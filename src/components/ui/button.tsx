@@ -15,7 +15,10 @@ const buttonVariants = cva(
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         soft: "bg-accent text-accent-foreground hover:bg-accent/80",
+        inverse: "bg-primary-foreground text-primary hover:bg-primary-foreground/90",
         warning: "bg-warning text-warning-foreground hover:bg-warning/85",
+        nav: "text-muted-foreground hover:bg-muted hover:text-foreground",
+        "nav-active": "bg-accent text-accent-foreground",
         ghost:
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
@@ -32,6 +35,8 @@ const buttonVariants = cva(
         "icon-xs": "size-6 [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-8",
         "icon-lg": "size-12",
+        nav: "h-16 flex-1 flex-col gap-0.5 px-1 text-[11px]",
+        tile: "h-16 justify-start gap-3 px-4 text-left whitespace-normal",
       },
     },
     defaultVariants: {
