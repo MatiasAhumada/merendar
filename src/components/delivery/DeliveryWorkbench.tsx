@@ -104,15 +104,15 @@ export function DeliveryWorkbench() {
       </Alert>
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.75fr)]">
-        <div className="flex flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-4">
           <Card size="sm">
             <CardContent className="flex flex-col gap-3">
               <div className="flex items-start justify-between gap-2">
-                <p className="flex items-center gap-2 font-semibold">
+                <p className="flex min-w-0 flex-1 items-center gap-2 font-semibold">
                   <HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="text-primary" />
                   Jornada: 15 de septiembre de 2026
                 </p>
-                <Badge variant="destructive">EN VIVO</Badge>
+                <Badge variant="destructive" className="shrink-0">EN VIVO</Badge>
               </div>
               <div className="flex gap-2 text-sm">
                 <HugeiconsIcon icon={Location01Icon} strokeWidth={1.8} className="mt-0.5 shrink-0 text-primary" />
@@ -125,8 +125,8 @@ export function DeliveryWorkbench() {
           <Card size="sm">
             <CardContent className="flex flex-col gap-2">
               <div className="flex items-end justify-between gap-2">
-                <div><p className="text-[11px] font-semibold uppercase tracking-wide">Progreso de entregas</p><p><strong className="font-display text-2xl text-primary">52</strong> / 80 módulos</p></div>
-                <div className="text-right"><p className="text-[11px] font-semibold uppercase tracking-wide">Disponibles</p><Badge variant="warning" className="h-7 px-2 text-base">28 cupos</Badge></div>
+                <div className="min-w-0"><p className="text-[11px] font-semibold uppercase tracking-wide">Progreso de entregas</p><p><strong className="font-display text-2xl text-primary">52</strong> / 80 módulos</p></div>
+                <div className="shrink-0 text-right"><p className="text-[11px] font-semibold uppercase tracking-wide">Disponibles</p><Badge variant="warning" className="h-7 px-2 text-base">28 cupos</Badge></div>
               </div>
               <Progress value={65} aria-label="65 por ciento de la jornada completada" />
               <p className="text-xs text-muted-foreground">65% de la jornada completada · Ritmo: 18 seg/persona</p>
@@ -187,7 +187,7 @@ export function DeliveryWorkbench() {
                     <h3 id="checklist-title" className="font-semibold">Checklist de validación en campo</h3>
                     <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl bg-muted p-3">
                       <span><strong className="block text-sm">DNI físico presentado</strong><span className="text-xs text-muted-foreground">Cotejado con rostro del titular</span></span>
-                      <Checkbox checked={physicalDni} onCheckedChange={(value) => setPhysicalDni(value === true)} aria-label="DNI físico presentado" />
+                      <Checkbox checked={physicalDni} onCheckedChange={(checked) => { if (checked === "indeterminate") return; setPhysicalDni(checked); }} aria-label="DNI físico presentado" />
                     </label>
                     <div className="flex items-center justify-between gap-3 rounded-xl bg-muted p-3">
                       <span><strong className="block text-sm">Firma táctil capturada</strong><span className="text-xs text-muted-foreground">Trazo en pantalla listo</span></span>
@@ -195,7 +195,7 @@ export function DeliveryWorkbench() {
                     </div>
                     <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl bg-muted p-3">
                       <span><strong className="block text-sm">Fotocopia DNI / declaración</strong><span className="text-xs text-muted-foreground">Adjunto físico o constancia digital</span></span>
-                      <Checkbox checked={attachment} onCheckedChange={(value) => setAttachment(value === true)} aria-label="Fotocopia DNI o declaración" />
+                      <Checkbox checked={attachment} onCheckedChange={(checked) => { if (checked === "indeterminate") return; setAttachment(checked); }} aria-label="Fotocopia DNI o declaración" />
                     </label>
                   </section>
 
@@ -232,7 +232,7 @@ export function DeliveryWorkbench() {
           ) : null}
         </div>
 
-        <section aria-labelledby="recent-title" className="flex flex-col gap-3">
+        <section aria-labelledby="recent-title" className="flex min-w-0 flex-col gap-3">
           <div className="flex items-center justify-between gap-2">
             <h2 id="recent-title" className="font-display text-lg font-semibold">Últimas entregas realizadas</h2>
             <Button variant="link" size="sm" asChild><Link href={ROUTES.HISTORY}>Ver historial</Link></Button>

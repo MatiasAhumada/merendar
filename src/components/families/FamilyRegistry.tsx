@@ -39,9 +39,10 @@ import {
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { FAMILY_FILTERS, FAMILY_RECORDS, type FamilyRecord } from "@/constants/families.constant";
+import { FAMILY_FILTERS, FAMILY_RECORDS } from "@/constants/families.constant";
+import { type FamilyRecord } from "@/interfaces/family.interface";
 
-type FamilyFilter = (typeof FAMILY_FILTERS)[number]["value"];
+type FamilyFilter = "all" | "Villa Nueva" | "Los Aromos" | "San Cayetano" | "alerts";
 
 export function FamilyRegistry() {
   const [search, setSearch] = useState("");
@@ -249,7 +250,7 @@ export function FamilyRegistry() {
         </CardContent>
       </Card>
 
-      <Sheet open={selectedFamily !== null} onOpenChange={(open) => { if (!open) setSelectedFamily(null); }}>
+      <Sheet open={Boolean(selectedFamily)} onOpenChange={(open) => { if (!open) setSelectedFamily(null); }}>
         <SheetContent side="right" className="w-full max-w-md overflow-y-auto">
           <SheetHeader className="pr-12">
             <SheetTitle className="font-display text-xl font-semibold">{selectedFamily?.name}</SheetTitle>

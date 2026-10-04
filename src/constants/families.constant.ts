@@ -1,14 +1,4 @@
-export interface FamilyRecord {
-  id: string;
-  name: string;
-  neighborhood: string;
-  address: string;
-  members: string;
-  detailLabel: string;
-  detail: string;
-  phone: string;
-  alert: boolean;
-}
+import { type FamilyRecord } from "@/interfaces/family.interface";
 
 export const FAMILY_FILTERS = [
   { value: "all", label: "Todos", count: 128 },

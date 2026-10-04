@@ -54,7 +54,7 @@ const RENDITION_CHECKS = [
 ] as const;
 
 export function MerchandiseWorkspace() {
-  const [activeSection, setActiveSection] = useState<(typeof SECTIONS)[number]["href"]>("#remitos");
+  const [activeSection, setActiveSection] = useState<"#remitos" | "#cupos" | "#rendiciones">("#remitos");
   const [fileName, setFileName] = useState("");
   const [notice, setNotice] = useState("");
   const [receiptNotice, setReceiptNotice] = useState(false);
