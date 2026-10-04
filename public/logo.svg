@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Solidaridad Activa">
+  <rect width="64" height="64" rx="18" fill="#005c55"/>
+  <path d="M32 47.5 13.7 30.4a10 10 0 0 1 14.1-14.2L32 20l4.2-3.8a10 10 0 0 1 14.1 14.2Z" fill="#a3faef"/>
+  <path d="M19 42c4 5 8.5 7.5 13 10 4.5-2.5 9-5 13-10" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="3" opacity=".9"/>
+</svg>
