@@ -1,10 +1,11 @@
 "use client";
 
+import { useEffect, useSyncExternalStore } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Menu01Icon } from "@hugeicons/core-free-icons";
+import { Logout01Icon, Menu01Icon } from "@hugeicons/core-free-icons";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,8 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
+import { ROUTES } from "@/constants/routes";
+import { endDemoSession, getServerDemoSession, hasDemoSession, subscribeDemoSession } from "@/lib/demo-session";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -24,7 +27,28 @@ interface AppShellProps {
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const isAuthenticated = useSyncExternalStore(subscribeDemoSession, hasDemoSession, getServerDemoSession);
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
+
+  useEffect(() => {
+    if (!hasDemoSession()) {
+      router.replace(`${ROUTES.LOGIN}?next=${encodeURIComponent(pathname)}`);
+    }
+  }, [isAuthenticated, pathname, router]);
+
+  function signOut() {
+    endDemoSession();
+    router.replace(ROUTES.LOGIN);
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div role="status" className="flex min-h-screen items-center justify-center px-4 text-sm text-muted-foreground">
+        Preparando acceso de demostración...
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen lg:flex">
@@ -62,6 +86,10 @@ export function AppShell({ children }: AppShellProps) {
               <p className="text-xs text-muted-foreground">Coordinadora territorial</p>
             </div>
           </div>
+          <Button variant="ghost" className="mt-4 w-full justify-start" onClick={signOut}>
+            <HugeiconsIcon icon={Logout01Icon} strokeWidth={1.8} data-icon="inline-start" />
+            Cerrar sesión
+          </Button>
         </div>
       </aside>
 
@@ -94,6 +122,10 @@ export function AppShell({ children }: AppShellProps) {
                         </Link>
                       </Button>
                     ))}
+                    <Button variant="ghost" className="w-full justify-start" onClick={signOut}>
+                      <HugeiconsIcon icon={Logout01Icon} strokeWidth={1.8} data-icon="inline-start" />
+                      Cerrar sesión
+                    </Button>
                   </nav>
                 </SheetContent>
               </Sheet>

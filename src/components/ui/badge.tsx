@@ -12,6 +12,7 @@ const badgeVariants = cva(
         secondary:
           "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
         success: "bg-accent text-accent-foreground [a]:hover:bg-accent/80",
+        inverse: "border-primary-foreground/20 bg-primary-foreground/15 text-primary-foreground",
         warning: "bg-warning/15 text-warning [a]:hover:bg-warning/25",
         destructive:
           "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
