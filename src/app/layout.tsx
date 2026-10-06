@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { Geist, Inter } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-
-const geistSans = Geist({
+const geistSans = localFont({
+  src: "./fonts/geist-latin.woff2",
   variable: "--font-geist-sans",
-  subsets: ["latin"],
+  weight: "100 900",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -20,7 +20,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className={`${geistSans.variable} ${inter.variable} antialiased`}>
+    <html lang="es" className={`${geistSans.variable} antialiased`}>
       <body className="flex min-h-screen flex-col font-sans">{children}</body>
     </html>
   );
