@@ -26,13 +26,12 @@ El botón «Usar credenciales de prueba» completa ambos campos. La sesión se c
 | `/login` | Acceso de demostración |
 | `/` | Dashboard operativo, métricas y accesos rápidos |
 | `/familias` | Padrón con búsqueda, filtros, ficha y formulario de alta |
-| `/entrega` | Jornada en vivo, validación visual, checklist y firma |
+| `/entrega` | Registro de entrega de prueba con ficha, checklist y firma |
 | `/mercaderia` | Cupos, remito, comprobante y rendiciones |
-| `/historial` | Historial visual de entregas |
 
 ## Alcance actual
 
-Los datos son ilustrativos y las acciones de guardado, sincronización, registro de entregas, generación de planillas y carga de archivos no persisten información. El login también es de prueba: las credenciales están en el código del cliente y la sesión se guarda en `sessionStorage`, sin autenticar contra un servidor. La interfaz indica esta condición en los flujos correspondientes. La configuración de Prisma permanece en el repositorio para la implementación funcional posterior; estas pantallas no requieren conexión a la base de datos.
+Los datos son ilustrativos y las acciones de guardado, sincronización, registro de entregas, generación de planillas y carga de archivos no persisten información. El registro de entregas conserva el formulario, el checklist y la firma de demostración, sin indicadores de progreso ni historial. El login también es de prueba: las credenciales están en el código del cliente y la sesión se guarda en `sessionStorage`, sin autenticar contra un servidor. La interfaz indica esta condición en los flujos correspondientes. La configuración de Prisma permanece en el repositorio para la implementación funcional posterior; estas pantallas no requieren conexión a la base de datos.
 
 ## Validación
 

@@ -17,7 +17,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import {
   DASHBOARD_ACTIONS,
   DASHBOARD_ACTIVITY,
@@ -59,31 +58,22 @@ export default function DashboardPage() {
             <CardHeader className="relative">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex flex-col gap-2">
-                  <Badge variant="success">JORNADA 15/09 EN CURSO</Badge>
+                  <Badge variant="success">PERÍODO SEPTIEMBRE 2026</Badge>
                   <CardTitle>
-                    <h2 className="font-display text-xl font-semibold">Distribución de Módulos</h2>
+                    <h2 className="font-display text-xl font-semibold">Operativo Comunitario</h2>
                   </CardTitle>
-                  <CardDescription>{DASHBOARD_SNAPSHOT.site} · Operativo activo</CardDescription>
+                  <CardDescription>{DASHBOARD_SNAPSHOT.site} · {DASHBOARD_SNAPSHOT.distributionDate}</CardDescription>
                 </div>
                 <div className="shrink-0 text-right">
-                  <p className="font-display text-3xl font-bold tabular-nums">{DASHBOARD_SNAPSHOT.availableModules}</p>
-                  <p className="text-xs font-semibold text-primary-container-foreground">cupos libres</p>
+                  <p className="font-display text-3xl font-bold tabular-nums">{DASHBOARD_SNAPSHOT.approvedModules}</p>
+                  <p className="text-xs font-semibold text-primary-container-foreground">cupos aprobados</p>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="relative flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between gap-3 text-xs font-semibold">
-                  <span>
-                    Progreso: {DASHBOARD_SNAPSHOT.deliveredModules} de {DASHBOARD_SNAPSHOT.totalModules} módulos entregados
-                  </span>
-                  <span>{DASHBOARD_SNAPSHOT.completionPercent}%</span>
-                </div>
-                <Progress variant="inverse" value={DASHBOARD_SNAPSHOT.completionPercent} aria-label="Progreso de entregas" />
-              </div>
               <Button variant="inverse" asChild className="w-full">
                 <Link href={ROUTES.DELIVERY}>
-                  Continuar Jornada en Vivo
+                  Registrar una entrega
                   <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" />
                 </Link>
               </Button>
@@ -168,8 +158,7 @@ export default function DashboardPage() {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle><h2 className="font-display text-lg font-semibold">Actividad en Vivo</h2></CardTitle>
-                <Button asChild variant="link" size="sm"><Link href={ROUTES.HISTORY}>Ver todo</Link></Button>
+                <CardTitle><h2 className="font-display text-lg font-semibold">Actividad reciente</h2></CardTitle>
               </div>
             </CardHeader>
             <CardContent>

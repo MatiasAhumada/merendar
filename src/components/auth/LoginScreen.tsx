@@ -69,10 +69,10 @@ export function LoginScreen() {
         <div className="relative z-10 mt-20 max-w-lg xl:mt-28">
           <Badge variant="inverse" className="h-7 px-3">OPERATIVO COMUNITARIO</Badge>
           <p className="mt-7 font-display text-5xl font-bold leading-[1.08] tracking-tight xl:text-6xl">
-            Cada entrega cuenta. <span className="text-primary-container-foreground">Cada familia también.</span>
+            Cada familia cuenta. <span className="text-primary-container-foreground">Cada jornada también.</span>
           </p>
           <p className="mt-6 max-w-md text-base leading-relaxed text-primary-foreground/80">
-            Un mismo lugar para acompañar a las familias, coordinar jornadas y seguir cada módulo desde su recepción hasta la rendición.
+            Un mismo lugar para acompañar a las familias, organizar jornadas y reunir la documentación del operativo.
           </p>
         </div>
 
@@ -84,8 +84,8 @@ export function LoginScreen() {
           </div>
           <div className="rounded-2xl border border-primary-foreground/15 bg-primary-foreground/10 p-5 backdrop-blur-sm">
             <HugeiconsIcon icon={CheckmarkCircle01Icon} strokeWidth={1.7} className="size-6 text-primary-container-foreground" />
-            <p className="mt-5 font-display text-3xl font-bold">52</p>
-            <p className="text-xs text-primary-foreground/75">entregas en la jornada</p>
+            <p className="mt-5 font-display text-3xl font-bold">80</p>
+            <p className="text-xs text-primary-foreground/75">cupos aprobados</p>
           </div>
         </div>
         <p className="relative z-10 mt-6 text-xs text-primary-foreground/60">Indicadores ilustrativos para esta demostración</p>
@@ -101,7 +101,7 @@ export function LoginScreen() {
           <Badge variant="secondary" className="mb-5 h-7 px-3"><HugeiconsIcon icon={LockIcon} strokeWidth={1.8} /> Acceso de demostración</Badge>
           <h1 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">Bienvenido al operativo</h1>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            Ingresá para explorar el circuito de familias, entregas y mercadería.
+            Ingresá para explorar familias, registro de entregas y mercadería.
           </p>
 
           <Card className="mt-7">

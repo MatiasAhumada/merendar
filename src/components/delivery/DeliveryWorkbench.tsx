@@ -1,13 +1,11 @@
 "use client";
 
 import { useRef, useState, type PointerEvent } from "react";
-import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Calendar03Icon,
   CheckmarkCircle01Icon,
   Delete02Icon,
-  File01Icon,
   Location01Icon,
   PackageIcon,
   QrCodeIcon,
@@ -17,14 +15,12 @@ import {
   UserAdd01Icon,
 } from "@hugeicons/core-free-icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import {
   Sheet,
   SheetClose,
@@ -35,8 +31,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { DEMO_HOLDER, RECENT_DELIVERIES } from "@/constants/delivery.constant";
-import { ROUTES } from "@/constants/routes";
+import { DEMO_HOLDER } from "@/constants/delivery.constant";
 
 const SAMPLE_SIGNATURE = "M 42 72 C 70 24, 100 35, 125 76 S 188 74, 232 56 S 300 63, 349 53";
 
@@ -88,11 +83,11 @@ export function DeliveryWorkbench() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight">Entrega Activa</h1>
-          <p className="text-sm text-muted-foreground">Jornada comunitaria · datos de ejemplo</p>
+          <h1 className="font-display text-2xl font-bold tracking-tight">Registrar entrega</h1>
+          <p className="text-sm text-muted-foreground">Formulario de jornada comunitaria · datos de ejemplo</p>
         </div>
         <Badge variant="success" className="h-7 px-3">Modo campo</Badge>
       </div>
@@ -103,8 +98,7 @@ export function DeliveryWorkbench() {
         <AlertDescription>La información de esta jornada es ilustrativa. No se registran entregas.</AlertDescription>
       </Alert>
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.75fr)]">
-        <div className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-col gap-4">
           <Card size="sm">
             <CardContent className="flex flex-col gap-3">
               <div className="flex items-start justify-between gap-2">
@@ -112,24 +106,13 @@ export function DeliveryWorkbench() {
                   <HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="text-primary" />
                   Jornada: 15 de septiembre de 2026
                 </p>
-                <Badge variant="destructive" className="shrink-0">EN VIVO</Badge>
+                <Badge variant="secondary" className="shrink-0">Formulario demo</Badge>
               </div>
               <div className="flex gap-2 text-sm">
                 <HugeiconsIcon icon={Location01Icon} strokeWidth={1.8} className="mt-0.5 shrink-0 text-primary" />
                 <div><p className="font-semibold">Barrio Villa Nueva</p><p className="text-xs text-muted-foreground">Punto de distribución: Merendero Sol Naciente</p></div>
               </div>
               <p className="text-xs text-muted-foreground">Responsable: <strong className="text-foreground">María González</strong> (Coordinadora)</p>
-            </CardContent>
-          </Card>
-
-          <Card size="sm">
-            <CardContent className="flex flex-col gap-2">
-              <div className="flex items-end justify-between gap-2">
-                <div className="min-w-0"><p className="text-[11px] font-semibold uppercase tracking-wide">Progreso de entregas</p><p><strong className="font-display text-2xl text-primary">52</strong> / 80 módulos</p></div>
-                <div className="shrink-0 text-right"><p className="text-[11px] font-semibold uppercase tracking-wide">Disponibles</p><Badge variant="warning" className="h-7 px-2 text-base">28 cupos</Badge></div>
-              </div>
-              <Progress value={65} aria-label="65 por ciento de la jornada completada" />
-              <p className="text-xs text-muted-foreground">65% de la jornada completada · Ritmo: 18 seg/persona</p>
             </CardContent>
           </Card>
 
@@ -161,12 +144,6 @@ export function DeliveryWorkbench() {
 
           {showHolder ? (
             <>
-              <Alert>
-                <HugeiconsIcon icon={SecurityCheckIcon} strokeWidth={1.8} className="text-primary" />
-                <AlertTitle>Validación antifraude · ejemplo</AlertTitle>
-                <AlertDescription>El DNI {DEMO_HOLDER.dni} no registra entregas hoy en esta maqueta.</AlertDescription>
-              </Alert>
-
               <Card>
                 <CardHeader>
                   <div className="flex flex-wrap items-center gap-2"><Badge variant="secondary">Titular habilitado</Badge><Badge variant="outline">4 miembros</Badge></div>
@@ -174,10 +151,6 @@ export function DeliveryWorkbench() {
                   <p className="text-sm text-muted-foreground">DNI {DEMO_HOLDER.dni} · {DEMO_HOLDER.family}</p>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-5">
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted p-3 text-xs">
-                    <div><p>Última entrega recibida:</p><strong>{DEMO_HOLDER.lastDelivery}</strong></div>
-                    <Badge variant="success">Habilitado</Badge>
-                  </div>
                   <div className="flex items-center justify-between gap-3 rounded-xl bg-secondary p-3 text-sm">
                     <div className="flex items-center gap-3"><HugeiconsIcon icon={PackageIcon} strokeWidth={1.8} className="shrink-0 text-primary" /><div><p className="font-semibold">Módulo Familiar Seco N° 2</p><p className="text-xs text-muted-foreground">Incluye kit de higiene y leche maternizada</p></div></div>
                     <Badge variant="outline">1 unidad</Badge>
@@ -230,23 +203,6 @@ export function DeliveryWorkbench() {
               </Card>
             </>
           ) : null}
-        </div>
-
-        <section aria-labelledby="recent-title" className="flex min-w-0 flex-col gap-3">
-          <div className="flex items-center justify-between gap-2">
-            <h2 id="recent-title" className="font-display text-lg font-semibold">Últimas entregas realizadas</h2>
-            <Button variant="link" size="sm" asChild><Link href={ROUTES.HISTORY}>Ver historial</Link></Button>
-          </div>
-          {RECENT_DELIVERIES.map((delivery) => (
-            <Card size="sm" key={delivery.name}>
-              <CardContent className="flex items-center gap-3">
-                <Avatar size="lg"><AvatarFallback>{delivery.initials}</AvatarFallback></Avatar>
-                <div className="min-w-0 flex-1"><p className="font-semibold">{delivery.name}</p><p className="truncate text-xs text-muted-foreground">{delivery.detail}</p></div>
-                <div className="text-right"><Badge variant="success"><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} /> Firmado</Badge><p className="mt-1 text-xs text-muted-foreground">{delivery.time}</p></div>
-              </CardContent>
-            </Card>
-          ))}
-        </section>
       </div>
     </div>
   );

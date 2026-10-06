@@ -11,7 +11,7 @@ const geistSans = Geist({
 
 export const metadata: Metadata = {
   title: "Solidaridad Activa | Gestión comunitaria",
-  description: "Panel de operaciones comunitarias, familias, entregas y mercadería.",
+  description: "Panel de operaciones comunitarias, familias, registro y mercadería.",
 };
 
 export default function RootLayout({

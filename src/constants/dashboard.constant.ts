@@ -11,10 +11,7 @@ export const DASHBOARD_SNAPSHOT = {
   distributionDate: "15/09/2026",
   period: "Septiembre 2026",
   site: "Comedor San Cayetano",
-  totalModules: 80,
-  deliveredModules: 52,
-  availableModules: 28,
-  completionPercent: 65,
+  approvedModules: 80,
 } as const;
 
 export const DASHBOARD_STAGES = [
@@ -31,14 +28,14 @@ export const DASHBOARD_STAGES = [
     status: "completed",
   },
   {
-    title: "Jornada de Entrega",
-    description: "52 entregados · 28 pendientes",
-    detail: "En curso",
+    title: "Registro de Entrega",
+    description: "Formulario disponible para el operativo",
+    detail: "Disponible",
     status: "current",
   },
   {
     title: "Rendición de Carga",
-    description: "Habilitación al completar entregas",
+    description: "Documentación del período en preparación",
     detail: "Pendiente",
     status: "pending",
   },
@@ -47,7 +44,7 @@ export const DASHBOARD_STAGES = [
 export const DASHBOARD_METRICS = [
   { label: "Familias", value: "128", description: "Registradas", icon: UserGroupIcon },
   { label: "Personas", value: "246", description: "Beneficiarios activos", icon: UserMultipleIcon },
-  { label: "Disponibles", value: "28", description: "Cupos restantes", icon: Archive01Icon },
+  { label: "Módulos", value: "80", description: "Cupos aprobados", icon: Archive01Icon },
   { label: "Rendiciones", value: "3", description: "Pendientes de cierre", icon: DocumentValidationIcon },
 ] as const;
 
@@ -61,8 +58,8 @@ export const DASHBOARD_ACTIONS = [
 export const DASHBOARD_ACTIVITY = [
   {
     name: "María G.",
-    action: "confirmó entrega a Familia Gómez",
-    detail: "3 módulos · DNI validado",
+    action: "actualizó el legajo de Familia Gómez",
+    detail: "Datos de contacto revisados",
     time: "hace 4 min",
     image: "/images/profile.jpg",
   },

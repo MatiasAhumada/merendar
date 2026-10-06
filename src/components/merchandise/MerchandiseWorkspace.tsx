@@ -29,7 +29,6 @@ import {
 } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import {
   Sheet,
   SheetClose,
@@ -47,10 +46,10 @@ const SECTIONS = [
 ] as const;
 
 const RENDITION_CHECKS = [
-  { label: "52 firmas y acreditaciones digitales", status: "Listo" },
-  { label: "52 DNI verificados en padrón", status: "Listo" },
-  { label: "Planilla de remito original digitalizada", status: "Adjunto" },
-  { label: "28 firmas restantes para cierre mensual", status: "En cola" },
+  { label: "Remito original digitalizado", status: "Adjunto" },
+  { label: "Cupo ministerial cotejado", status: "Listo" },
+  { label: "Documentación de recepción", status: "Listo" },
+  { label: "Planilla oficial del período", status: "Pendiente" },
 ] as const;
 
 export function MerchandiseWorkspace() {
@@ -65,7 +64,7 @@ export function MerchandiseWorkspace() {
     <div className="flex flex-col gap-5">
       <div>
         <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">Mercadería y rendiciones</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Seguimiento del lote y la documentación de ejemplo</p>
+        <p className="mt-1 text-sm text-muted-foreground">Cupos, remitos y documentación de ejemplo</p>
       </div>
 
       <nav aria-label="Secciones de mercadería" className="grid grid-cols-3 gap-1 rounded-2xl bg-secondary p-1">
@@ -93,11 +92,10 @@ export function MerchandiseWorkspace() {
             <p className="text-xs text-primary-foreground/80">Remito #00489 · Min. Desarrollo Social</p>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {[
                 { label: "Recibidos", value: "80", foot: "Total carga" },
-                { label: "Entregados", value: "52", foot: "65% ejec." },
-                { label: "En depósito", value: "28", foot: "Disponibles" },
+                { label: "Cupos aprobados", value: "80", foot: "Solicitud vigente" },
               ].map((item) => (
                 <div key={item.label} className="rounded-xl bg-primary-foreground/15 p-3 text-center">
                   <p className="text-[11px] font-medium text-primary-foreground/85">{item.label}</p>
@@ -105,10 +103,6 @@ export function MerchandiseWorkspace() {
                   <p className="text-[10px] uppercase text-primary-foreground/75">{item.foot}</p>
                 </div>
               ))}
-            </div>
-            <div>
-              <div className="mb-1 flex items-center justify-between gap-2 text-xs font-semibold"><span>Progreso de distribución barrial</span><span>52 / 80 un.</span></div>
-              <Progress variant="inverse" value={65} aria-label="65 por ciento de módulos distribuidos" />
             </div>
           </CardContent>
         </Card>
@@ -171,7 +165,7 @@ export function MerchandiseWorkspace() {
             {fileName ? <Alert variant="info"><AlertTitle>Archivo seleccionado: {fileName}</AlertTitle><AlertDescription>La imagen no se sube en esta maqueta.</AlertDescription></Alert> : null}
             <div className="flex gap-3 rounded-xl bg-secondary p-3">
               <HugeiconsIcon icon={CheckmarkCircle01Icon} strokeWidth={1.8} className="mt-0.5 shrink-0 text-primary" />
-              <div><p className="text-sm font-semibold">Verificado y asignado a jornada</p><p className="text-xs text-muted-foreground">Lote habilitado para entregas con comprobación biométrica</p></div>
+              <div><p className="text-sm font-semibold">Remito verificado</p><p className="text-xs text-muted-foreground">Recepción contrastada con el cupo ministerial aprobado</p></div>
             </div>
           </CardContent>
         </Card>
@@ -184,7 +178,6 @@ export function MerchandiseWorkspace() {
         <Card>
           <CardHeader><div className="flex flex-wrap items-start justify-between gap-2"><div><CardTitle><h3 className="font-display text-base font-semibold">Jornada Septiembre 2026</h3></CardTitle><p className="text-xs text-muted-foreground">Organismo: Ministerio de Desarrollo Social</p></div><Badge variant="warning">En preparación</Badge></div></CardHeader>
           <CardContent className="flex flex-col gap-4">
-            <div><div className="mb-2 flex items-center justify-between gap-2 text-xs"><span>Carga de constancias</span><strong>52 de 80 listas</strong></div><Progress value={65} aria-label="52 de 80 constancias listas" /></div>
             <ul className="flex flex-col gap-3 rounded-xl bg-muted p-3">
               {RENDITION_CHECKS.map((item) => (
                 <li key={item.label} className="flex items-center justify-between gap-3 text-xs"><span className="flex items-center gap-2"><HugeiconsIcon icon={CheckmarkCircle01Icon} strokeWidth={1.8} className="shrink-0 text-primary" />{item.label}</span><strong className="shrink-0 text-primary">{item.status}</strong></li>
@@ -193,7 +186,7 @@ export function MerchandiseWorkspace() {
             <Button variant="secondary" className="w-full whitespace-normal" onClick={() => setNotice("La planilla oficial todavía no se genera en esta maqueta.")}><HugeiconsIcon icon={FileSpreadsheetIcon} strokeWidth={1.8} /> Generar planilla oficial de rendición (PDF / Excel)</Button>
           </CardContent>
         </Card>
-        <Card size="sm"><CardContent className="flex flex-col gap-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-display text-base font-semibold">Jornada Agosto 2026</p><p className="text-xs text-muted-foreground">Expte #9921-MDS-2026</p></div><Badge variant="success">Presentada</Badge></div><div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span>75/75 entregas homologadas</span><Dialog><DialogTrigger asChild><Button variant="secondary" size="sm">Ver constancia</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>Constancia de agosto 2026</DialogTitle><DialogDescription>Referencia visual del expediente #9921-MDS-2026. El archivo no está disponible en esta maqueta.</DialogDescription></DialogHeader><div className="flex items-center gap-2 rounded-xl bg-muted p-4"><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} className="text-primary" />75 entregas homologadas</div></DialogContent></Dialog></div></CardContent></Card>
+        <Card size="sm"><CardContent className="flex flex-col gap-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="font-display text-base font-semibold">Jornada Agosto 2026</p><p className="text-xs text-muted-foreground">Expte #9921-MDS-2026</p></div><Badge variant="success">Presentada</Badge></div><div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span>Documentación del período archivada</span><Dialog><DialogTrigger asChild><Button variant="secondary" size="sm">Ver constancia</Button></DialogTrigger><DialogContent><DialogHeader><DialogTitle>Constancia de agosto 2026</DialogTitle><DialogDescription>Referencia visual del expediente #9921-MDS-2026. El archivo no está disponible en esta maqueta.</DialogDescription></DialogHeader><div className="flex items-center gap-2 rounded-xl bg-muted p-4"><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} className="text-primary" />Expediente presentado</div></DialogContent></Dialog></div></CardContent></Card>
       </section>
       {notice ? <Alert variant="info"><AlertTitle>{notice}</AlertTitle><AlertDescription>Vista de demostración, sin generación de archivos.</AlertDescription></Alert> : null}
     </div>
