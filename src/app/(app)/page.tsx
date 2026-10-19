@@ -17,6 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { requireSession } from "@/server/services/auth-session";
 import {
   DASHBOARD_ACTIONS,
   DASHBOARD_ACTIVITY,
@@ -26,7 +27,8 @@ import {
 } from "@/constants/dashboard.constant";
 import { ROUTES } from "@/constants/routes";
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  await requireSession();
   return (
     <div className="flex flex-col gap-5">
       <section className="flex items-center justify-between gap-4">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import axios from "axios";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -18,10 +19,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { DEMO_CREDENTIALS } from "@/constants/demo-auth.constant";
+import { AUTH, AUTH_MESSAGES } from "@/constants/auth.constant";
+import { API_ROUTES, ROUTES } from "@/constants/routes";
 import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
-import { ROUTES } from "@/constants/routes";
-import { startDemoSession } from "@/lib/demo-session";
+import clientAxios from "@/utils/clientAxios.util";
+import { clientErrorHandler } from "@/utils/handlers/clientHandler";
 
 function getDestination() {
   const requestedPath = new URLSearchParams(window.location.search).get("next");
@@ -31,27 +33,30 @@ function getDestination() {
 
 export function LoginScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
-  const [hasError, setHasError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function fillDemoCredentials() {
-    setEmail(DEMO_CREDENTIALS.email);
-    setPassword(DEMO_CREDENTIALS.password);
-    setHasError(false);
-  }
-
-  function submitLogin(event: FormEvent<HTMLFormElement>) {
+  async function submitLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setErrorMessage("");
+    setIsSubmitting(true);
 
-    if (email.trim().toLowerCase() !== DEMO_CREDENTIALS.email || password !== DEMO_CREDENTIALS.password) {
-      setHasError(true);
-      return;
+    try {
+      await clientAxios.post(API_ROUTES.AUTH.SESSION, { identifier, password });
+      router.replace(getDestination());
+      router.refresh();
+    } catch (error) {
+      clientErrorHandler(error, () => setErrorMessage(AUTH_MESSAGES.LOGIN_UNAVAILABLE), { logToConsole: false, showToast: false });
+
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        setErrorMessage(AUTH_MESSAGES.INVALID_CREDENTIALS);
+      }
+    } finally {
+      setIsSubmitting(false);
     }
-
-    startDemoSession();
-    router.replace(getDestination());
   }
 
   return (
@@ -98,7 +103,7 @@ export function LoginScreen() {
         </div>
 
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-10 lg:py-0">
-          <Badge variant="secondary" className="mb-5 h-7 px-3"><HugeiconsIcon icon={LockIcon} strokeWidth={1.8} /> Acceso de demostración</Badge>
+          <Badge variant="secondary" className="mb-5 h-7 px-3"><HugeiconsIcon icon={LockIcon} strokeWidth={1.8} /> Acceso seguro</Badge>
           <h1 className="font-display text-3xl font-bold tracking-tight sm:text-4xl">Bienvenido al operativo</h1>
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
             Ingresá para explorar familias, registro de entregas y mercadería.
@@ -107,72 +112,64 @@ export function LoginScreen() {
           <Card className="mt-7">
             <CardHeader>
               <CardTitle><h3 className="font-display text-lg font-semibold">Ingresar</h3></CardTitle>
-              <CardDescription>Usá las credenciales de prueba que figuran debajo.</CardDescription>
+              <CardDescription>Ingresá con la cuenta asignada por presidencia.</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={submitLogin} noValidate>
                 <FieldGroup className="gap-4">
-                  <Field data-invalid={hasError}>
-                    <FieldLabel htmlFor="demo-email">Correo electrónico</FieldLabel>
+                  <Field data-invalid={Boolean(errorMessage)}>
+                    <FieldLabel htmlFor="identifier">Usuario o correo electrónico</FieldLabel>
                     <Input
-                      id="demo-email"
-                      name="email"
-                      type="email"
+                      id="identifier"
+                      name="identifier"
+                      type="text"
+                      maxLength={AUTH.IDENTIFIER_MAX_LENGTH}
                       autoComplete="username"
-                      placeholder="tu.correo@organizacion.org"
-                      value={email}
-                      onChange={(event) => { setEmail(event.target.value); setHasError(false); }}
-                      aria-invalid={hasError}
+                      placeholder="Tu usuario o correo"
+                      value={identifier}
+                      onChange={(event) => { setIdentifier(event.target.value); setErrorMessage(""); }}
+                      aria-invalid={Boolean(errorMessage)}
                       required
                     />
                   </Field>
-                  <Field data-invalid={hasError}>
+                  <Field data-invalid={Boolean(errorMessage)}>
                     <div className="flex items-center justify-between gap-2">
-                      <FieldLabel htmlFor="demo-password">Contraseña</FieldLabel>
+                    <FieldLabel htmlFor="password">Contraseña</FieldLabel>
                       <Button type="button" variant="link" size="sm" aria-pressed={passwordVisible} onClick={() => setPasswordVisible(!passwordVisible)}>
                         <HugeiconsIcon icon={passwordVisible ? ViewOffIcon : EyeIcon} strokeWidth={1.8} data-icon="inline-start" />
                         {passwordVisible ? "Ocultar" : "Mostrar"}
                       </Button>
                     </div>
                     <Input
-                      id="demo-password"
+                      id="password"
                       name="password"
                       type={passwordVisible ? "text" : "password"}
+                      maxLength={AUTH.PASSWORD_MAX_LENGTH}
                       autoComplete="current-password"
                       placeholder="Ingresá la contraseña"
                       value={password}
-                      onChange={(event) => { setPassword(event.target.value); setHasError(false); }}
-                      aria-invalid={hasError}
+                      onChange={(event) => { setPassword(event.target.value); setErrorMessage(""); }}
+                      aria-invalid={Boolean(errorMessage)}
                       required
                     />
                   </Field>
                 </FieldGroup>
-                {hasError ? (
+                {errorMessage ? (
                   <Alert variant="destructive" className="mt-4">
-                    <AlertTitle>Credenciales incorrectas</AlertTitle>
-                    <AlertDescription>Usá el correo y la contraseña de prueba indicados abajo.</AlertDescription>
+                    <AlertTitle>No se pudo iniciar sesión</AlertTitle>
+                    <AlertDescription>{errorMessage}</AlertDescription>
                   </Alert>
                 ) : null}
-                <Button type="submit" className="mt-6 w-full">
-                  Entrar al panel
+                <Button type="submit" className="mt-6 w-full" disabled={isSubmitting}>
+                  {isSubmitting ? "Ingresando…" : "Entrar al panel"}
                   <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" />
                 </Button>
               </form>
             </CardContent>
           </Card>
 
-          <Card variant="muted" size="sm" className="mt-4">
-            <CardContent className="flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-2"><p className="font-semibold">Credenciales para probar</p><Badge variant="outline">Demo</Badge></div>
-              <div className="grid gap-2 text-sm sm:grid-cols-2">
-                <div><p className="text-xs text-muted-foreground">Usuario</p><p className="font-medium break-all">{DEMO_CREDENTIALS.email}</p></div>
-                <div><p className="text-xs text-muted-foreground">Contraseña</p><p className="font-medium">{DEMO_CREDENTIALS.password}</p></div>
-              </div>
-              <Button type="button" variant="soft" size="sm" className="w-full" onClick={fillDemoCredentials}>Usar credenciales de prueba</Button>
-            </CardContent>
-          </Card>
           <p className="mt-5 text-center text-xs leading-relaxed text-muted-foreground">
-            Este acceso es solo visual. La sesión vive en esta pestaña y no usa servidor ni base de datos.
+            El acceso necesita conexión a internet para validar tu cuenta y sesión.
           </p>
         </div>
       </main>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
+import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -19,35 +19,35 @@ import {
 } from "@/components/ui/sheet";
 import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
 import { ROUTES } from "@/constants/routes";
-import { endDemoSession, getServerDemoSession, hasDemoSession, subscribeDemoSession } from "@/lib/demo-session";
+import type { AuthenticatedUser } from "@/server/services/auth.service";
+import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
+import clientAxios from "@/utils/clientAxios.util";
+import { API_ROUTES } from "@/constants/routes";
+import { clientErrorHandler } from "@/utils/handlers/clientHandler";
 
 interface AppShellProps {
   children: React.ReactNode;
+  user: AuthenticatedUser;
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, user }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const isAuthenticated = useSyncExternalStore(subscribeDemoSession, hasDemoSession, getServerDemoSession);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
 
-  useEffect(() => {
-    if (!hasDemoSession()) {
-      router.replace(`${ROUTES.LOGIN}?next=${encodeURIComponent(pathname)}`);
+  async function signOut() {
+    setIsSigningOut(true);
+
+    try {
+      await clientAxios.delete(API_ROUTES.AUTH.SESSION);
+      router.replace(ROUTES.LOGIN);
+      router.refresh();
+    } catch (error) {
+      clientErrorHandler(error);
+    } finally {
+      setIsSigningOut(false);
     }
-  }, [isAuthenticated, pathname, router]);
-
-  function signOut() {
-    endDemoSession();
-    router.replace(ROUTES.LOGIN);
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div role="status" className="flex min-h-screen items-center justify-center px-4 text-sm text-muted-foreground">
-        Preparando acceso de demostración...
-      </div>
-    );
   }
 
   return (
@@ -82,11 +82,11 @@ export function AppShell({ children }: AppShellProps) {
               <AvatarFallback>MG</AvatarFallback>
             </Avatar>
             <div>
-              <p className="font-semibold">María G.</p>
-              <p className="text-xs text-muted-foreground">Coordinadora territorial</p>
+              <p className="max-w-36 truncate font-semibold">{user.name}</p>
+              <p className="text-xs text-muted-foreground">{USER_ROLE_LABELS[user.role]}</p>
             </div>
           </div>
-          <Button variant="ghost" className="mt-4 w-full justify-start" onClick={signOut}>
+          <Button variant="ghost" className="mt-4 w-full justify-start" onClick={signOut} disabled={isSigningOut}>
             <HugeiconsIcon icon={Logout01Icon} strokeWidth={1.8} data-icon="inline-start" />
             Cerrar sesión
           </Button>
@@ -122,7 +122,7 @@ export function AppShell({ children }: AppShellProps) {
                         </Link>
                       </Button>
                     ))}
-                    <Button variant="ghost" className="w-full justify-start" onClick={signOut}>
+                    <Button variant="ghost" className="w-full justify-start" onClick={signOut} disabled={isSigningOut}>
                       <HugeiconsIcon icon={Logout01Icon} strokeWidth={1.8} data-icon="inline-start" />
                       Cerrar sesión
                     </Button>
@@ -138,10 +138,9 @@ export function AppShell({ children }: AppShellProps) {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <Badge variant="secondary">Vista demo</Badge>
+              <Badge variant="secondary">{USER_ROLE_LABELS[user.role]}</Badge>
               <Avatar size="lg">
-                <AvatarImage src="/images/profile.jpg" alt="María González" />
-                <AvatarFallback>MG</AvatarFallback>
+                <AvatarFallback>{user.name.slice(0, 2).toUpperCase()}</AvatarFallback>
               </Avatar>
             </div>
           </div>
