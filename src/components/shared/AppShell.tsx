@@ -18,6 +18,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
+import { BRAND } from "@/constants/brand.constant";
 import { ROUTES } from "@/constants/routes";
 import type { AuthenticatedUser } from "@/server/services/auth.service";
 import { UserRole } from "@prisma/client";
@@ -56,9 +57,9 @@ export function AppShell({ children, user }: AppShellProps) {
     <div className="min-h-screen lg:flex">
       <aside className="hidden w-64 shrink-0 border-r border-sidebar-border bg-sidebar lg:flex lg:flex-col">
         <div className="flex items-center gap-3 border-b border-sidebar-border px-5 py-6">
-          <Image src="/logo.svg" alt="" width={40} height={40} priority />
+          <Image src={BRAND.logoPath} alt="" width={48} height={48} priority />
           <div className="min-w-0">
-            <p className="truncate font-display text-base font-semibold">Solidaridad Activa</p>
+            <p className="truncate font-display text-base font-semibold">{BRAND.shortName}</p>
             <p className="text-xs text-muted-foreground">Gestión comunitaria</p>
           </div>
         </div>
@@ -107,7 +108,7 @@ export function AppShell({ children, user }: AppShellProps) {
                 </SheetTrigger>
                 <SheetContent side="left">
                   <SheetHeader>
-                    <SheetTitle>Solidaridad Activa</SheetTitle>
+                    <SheetTitle>{BRAND.shortName}</SheetTitle>
                     <SheetDescription>Gestión comunitaria</SheetDescription>
                   </SheetHeader>
                   <nav aria-label="Menú principal" className="flex flex-col gap-1 px-4">
@@ -131,12 +132,12 @@ export function AppShell({ children, user }: AppShellProps) {
                   </nav>
                 </SheetContent>
               </Sheet>
-              <Image src="/logo.svg" alt="" width={34} height={34} className="lg:hidden" priority />
+              <Image src={BRAND.logoPath} alt="" width={40} height={40} className="lg:hidden" priority />
               <div className="min-w-0">
                 <p className="truncate font-display text-base font-semibold leading-tight">
-                  {currentPage?.label ?? "Solidaridad Activa"}
+                  {currentPage?.label ?? BRAND.shortName}
                 </p>
-                <p className="truncate text-xs font-medium text-primary">Solidaridad Activa</p>
+                <p className="truncate text-xs font-medium text-primary">{BRAND.shortName}</p>
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">

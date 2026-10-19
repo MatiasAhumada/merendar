@@ -20,6 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { AUTH, AUTH_MESSAGES } from "@/constants/auth.constant";
+import { BRAND } from "@/constants/brand.constant";
 import { API_ROUTES, ROUTES } from "@/constants/routes";
 import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
 import clientAxios from "@/utils/clientAxios.util";
@@ -66,9 +67,9 @@ export function LoginScreen() {
         <div aria-hidden="true" className="pointer-events-none absolute -right-12 top-8 size-64 rounded-full border border-primary-foreground/10" />
         <div className="relative z-10 flex items-center gap-3">
           <span className="flex size-12 items-center justify-center rounded-2xl bg-white shadow-lg">
-            <Image src="/logo.svg" alt="" width={34} height={34} priority />
+            <Image src={BRAND.logoPath} alt="" width={48} height={48} priority />
           </span>
-          <div><p className="font-display text-lg font-semibold">Solidaridad Activa</p><p className="text-xs text-primary-foreground/75">Gestión comunitaria</p></div>
+          <div><p className="font-display text-lg font-semibold">{BRAND.shortName}</p><p className="text-xs text-primary-foreground/75">Gestión comunitaria</p></div>
         </div>
 
         <div className="relative z-10 mt-20 max-w-lg xl:mt-28">
@@ -98,8 +99,8 @@ export function LoginScreen() {
 
       <main className="flex min-w-0 flex-col bg-background px-4 py-6 sm:px-8 lg:px-12 lg:py-10">
         <div className="flex items-center gap-3 lg:hidden">
-          <Image src="/logo.svg" alt="" width={42} height={42} priority />
-          <div><p className="font-display font-semibold">Solidaridad Activa</p><p className="text-xs text-muted-foreground">Gestión comunitaria</p></div>
+          <Image src={BRAND.logoPath} alt="" width={48} height={48} priority />
+          <div><p className="font-display font-semibold">{BRAND.shortName}</p><p className="text-xs text-muted-foreground">Gestión comunitaria</p></div>
         </div>
 
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-10 lg:py-0">
