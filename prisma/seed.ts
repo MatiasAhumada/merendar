@@ -59,8 +59,11 @@ async function main() {
 }
 
 main()
-  .catch(() => {
+  .catch((error: unknown) => {
     console.error("No se pudo completar el bootstrap del usuario presidente.");
+    if (error instanceof Error) {
+      console.error(error.message);
+    }
     process.exit(1);
   })
   .finally(async () => {
