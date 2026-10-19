@@ -4,6 +4,7 @@ export const ROUTES = {
   DELIVERY: "/entrega",
   GOODS: "/mercaderia",
   LOGIN: "/login",
+  USERS: "/usuarios",
 } as const;
 
 export const ROUTE_LABELS: Record<string, string> = {

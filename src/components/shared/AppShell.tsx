@@ -20,6 +20,7 @@ import {
 import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
 import { ROUTES } from "@/constants/routes";
 import type { AuthenticatedUser } from "@/server/services/auth.service";
+import { UserRole } from "@prisma/client";
 import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import { API_ROUTES } from "@/constants/routes";
@@ -35,6 +36,7 @@ export function AppShell({ children, user }: AppShellProps) {
   const router = useRouter();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
+  const navigation = PRIMARY_NAVIGATION.filter((item) => item.href !== ROUTES.USERS || user.role === UserRole.PRESIDENTE);
 
   async function signOut() {
     setIsSigningOut(true);
@@ -61,7 +63,7 @@ export function AppShell({ children, user }: AppShellProps) {
           </div>
         </div>
         <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1 p-3">
-          {PRIMARY_NAVIGATION.map((item) => (
+          {navigation.map((item) => (
             <Button
               asChild
               key={item.href}
@@ -109,7 +111,7 @@ export function AppShell({ children, user }: AppShellProps) {
                     <SheetDescription>Gestión comunitaria</SheetDescription>
                   </SheetHeader>
                   <nav aria-label="Menú principal" className="flex flex-col gap-1 px-4">
-                    {PRIMARY_NAVIGATION.map((item) => (
+                    {navigation.map((item) => (
                       <Button
                         asChild
                         key={item.href}
@@ -152,9 +154,9 @@ export function AppShell({ children, user }: AppShellProps) {
 
         <nav
           aria-label="Navegación inferior"
-          className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-border bg-card/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-lg backdrop-blur lg:hidden"
+          className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border bg-card/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-lg backdrop-blur lg:hidden"
         >
-          {PRIMARY_NAVIGATION.map((item) => (
+          {navigation.map((item) => (
             <Button
               asChild
               key={item.href}
