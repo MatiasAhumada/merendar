@@ -86,9 +86,15 @@ test("database sessions reject invalid credentials and support persistence, expi
     });
     assert.equal((await POST(request)).status, 403);
 
-    const loginRequest = new NextRequest("https://localhost:3000/api/session", {
+    const loginRequest = new NextRequest("https://0.0.0.0:3000/api/session", {
       method: "POST",
-      headers: { origin: "https://localhost:3000", "content-type": "application/json" },
+      headers: {
+        origin: "https://localhost:3000",
+        host: "localhost:3000",
+        "x-forwarded-host": "localhost:3000",
+        "x-forwarded-proto": "https",
+        "content-type": "application/json",
+      },
       body: JSON.stringify({ identifier: username, password }),
     });
     const loginResponse = await POST(loginRequest);

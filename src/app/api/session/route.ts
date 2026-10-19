@@ -17,7 +17,20 @@ function jsonResponse(body: unknown, status: number) {
 }
 
 function isSameOrigin(request: NextRequest) {
-  return request.headers.get("origin") === request.nextUrl.origin;
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || request.headers.get("host") || request.nextUrl.host;
+  const protocol = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || request.nextUrl.protocol.replace(":", "");
+
+  if (!origin || !host || !protocol) {
+    return false;
+  }
+
+  try {
+    const parsedOrigin = new URL(origin);
+    return parsedOrigin.host === host && parsedOrigin.protocol === `${protocol}:`;
+  } catch {
+    return false;
+  }
 }
 
 export async function GET(request: NextRequest) {
