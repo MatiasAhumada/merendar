@@ -25,6 +25,7 @@ import { API_ROUTES, ROUTES } from "@/constants/routes";
 import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import { clientErrorHandler } from "@/utils/handlers/clientHandler";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 
 function getDestination() {
   const requestedPath = new URLSearchParams(window.location.search).get("next");
@@ -34,6 +35,7 @@ function getDestination() {
 
 export function LoginScreen() {
   const router = useRouter();
+  const isOnline = useNetworkStatus();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -43,6 +45,12 @@ export function LoginScreen() {
   async function submitLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage("");
+
+    if (!isOnline) {
+      setErrorMessage("Necesitás conexión a internet para validar tu cuenta.");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -157,7 +165,13 @@ export function LoginScreen() {
                     <AlertDescription>{errorMessage}</AlertDescription>
                   </Alert>
                 ) : null}
-                <Button type="submit" className="mt-6 w-full" disabled={isSubmitting}>
+                {!isOnline ? (
+                  <Alert variant="info" className="mt-4">
+                    <AlertTitle>Sin conexión</AlertTitle>
+                    <AlertDescription>El inicio de sesión requiere conexión a internet.</AlertDescription>
+                  </Alert>
+                ) : null}
+                <Button type="submit" className="mt-6 w-full" disabled={isSubmitting || !isOnline}>
                   {isSubmitting ? "Ingresando…" : "Entrar al panel"}
                   <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" />
                 </Button>

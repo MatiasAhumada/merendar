@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { BRAND } from "@/constants/brand.constant";
+import { PwaRegistration } from "@/components/shared/PwaRegistration";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -40,7 +41,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" className={`${geistSans.variable} antialiased`}>
-      <body className="flex min-h-screen flex-col font-sans">{children}</body>
+      <body className="flex min-h-screen flex-col font-sans">
+        <PwaRegistration />
+        {children}
+      </body>
     </html>
   );
 }

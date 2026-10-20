@@ -58,4 +58,6 @@ pnpm build
 ALLOW_AUTH_INTEGRATION_TESTS=true pnpm test:integration
 ```
 
+La estrategia de instalación, caché pública y acceso sin conexión está documentada en [docs/offline.md](docs/offline.md).
+
 Las pruebas de integración requieren PostgreSQL local de desarrollo (`DATABASE_URL` con nombre de base que incluya `dev`, `test` o `local`).

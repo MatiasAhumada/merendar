@@ -5,7 +5,11 @@ import { ROUTES } from "@/constants/routes";
 export function proxy(request: NextRequest) {
   const hasSessionCookie = Boolean(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
   const isLoginRoute = request.nextUrl.pathname === ROUTES.LOGIN;
-  const isProtectedRoute = !isLoginRoute;
+  const isPublicPwaRoute =
+    request.nextUrl.pathname === ROUTES.OFFLINE ||
+    request.nextUrl.pathname === ROUTES.PWA_MANIFEST ||
+    request.nextUrl.pathname === ROUTES.SERVICE_WORKER;
+  const isProtectedRoute = !isLoginRoute && !isPublicPwaRoute;
 
   if (isProtectedRoute && !hasSessionCookie) {
     const loginUrl = new URL(ROUTES.LOGIN, request.url);

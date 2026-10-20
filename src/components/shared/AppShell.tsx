@@ -26,6 +26,9 @@ import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import { API_ROUTES } from "@/constants/routes";
 import { clientErrorHandler } from "@/utils/handlers/clientHandler";
+import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
+import { OfflineAccessNotice } from "@/components/shared/OfflineAccessNotice";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -36,10 +39,15 @@ export function AppShell({ children, user }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const isOnline = useNetworkStatus();
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
   const navigation = PRIMARY_NAVIGATION.filter((item) => item.href !== ROUTES.USERS || user.role === UserRole.PRESIDENTE);
 
   async function signOut() {
+    if (!isOnline) {
+      return;
+    }
+
     setIsSigningOut(true);
 
     try {
@@ -85,7 +93,7 @@ export function AppShell({ children, user }: AppShellProps) {
               <p className="text-xs text-muted-foreground">{USER_ROLE_LABELS[user.role]}</p>
             </div>
           </div>
-          <Button variant="ghost" className="mt-4 w-full justify-start" onClick={signOut} disabled={isSigningOut}>
+          <Button variant="ghost" className="mt-4 w-full justify-start" onClick={signOut} disabled={isSigningOut || !isOnline}>
             <HugeiconsIcon icon={Logout01Icon} strokeWidth={1.8} data-icon="inline-start" />
             Cerrar sesión
           </Button>
@@ -121,7 +129,7 @@ export function AppShell({ children, user }: AppShellProps) {
                         </Link>
                       </Button>
                     ))}
-                    <Button variant="ghost" className="w-full justify-start" onClick={signOut} disabled={isSigningOut}>
+                    <Button variant="ghost" className="w-full justify-start" onClick={signOut} disabled={isSigningOut || !isOnline}>
                       <HugeiconsIcon icon={Logout01Icon} strokeWidth={1.8} data-icon="inline-start" />
                       Cerrar sesión
                     </Button>
@@ -137,6 +145,7 @@ export function AppShell({ children, user }: AppShellProps) {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <ConnectionStatus />
               <Badge variant="secondary">{USER_ROLE_LABELS[user.role]}</Badge>
               <Avatar size="lg">
                 <AvatarFallback>{user.name.slice(0, 2).toUpperCase()}</AvatarFallback>
@@ -146,7 +155,7 @@ export function AppShell({ children, user }: AppShellProps) {
         </header>
 
         <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 pb-28 sm:px-6 lg:px-8 lg:py-8">
-          {children}
+          {isOnline ? children : <OfflineAccessNotice />}
         </main>
 
         <nav

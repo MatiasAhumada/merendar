@@ -5,6 +5,9 @@ export const ROUTES = {
   GOODS: "/mercaderia",
   LOGIN: "/login",
   USERS: "/usuarios",
+  OFFLINE: "/offline",
+  PWA_MANIFEST: "/manifest.webmanifest",
+  SERVICE_WORKER: "/sw.js",
 } as const;
 
 export const ROUTE_LABELS: Record<string, string> = {

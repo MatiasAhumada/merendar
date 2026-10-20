@@ -11,10 +11,13 @@ import { API_ROUTES } from "@/constants/routes";
 import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import { clientErrorHandler } from "@/utils/handlers/clientHandler";
+import { OfflineAccessNotice } from "@/components/shared/OfflineAccessNotice";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 
 interface ManagedUser { id: string; name: string; email: string | null; role: UserRole | null; isActive: boolean }
 
 export function UserAdministration() {
+  const isOnline = useNetworkStatus();
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -34,7 +37,15 @@ export function UserAdministration() {
     } finally { setLoading(false); }
   }, [search]);
 
-  useEffect(() => { void loadUsers(); }, [loadUsers]);
+  useEffect(() => {
+    if (isOnline) {
+      void loadUsers();
+    }
+  }, [isOnline, loadUsers]);
+
+  if (!isOnline) {
+    return <OfflineAccessNotice />;
+  }
 
   async function createUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
