@@ -47,6 +47,7 @@ export const authRepository = {
       },
       select: {
         id: true,
+        expiresAt: true,
         user: { select: publicUserSelect },
       },
     });

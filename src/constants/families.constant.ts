@@ -1,45 +1,31 @@
-import { type FamilyRecord } from "@/interfaces/family.interface";
+import { FamilyDocumentType } from "@prisma/client";
 
-export const FAMILY_FILTERS = [
-  { value: "all", label: "Todos", count: 128 },
-  { value: "Villa Nueva", label: "Villa Nueva", count: 42 },
-  { value: "Los Aromos", label: "Los Aromos", count: 35 },
-  { value: "San Cayetano", label: "San Cayetano", count: 51 },
-  { value: "alerts", label: "Con alertas", count: 4 },
+export const FAMILY_DOCUMENT_LABELS: Record<FamilyDocumentType, string> = {
+  DNI: "DNI",
+  PARTIDA_NACIMIENTO: "Partida de nacimiento",
+  CERTIFICADO_ESCOLAR: "Certificado escolar",
+  CERTIFICADO_MEDICO: "Certificado médico",
+  OTRO: "Otra documentación",
+};
+
+export const FAMILY_DOCUMENT_OPTIONS = Object.entries(FAMILY_DOCUMENT_LABELS).map(([value, label]) => ({
+  value: value as FamilyDocumentType,
+  label,
+}));
+
+export const FAMILY_NEIGHBORHOODS = [
+  "Villa Nueva",
+  "Los Aromos",
+  "San Cayetano",
+  "Barrio Parque",
+  "Otro / Asentamiento",
 ] as const;
 
-export const FAMILY_RECORDS: FamilyRecord[] = [
-  {
-    id: "gomez",
-    name: "Familia Gómez",
-    neighborhood: "Villa Nueva",
-    address: "Calle 4 N° 842",
-    members: "4 integrantes (2 menores)",
-    detailLabel: "Titular del grupo",
-    detail: "Ana Gómez",
-    phone: "11-4521-8890",
-    alert: false,
-  },
-  {
-    id: "perez",
-    name: "Familia Pérez",
-    neighborhood: "San Cayetano",
-    address: "Pasaje Sur 120",
-    members: "3 integrantes",
-    detailLabel: "Titular del grupo",
-    detail: "Juan Pérez",
-    phone: "11-6672-1204",
-    alert: false,
-  },
-  {
-    id: "fernandez",
-    name: "Familia Fernández",
-    neighborhood: "Los Aromos",
-    address: "Mz 14 Lote 3",
-    members: "5 integrantes (3 menores)",
-    detailLabel: "Requerimiento",
-    detail: "Falta DNI de 2 menores",
-    phone: "11-3199-0044",
-    alert: true,
-  },
-];
+export const FAMILY_MEMBER_RELATIONSHIPS = [
+  "Referente",
+  "Pareja",
+  "Hija o hijo",
+  "Madre o padre",
+  "Otro familiar",
+  "Otro vínculo",
+] as const;

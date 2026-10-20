@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
+import { FamilyDocumentType } from "@prisma/client";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowRight01Icon,
   Call02Icon,
-  CheckmarkCircle01Icon,
   CloudUploadIcon,
   Location01Icon,
   Search01Icon,
@@ -37,242 +37,377 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { Textarea } from "@/components/ui/textarea";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { FAMILY_FILTERS, FAMILY_RECORDS } from "@/constants/families.constant";
-import { type FamilyRecord } from "@/interfaces/family.interface";
+import { FAMILY_DOCUMENT_LABELS, FAMILY_DOCUMENT_OPTIONS, FAMILY_MEMBER_RELATIONSHIPS, FAMILY_NEIGHBORHOODS } from "@/constants/families.constant";
+import type { FamilyRecord } from "@/interfaces/family.interface";
+import type { FamilyPersonInput } from "@/types/family";
+import { z } from "zod";
 
-type FamilyFilter = "all" | "Villa Nueva" | "Los Aromos" | "San Cayetano" | "alerts";
+interface FamilyRegistryProps {
+  initialFamilies: FamilyRecord[];
+}
 
-export function FamilyRegistry() {
+interface FamilyFormMember extends FamilyPersonInput {
+  localId: string;
+}
+
+const familyDocumentSchema = z.object({ id: z.string(), documentType: z.enum(FamilyDocumentType) });
+const familyPersonSchema = z.object({
+  id: z.string(),
+  firstName: z.string(),
+  lastName: z.string(),
+  dni: z.string().nullable(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  relationship: z.string(),
+  missingDocuments: z.array(familyDocumentSchema),
+});
+const familyResponseSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  neighborhood: z.string(),
+  address: z.string(),
+  contactPhone: z.string().nullable(),
+  contactEmail: z.string().nullable(),
+  referencePersonId: z.string().nullable(),
+  members: z.array(z.object({ id: z.string(), person: familyPersonSchema, missingDocuments: z.array(familyDocumentSchema) })),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+const createFamilyResponseSchema = z.object({ family: familyResponseSchema });
+const familiesResponseSchema = z.object({ families: z.array(familyResponseSchema) });
+const errorResponseSchema = z.object({ error: z.object({ message: z.string().optional(), details: z.record(z.string(), z.array(z.string())).optional() }) });
+
+function createEmptyMember(): FamilyFormMember {
+  return {
+    localId: crypto.randomUUID(),
+    firstName: "",
+    lastName: "",
+    relationship: "Hija o hijo",
+    missingDocuments: [],
+  };
+}
+
+function normalizeFamilies(families: z.infer<typeof familyResponseSchema>[]): FamilyRecord[] {
+  return families.map((family) => ({
+    ...family,
+    members: family.members.map((member) => ({ ...member.person, missingDocuments: member.missingDocuments })),
+  }));
+}
+
+function getMemberCountLabel(count: number) {
+  return `${count} ${count === 1 ? "integrante" : "integrantes"}`;
+}
+
+function FamilyDetails({ family, onClose }: { family: FamilyRecord; onClose: () => void }) {
+  const referencePerson = family.members.find((member) => member.id === family.referencePersonId);
+
+  return (
+    <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <SheetContent side="right" className="w-full max-w-xl overflow-y-auto">
+        <SheetHeader className="pr-12">
+          <SheetTitle className="font-display text-xl font-semibold">{family.name}</SheetTitle>
+          <SheetDescription>Ficha familiar · padrón comunitario</SheetDescription>
+        </SheetHeader>
+        <div className="flex flex-col gap-5 px-6 pb-6">
+          <div className="space-y-3 rounded-xl bg-muted p-4 text-sm">
+            <div><p className="text-xs text-muted-foreground">Domicilio</p><p className="font-medium">Barrio {family.neighborhood} · {family.address}</p></div>
+            <div><p className="text-xs text-muted-foreground">Contacto del grupo</p><p className="font-medium">{family.contactPhone || "Sin teléfono"} · {family.contactEmail || "Sin email"}</p></div>
+            <div><p className="text-xs text-muted-foreground">Referente</p><p className="font-medium">{referencePerson ? `${referencePerson.firstName} ${referencePerson.lastName}` : "Sin referente"}</p></div>
+          </div>
+          <section aria-label="Integrantes de la familia" className="space-y-3">
+            <h3 className="font-semibold">Integrantes ({family.members.length})</h3>
+            {family.members.map((member) => (
+              <Card key={member.id} size="sm">
+                <CardContent className="space-y-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-medium">{member.firstName} {member.lastName}</p>
+                      <p className="text-xs text-muted-foreground">{member.relationship}{member.id === family.referencePersonId ? " · referente" : ""}</p>
+                    </div>
+                    <Badge variant={member.missingDocuments.length ? "warning" : "success"}>
+                      {member.missingDocuments.length ? "Documentación pendiente" : "Documentación completa"}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div><p className="text-xs text-muted-foreground">DNI</p><p>{member.dni || "Sin informar"}</p></div>
+                    <div><p className="text-xs text-muted-foreground">Contacto</p><p>{member.phone || member.email || "Sin informar"}</p></div>
+                  </div>
+                  {member.missingDocuments.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {member.missingDocuments.map((document) => <Badge key={document.id} variant="warning">{FAMILY_DOCUMENT_LABELS[document.documentType]}</Badge>)}
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            ))}
+          </section>
+        </div>
+        <SheetFooter><SheetClose asChild><Button variant="outline">Cerrar ficha</Button></SheetClose></SheetFooter>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
+  const [families, setFamilies] = useState(initialFamilies);
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<FamilyFilter>("all");
+  const [filter, setFilter] = useState("all");
   const [selectedFamily, setSelectedFamily] = useState<FamilyRecord | null>(null);
-  const [formNotice, setFormNotice] = useState(false);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [members, setMembers] = useState<FamilyFormMember[]>([createEmptyMember()]);
+  const [referenceMemberId, setReferenceMemberId] = useState(members[0]?.localId ?? "");
+  const [formErrors, setFormErrors] = useState<Record<string, string[]>>({});
+  const [formMessage, setFormMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const normalizedSearch = search.trim().toLocaleLowerCase("es");
-  const visibleFamilies = FAMILY_RECORDS.filter((family) => {
-    const matchesSearch = [family.name, family.neighborhood, family.address]
-      .join(" ")
-      .toLocaleLowerCase("es")
-      .includes(normalizedSearch);
-    const matchesNeighborhood = filter === "all" || family.neighborhood === filter;
-    const matchesAlert = filter === "alerts" && family.alert;
-    return matchesSearch && (matchesNeighborhood || matchesAlert);
+  const neighborhoods = useMemo(() => [...new Set(families.map((family) => family.neighborhood))].sort(), [families]);
+  const visibleFamilies = families.filter((family) => {
+    const memberText = family.members.map((member) => `${member.firstName} ${member.lastName} ${member.dni ?? ""}`).join(" ");
+    const matchesSearch = `${family.name} ${family.neighborhood} ${family.address} ${memberText}`.toLocaleLowerCase("es").includes(normalizedSearch);
+    let matchesNeighborhood = filter === "all";
+
+    if (filter === "alerts") {
+      matchesNeighborhood = family.members.some((member) => member.missingDocuments.length);
+    }
+
+    if (filter !== "all" && filter !== "alerts") {
+      matchesNeighborhood = family.neighborhood === filter;
+    }
+
+    return matchesSearch && matchesNeighborhood;
   });
+  const alertCount = families.filter((family) => family.members.some((member) => member.missingDocuments.length)).length;
+
+  function updateMember(localId: string, updater: (member: FamilyFormMember) => FamilyFormMember) {
+    setMembers((currentMembers) => currentMembers.map((member) => {
+      if (member.localId === localId) {
+        return updater(member);
+      }
+
+      return member;
+    }));
+  }
+
+  function closeForm() {
+    setIsFormOpen(false);
+    setMembers([createEmptyMember()]);
+    setReferenceMemberId("");
+    setFormErrors({});
+    setFormMessage("");
+  }
+
+  async function refreshFamilies() {
+    const response = await fetch("/api/families", { cache: "no-store" });
+    const parsedResponse = familiesResponseSchema.safeParse(await response.json());
+
+    if (!response.ok || !parsedResponse.success) {
+      throw new Error("No se pudo actualizar el padrón");
+    }
+
+    setFamilies(normalizeFamilies(parsedResponse.data.families));
+  }
+
+  async function submitFamily(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSaving(true);
+    setFormMessage("");
+    setFormErrors({});
+    const formData = new FormData(event.currentTarget);
+    const payload = {
+      name: String(formData.get("name") ?? ""),
+      neighborhood: String(formData.get("neighborhood") ?? ""),
+      address: String(formData.get("address") ?? ""),
+      contactPhone: String(formData.get("contactPhone") ?? "") || undefined,
+      contactEmail: String(formData.get("contactEmail") ?? "") || undefined,
+      referenceMemberIndex: members.findIndex((member) => member.localId === referenceMemberId),
+      members: members.map((member) => ({
+        firstName: member.firstName,
+        lastName: member.lastName,
+        dni: member.dni || undefined,
+        email: member.email || undefined,
+        phone: member.phone || undefined,
+        relationship: member.relationship,
+        missingDocuments: member.missingDocuments,
+      })),
+    };
+
+    try {
+      const response = await fetch("/api/families", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const responseBody: unknown = await response.json();
+
+      if (!response.ok) {
+        const parsedError = errorResponseSchema.safeParse(responseBody);
+        if (parsedError.success) {
+          setFormMessage(parsedError.data.error.message ?? "No se pudo guardar la familia");
+          setFormErrors(parsedError.data.error.details ?? {});
+        }
+        return;
+      }
+
+      const parsedFamily = createFamilyResponseSchema.safeParse(responseBody);
+      if (!parsedFamily.success) {
+        throw new Error("La respuesta del servidor no tiene el formato esperado");
+      }
+
+      await refreshFamilies();
+      closeForm();
+    } catch {
+      setFormMessage("No se pudo guardar la familia. Revisá tu conexión e intentá nuevamente.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-5">
       <section className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">Familias Registradas</h1>
-          <p className="mt-1 text-sm text-muted-foreground">128 grupos familiares activos en el programa social</p>
+          <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">Padrón de familias</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{families.length} grupos familiares registrados</p>
         </div>
         <Badge variant="success" className="h-8 px-3">
           <HugeiconsIcon icon={UserMultipleIcon} strokeWidth={1.8} data-icon="inline-start" />
-          Territorio Activo
+          Registro comunitario
         </Badge>
       </section>
 
-      <div className="flex gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <div className="relative min-w-0 flex-1">
           <HugeiconsIcon icon={Search01Icon} strokeWidth={1.8} className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            aria-label="Buscar familias"
-            type="search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Buscar por apellido, barrio o calle..."
-            className="pl-11"
-          />
+          <Input aria-label="Buscar familias" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por persona, DNI, barrio o domicilio..." className="pl-11" />
         </div>
-        <Sheet onOpenChange={() => setFormNotice(false)}>
+        <Sheet open={isFormOpen} onOpenChange={(open) => { if (open) setIsFormOpen(true); else closeForm(); }}>
           <SheetTrigger asChild>
-            <Button aria-label="Nueva familia">
+            <Button aria-label="Nueva familia" className="w-full sm:w-auto">
               <HugeiconsIcon icon={UserAdd01Icon} strokeWidth={1.8} />
-              <span className="hidden sm:inline">Nueva familia</span>
+              Nueva familia
             </Button>
           </SheetTrigger>
-          <SheetContent side="bottom" className="mx-auto max-h-[92dvh] max-w-2xl overflow-y-auto rounded-t-3xl">
+          <SheetContent side="bottom" className="mx-auto max-h-[92dvh] max-w-3xl overflow-y-auto rounded-t-3xl">
             <SheetHeader className="pr-14">
-              <SheetTitle className="font-display text-xl font-semibold">Alta Rápida de Familia</SheetTitle>
-              <SheetDescription>Registro territorial · vista de demostración</SheetDescription>
+              <SheetTitle className="font-display text-xl font-semibold">Registrar grupo familiar</SheetTitle>
+              <SheetDescription>La ficha se guarda en el padrón de la organización.</SheetDescription>
             </SheetHeader>
-            <form className="px-6 pb-8" onSubmit={(event) => { event.preventDefault(); setFormNotice(true); }}>
+            <form className="px-6 pb-8" onSubmit={submitFamily}>
               <FieldGroup className="gap-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="family-name">Nombre del grupo familiar *</FieldLabel>
+                    <Input id="family-name" name="name" placeholder="Ej. Familia López" required aria-invalid={Boolean(formErrors.name?.length)} />
+                    {formErrors.name?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="family-neighborhood">Barrio *</FieldLabel>
+                    <Select name="neighborhood" required>
+                      <SelectTrigger id="family-neighborhood" className="w-full"><SelectValue placeholder="Seleccionar barrio" /></SelectTrigger>
+                      <SelectContent><SelectGroup>{FAMILY_NEIGHBORHOODS.map((neighborhood) => <SelectItem key={neighborhood} value={neighborhood}>{neighborhood}</SelectItem>)}</SelectGroup></SelectContent>
+                    </Select>
+                    {formErrors.neighborhood?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
+                  </Field>
+                </div>
                 <Field>
-                  <FieldLabel htmlFor="family-name">Apellido o grupo familiar *</FieldLabel>
-                  <Input id="family-name" name="name" placeholder="Ej. Familia López" required />
+                  <FieldLabel htmlFor="family-address">Domicilio *</FieldLabel>
+                  <Input id="family-address" name="address" placeholder="Calle, altura, manzana y lote" required aria-invalid={Boolean(formErrors.address?.length)} />
+                  {formErrors.address?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
                 </Field>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field><FieldLabel htmlFor="family-phone">Teléfono de contacto</FieldLabel><Input id="family-phone" name="contactPhone" type="tel" placeholder="Código de área y número" /></Field>
+                  <Field><FieldLabel htmlFor="family-email">Email de contacto</FieldLabel><Input id="family-email" name="contactEmail" type="email" placeholder="nombre@correo.com" aria-invalid={Boolean(formErrors.contactEmail?.length)} />{formErrors.contactEmail?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
+                  <div><h3 className="font-semibold">Personas integrantes</h3><p className="text-xs text-muted-foreground">Registrá cada persona una sola vez en el padrón.</p></div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setMembers((currentMembers) => [...currentMembers, createEmptyMember()])} disabled={members.length >= 20}>Agregar integrante</Button>
+                </div>
                 <Field>
-                  <FieldLabel htmlFor="family-address">Dirección, calle y altura *</FieldLabel>
-                  <Input id="family-address" name="address" placeholder="Ej. Calle 4 N° 842" required />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="family-neighborhood">Barrio comunitario</FieldLabel>
-                  <Select name="neighborhood">
-                    <SelectTrigger id="family-neighborhood" className="w-full"><SelectValue placeholder="Seleccionar barrio" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {[
-                          "Villa Nueva",
-                          "Los Aromos",
-                          "San Cayetano",
-                          "Barrio Parque",
-                          "Otro / Asentamiento",
-                        ].map((neighborhood) => <SelectItem key={neighborhood} value={neighborhood}>{neighborhood}</SelectItem>)}
-                      </SelectGroup>
-                    </SelectContent>
+                  <FieldLabel htmlFor="family-reference">Persona referente *</FieldLabel>
+                  <Select value={referenceMemberId} onValueChange={setReferenceMemberId} required>
+                    <SelectTrigger id="family-reference" className="w-full"><SelectValue placeholder="Seleccionar referente" /></SelectTrigger>
+                    <SelectContent>{members.map((member, index) => <SelectItem key={member.localId} value={member.localId}>{member.firstName || member.lastName ? `${member.firstName} ${member.lastName}`.trim() : `Integrante ${index + 1}`}</SelectItem>)}</SelectContent>
                   </Select>
+                  {formErrors.referenceMemberIndex?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
                 </Field>
-                <Field>
-                  <FieldLabel htmlFor="family-phone">Teléfono de contacto</FieldLabel>
-                  <Input id="family-phone" name="phone" type="tel" placeholder="Ej. 11-4521-8890" />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="family-notes">Observaciones de vulnerabilidad o acceso</FieldLabel>
-                  <Textarea id="family-notes" name="notes" placeholder="Observaciones adicionales" />
-                </Field>
-                <Field orientation="horizontal">
-                  <Checkbox id="family-head" />
-                  <div>
-                    <FieldLabel htmlFor="family-head">Crear titular de forma inmediata</FieldLabel>
-                    <FieldDescription>Asigna los datos de contacto como primer responsable</FieldDescription>
-                  </div>
-                </Field>
+                {members.map((member, index) => (
+                  <Card key={member.localId} size="sm">
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center justify-between gap-3"><h4 className="font-semibold">Integrante {index + 1}</h4>{members.length > 1 ? <Button type="button" variant="ghost" size="sm" onClick={() => { setMembers((currentMembers) => currentMembers.filter((currentMember) => currentMember.localId !== member.localId)); if (referenceMemberId === member.localId) setReferenceMemberId(members.find((currentMember) => currentMember.localId !== member.localId)?.localId ?? ""); }}>Quitar</Button> : null}</div>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Field><FieldLabel htmlFor={`member-first-${member.localId}`}>Nombre *</FieldLabel><Input id={`member-first-${member.localId}`} value={member.firstName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, firstName: event.target.value }))} required /></Field>
+                        <Field><FieldLabel htmlFor={`member-last-${member.localId}`}>Apellido *</FieldLabel><Input id={`member-last-${member.localId}`} value={member.lastName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, lastName: event.target.value }))} required /></Field>
+                        <Field><FieldLabel htmlFor={`member-dni-${member.localId}`}>DNI</FieldLabel><Input id={`member-dni-${member.localId}`} inputMode="numeric" value={member.dni ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, dni: event.target.value.replace(/\D/g, "").slice(0, 8) }))} aria-invalid={Boolean(formErrors.members?.length)} /><FieldDescription>Ingresá 7 u 8 números. Si no tiene, dejalo vacío.</FieldDescription></Field>
+                        <Field><FieldLabel htmlFor={`member-phone-${member.localId}`}>Teléfono</FieldLabel><Input id={`member-phone-${member.localId}`} type="tel" value={member.phone ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, phone: event.target.value }))} /></Field>
+                        <Field><FieldLabel htmlFor={`member-email-${member.localId}`}>Email</FieldLabel><Input id={`member-email-${member.localId}`} type="email" value={member.email ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, email: event.target.value }))} /></Field>
+                        <Field><FieldLabel htmlFor={`member-relationship-${member.localId}`}>Vínculo *</FieldLabel><Select value={member.relationship} onValueChange={(relationship) => updateMember(member.localId, (currentMember) => ({ ...currentMember, relationship }))}><SelectTrigger id={`member-relationship-${member.localId}`} className="w-full"><SelectValue /></SelectTrigger><SelectContent>{FAMILY_MEMBER_RELATIONSHIPS.map((relationship) => <SelectItem key={relationship} value={relationship}>{relationship}</SelectItem>)}</SelectContent></Select></Field>
+                      </div>
+                      <fieldset className="space-y-2">
+                        <legend className="text-sm font-medium">Documentación faltante</legend>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {FAMILY_DOCUMENT_OPTIONS.map((document) => {
+                            const isMissing = member.missingDocuments.includes(document.value);
+                            return <label key={document.value} className="flex min-h-10 items-center gap-2 text-sm"><Checkbox checked={isMissing} onCheckedChange={(checked) => updateMember(member.localId, (currentMember) => ({ ...currentMember, missingDocuments: checked ? [...currentMember.missingDocuments, document.value] : currentMember.missingDocuments.filter((currentDocument) => currentDocument !== document.value) }))} />{document.label}</label>;
+                          })}
+                        </div>
+                      </fieldset>
+                    </CardContent>
+                  </Card>
+                ))}
               </FieldGroup>
-              {formNotice ? (
-                <Alert variant="info" className="mt-5">
-                  <AlertTitle>Vista de demostración</AlertTitle>
-                  <AlertDescription>El formulario se puede recorrer, pero aún no guarda datos.</AlertDescription>
-                </Alert>
-              ) : null}
-              <div className="mt-6 flex justify-end gap-2">
-                <SheetClose asChild><Button variant="outline" type="button">Cancelar</Button></SheetClose>
-                <Button type="submit">Guardar familia</Button>
-              </div>
+              {formMessage ? <Alert variant="destructive" className="mt-5"><AlertTitle>No se pudo guardar</AlertTitle><AlertDescription>{formMessage}</AlertDescription></Alert> : null}
+              <div className="mt-6 flex flex-col-reverse justify-end gap-2 sm:flex-row"><SheetClose asChild><Button variant="outline" type="button">Cancelar</Button></SheetClose><Button type="submit" disabled={isSaving}>{isSaving ? "Guardando..." : "Guardar familia"}</Button></div>
             </form>
           </SheetContent>
         </Sheet>
       </div>
 
-      <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-        <ToggleGroup
-          type="single"
-          value={filter}
-          onValueChange={(value) => {
-            const selectedFilter = FAMILY_FILTERS.find((item) => item.value === value);
-            if (selectedFilter) setFilter(selectedFilter.value);
-          }}
-          variant="filter"
-          size="filter"
-          className="gap-2"
-          aria-label="Filtrar familias"
-        >
-          {FAMILY_FILTERS.map((item) => (
-            <ToggleGroupItem key={item.value} value={item.value}>
-              {item.label} <span className="text-xs opacity-75">{item.count}</span>
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
+      <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Filtrar familias">
+        <Button variant={filter === "all" ? "secondary" : "outline"} size="sm" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>Todas ({families.length})</Button>
+        {neighborhoods.map((neighborhood) => <Button key={neighborhood} variant={filter === neighborhood ? "secondary" : "outline"} size="sm" aria-pressed={filter === neighborhood} onClick={() => setFilter(neighborhood)}>{neighborhood} ({families.filter((family) => family.neighborhood === neighborhood).length})</Button>)}
+        <Button variant={filter === "alerts" ? "secondary" : "outline"} size="sm" aria-pressed={filter === "alerts"} onClick={() => setFilter("alerts")}>Con alertas ({alertCount})</Button>
       </div>
 
-      <section aria-label="Listado de familias" className="grid gap-3 xl:grid-cols-2">
-        {visibleFamilies.map((family) => (
-          <Card key={family.id} size="sm">
-            <CardContent className="flex flex-col gap-4">
-              <div className="flex items-start gap-3">
-                <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
-                  <HugeiconsIcon icon={UserMultipleIcon} strokeWidth={1.8} className="size-6" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="font-display text-base font-semibold">{family.name}</h2>
-                    <Badge variant={family.alert ? "warning" : "success"}>
-                      {family.alert ? "Pendiente Doc." : "Activa"}
-                    </Badge>
+      {visibleFamilies.length ? (
+        <section aria-label="Listado de familias" className="grid gap-3 xl:grid-cols-2">
+          {visibleFamilies.map((family) => {
+            const missingCount = family.members.reduce((total, member) => total + member.missingDocuments.length, 0);
+            const referencePerson = family.members.find((member) => member.id === family.referencePersonId);
+            return (
+              <Card key={family.id} size="sm">
+                <CardContent className="flex flex-col gap-4">
+                  <div className="flex items-start gap-3">
+                    <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground"><HugeiconsIcon icon={UserMultipleIcon} strokeWidth={1.8} className="size-6" /></span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2"><h2 className="font-display text-base font-semibold">{family.name}</h2><Badge variant={missingCount ? "warning" : "success"}>{missingCount ? `${missingCount} faltantes` : "Documentación completa"}</Badge></div>
+                      <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><HugeiconsIcon icon={Location01Icon} strokeWidth={1.8} />{family.neighborhood} · {family.address}</p>
+                    </div>
                   </div>
-                  <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                    <HugeiconsIcon icon={Location01Icon} strokeWidth={1.8} />
-                    Barrio {family.neighborhood} · {family.address}
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted p-3">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Beneficiarios</p>
-                  <p className="mt-1 flex items-start gap-1 text-xs font-medium">
-                    <HugeiconsIcon icon={UserMultipleIcon} strokeWidth={1.8} className="shrink-0 text-primary" />
-                    {family.members}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{family.detailLabel}</p>
-                  <p className="mt-1 flex items-start gap-1 text-xs font-medium">
-                    <HugeiconsIcon icon={family.alert ? CloudUploadIcon : CheckmarkCircle01Icon} strokeWidth={1.8} className="shrink-0 text-primary" />
-                    {family.detail}
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <Button variant="soft" size="sm" asChild>
-                  <a href={`tel:${family.phone.replaceAll("-", "")}`}>
-                    <HugeiconsIcon icon={Call02Icon} strokeWidth={1.8} data-icon="inline-start" />
-                    {family.phone}
-                  </a>
-                </Button>
-                <Button size="sm" onClick={() => setSelectedFamily(family)}>
-                  Ver ficha familiar
-                  <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" />
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-        {visibleFamilies.length === 0 ? (
-          <Card className="xl:col-span-2">
-            <CardContent className="py-8 text-center text-muted-foreground">No hay familias de ejemplo para esta búsqueda.</CardContent>
-          </Card>
-        ) : null}
-      </section>
+                  <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted p-3 text-xs">
+                    <div><p className="font-semibold uppercase tracking-wide text-muted-foreground">Integrantes</p><p className="mt-1 font-medium">{getMemberCountLabel(family.members.length)}</p></div>
+                    <div><p className="font-semibold uppercase tracking-wide text-muted-foreground">Persona referente</p><p className="mt-1 font-medium">{referencePerson ? `${referencePerson.firstName} ${referencePerson.lastName}` : "Sin informar"}</p></div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {family.contactPhone ? <Button variant="soft" size="sm" asChild><a href={`tel:${family.contactPhone.replace(/[^\d+]/g, "")}`}><HugeiconsIcon icon={Call02Icon} strokeWidth={1.8} data-icon="inline-start" />{family.contactPhone}</a></Button> : <span className="text-xs text-muted-foreground">Sin teléfono de contacto</span>}
+                    <Button size="sm" onClick={() => setSelectedFamily(family)}>Ver ficha familiar<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" /></Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </section>
+      ) : (
+        <Card><CardContent className="py-10 text-center"><h2 className="font-semibold">{families.length ? "No hay resultados" : "Todavía no hay familias registradas"}</h2><p className="mt-1 text-sm text-muted-foreground">{families.length ? "Probá con otro nombre, DNI, barrio o domicilio." : "Creá la primera ficha para iniciar el padrón comunitario."}</p></CardContent></Card>
+      )}
 
       <Card variant="muted" size="sm">
         <CardContent className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="flex size-10 items-center justify-center rounded-full bg-warning/15 text-warning">
-              <HugeiconsIcon icon={CloudUploadIcon} strokeWidth={1.8} />
-            </span>
-            <div>
-              <p className="font-semibold">3 fichas de ejemplo</p>
-              <p className="text-xs text-muted-foreground">Sin sincronización en esta maqueta</p>
-            </div>
-          </div>
-          <Badge variant="secondary">Vista demo</Badge>
+          <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-full bg-warning/15 text-warning"><HugeiconsIcon icon={CloudUploadIcon} strokeWidth={1.8} /></span><div><p className="font-semibold">{alertCount} fichas con documentación pendiente</p><p className="text-xs text-muted-foreground">Los faltantes se muestran en cada integrante.</p></div></div>
+          <Badge variant="secondary">Padrón actualizado</Badge>
         </CardContent>
       </Card>
 
-      <Sheet open={Boolean(selectedFamily)} onOpenChange={(open) => { if (!open) setSelectedFamily(null); }}>
-        <SheetContent side="right" className="w-full max-w-md overflow-y-auto">
-          <SheetHeader className="pr-12">
-            <SheetTitle className="font-display text-xl font-semibold">{selectedFamily?.name}</SheetTitle>
-            <SheetDescription>Ficha familiar · datos de ejemplo</SheetDescription>
-          </SheetHeader>
-          {selectedFamily ? (
-            <div className="flex flex-col gap-5 px-6">
-              <Badge variant={selectedFamily.alert ? "warning" : "success"}>
-                {selectedFamily.alert ? "Documentación pendiente" : "Familia activa"}
-              </Badge>
-              <div className="space-y-4 rounded-xl bg-muted p-4 text-sm">
-                <div><p className="text-xs text-muted-foreground">Domicilio</p><p className="font-medium">Barrio {selectedFamily.neighborhood} · {selectedFamily.address}</p></div>
-                <div><p className="text-xs text-muted-foreground">Beneficiarios</p><p className="font-medium">{selectedFamily.members}</p></div>
-                <div><p className="text-xs text-muted-foreground">{selectedFamily.detailLabel}</p><p className="font-medium">{selectedFamily.detail}</p></div>
-                <div><p className="text-xs text-muted-foreground">Contacto</p><p className="font-medium">{selectedFamily.phone}</p></div>
-              </div>
-              <Button asChild><a href={`tel:${selectedFamily.phone.replaceAll("-", "")}`}>Llamar al contacto</a></Button>
-            </div>
-          ) : null}
-          <SheetFooter><SheetClose asChild><Button variant="outline">Cerrar ficha</Button></SheetClose></SheetFooter>
-        </SheetContent>
-      </Sheet>
+      {selectedFamily ? <FamilyDetails family={selectedFamily} onClose={() => setSelectedFamily(null)} /> : null}
     </div>
   );
 }

@@ -92,7 +92,7 @@ export const authService = {
       return null;
     }
 
-    return { id: session.id, user: { ...session.user, role: session.user.role } };
+    return { id: session.id, expiresAt: session.expiresAt, user: { ...session.user, role: session.user.role } };
   },
 
   async logout(token: string | undefined) {

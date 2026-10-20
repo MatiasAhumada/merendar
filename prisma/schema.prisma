@@ -15,8 +15,92 @@ model User {
   role         UserRole?
   isActive     Boolean       @default(true)
   sessions     AuthSession[]
+  createdFamilies Family[]
+  familyOperations FamilyOperation[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+}
+
+model Family {
+  id                 String         @id @default(cuid())
+  name               String
+  neighborhood       String
+  address            String
+  contactPhone       String?
+  contactEmail       String?
+  referencePersonId  String?
+  createdById        String
+  members            FamilyMember[]
+  operations         FamilyOperation[]
+  referencePerson    Person?        @relation("FamilyReference", fields: [referencePersonId], references: [id], onDelete: SetNull)
+  createdBy          User           @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([neighborhood, name])
+  @@index([createdById, createdAt])
+}
+
+model Person {
+  id                 String         @id @default(cuid())
+  firstName          String
+  lastName           String
+  dni                String?        @unique
+  email              String?
+  phone              String?
+  memberships        FamilyMember[]
+  referencedBy       Family[]       @relation("FamilyReference")
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([lastName, firstName])
+}
+
+model FamilyMember {
+  id                 String            @id @default(cuid())
+  familyId           String
+  personId           String
+  relationship       String
+  family             Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  person             Person            @relation(fields: [personId], references: [id], onDelete: Restrict)
+  missingDocuments   MissingDocument[]
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@unique([familyId, personId])
+  @@index([personId])
+}
+
+model MissingDocument {
+  id               String                 @id @default(cuid())
+  familyMemberId   String
+  documentType     FamilyDocumentType
+  familyMember     FamilyMember           @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+  createdAt        DateTime               @default(now())
+
+  @@unique([familyMemberId, documentType])
+  @@index([documentType, createdAt])
+}
+
+model FamilyOperation {
+  operationId String   @id @db.Uuid
+  actorId     String
+  familyId    String
+  requestHash String
+  actor       User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  family      Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([familyId])
+}
+
+enum FamilyDocumentType {
+  DNI
+  PARTIDA_NACIMIENTO
+  CERTIFICADO_ESCOLAR
+  CERTIFICADO_MEDICO
+  OTRO
 }
 
 enum UserRole {
