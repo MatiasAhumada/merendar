@@ -66,16 +66,13 @@ export function LoginScreen() {
         <div aria-hidden="true" className="pointer-events-none absolute -right-28 -top-24 size-96 rounded-full border border-primary-foreground/15" />
         <div aria-hidden="true" className="pointer-events-none absolute -right-12 top-8 size-64 rounded-full border border-primary-foreground/10" />
         <div className="relative z-10 flex items-center gap-3">
-          <span className="flex size-12 items-center justify-center rounded-2xl bg-white shadow-lg">
-            <Image src={BRAND.logoPath} alt="" width={48} height={48} priority />
-          </span>
-          <div><p className="font-display text-lg font-semibold">{BRAND.shortName}</p><p className="text-xs text-primary-foreground/75">Gestión comunitaria</p></div>
+          <Image src={BRAND.darkWordmarkPath} alt={BRAND.name} width={250} height={115} className="h-16 w-auto" priority />
         </div>
 
         <div className="relative z-10 mt-20 max-w-lg xl:mt-28">
           <Badge variant="inverse" className="h-7 px-3">OPERATIVO COMUNITARIO</Badge>
           <p className="mt-7 font-display text-5xl font-bold leading-[1.08] tracking-tight xl:text-6xl">
-            Cada familia cuenta. <span className="text-primary-container-foreground">Cada jornada también.</span>
+            Organización de <span className="text-primary-container-foreground">jornadas comunitarias.</span>
           </p>
           <p className="mt-6 max-w-md text-base leading-relaxed text-primary-foreground/80">
             Un mismo lugar para acompañar a las familias, organizar jornadas y reunir la documentación del operativo.
@@ -99,8 +96,7 @@ export function LoginScreen() {
 
       <main className="flex min-w-0 flex-col bg-background px-4 py-6 sm:px-8 lg:px-12 lg:py-10">
         <div className="flex items-center gap-3 lg:hidden">
-          <Image src={BRAND.logoPath} alt="" width={48} height={48} priority />
-          <div><p className="font-display font-semibold">{BRAND.shortName}</p><p className="text-xs text-muted-foreground">Gestión comunitaria</p></div>
+          <Image src={BRAND.wordmarkPath} alt={BRAND.name} width={220} height={100} className="h-14 w-auto" priority />
         </div>
 
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-10 lg:py-0">

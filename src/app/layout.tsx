@@ -11,8 +11,17 @@ const geistSans = localFont({
 });
 
 export const metadata: Metadata = {
-  title: `${BRAND.shortName} | Gestión comunitaria`,
+  title: { default: `${BRAND.name} | Gestión comunitaria`, template: `%s | ${BRAND.name}` },
   description: BRAND.description,
+  applicationName: BRAND.name,
+  openGraph: {
+    title: BRAND.name,
+    description: BRAND.description,
+    siteName: BRAND.name,
+    locale: "es_AR",
+    type: "website",
+  },
+  twitter: { card: "summary", title: BRAND.name, description: BRAND.description },
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "16x16 32x32", type: "image/x-icon" },

@@ -57,11 +57,7 @@ export function AppShell({ children, user }: AppShellProps) {
     <div className="min-h-screen lg:flex">
       <aside className="hidden w-64 shrink-0 border-r border-sidebar-border bg-sidebar lg:flex lg:flex-col">
         <div className="flex items-center gap-3 border-b border-sidebar-border px-5 py-6">
-          <Image src={BRAND.logoPath} alt="" width={48} height={48} priority />
-          <div className="min-w-0">
-            <p className="truncate font-display text-base font-semibold">{BRAND.shortName}</p>
-            <p className="text-xs text-muted-foreground">Gestión comunitaria</p>
-          </div>
+          <Image src={BRAND.wordmarkPath} alt={BRAND.name} width={180} height={82} className="h-12 w-auto" priority />
         </div>
         <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1 p-3">
           {navigation.map((item) => (
@@ -108,7 +104,7 @@ export function AppShell({ children, user }: AppShellProps) {
                 </SheetTrigger>
                 <SheetContent side="left">
                   <SheetHeader>
-                    <SheetTitle>{BRAND.shortName}</SheetTitle>
+                    <SheetTitle>{BRAND.name}</SheetTitle>
                     <SheetDescription>Gestión comunitaria</SheetDescription>
                   </SheetHeader>
                   <nav aria-label="Menú principal" className="flex flex-col gap-1 px-4">

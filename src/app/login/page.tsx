@@ -6,7 +6,7 @@ import { ROUTES } from "@/constants/routes";
 import { BRAND } from "@/constants/brand.constant";
 
 export const metadata: Metadata = {
-  title: `Ingresar | ${BRAND.shortName}`,
+  title: "Ingresar",
   description: `Acceso al panel de gestión de ${BRAND.shortName}.`,
 };
 
