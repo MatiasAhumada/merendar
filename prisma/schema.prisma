@@ -17,6 +17,7 @@ model User {
   sessions     AuthSession[]
   createdFamilies Family[]
   familyOperations FamilyOperation[]
+  synchronizationReceipts SynchronizationReceipt[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 }
@@ -130,4 +131,25 @@ model LoginAttempt {
 
   @@index([candidateKey, createdAt])
   @@index([createdAt])
+}
+
+model SynchronizationReceipt {
+  operationId     String       @id @db.Uuid
+  userId          String
+  resource        SyncResource
+  resourceId      String?
+  requestHash     String
+  resourceVersion Int
+  result          Json
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime     @default(now())
+
+  @@index([userId, createdAt])
+  @@index([resource, resourceId])
+}
+
+enum SyncResource {
+  FAMILIES
+  REMITTANCES
+  RECORDS
 }
