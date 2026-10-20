@@ -66,7 +66,7 @@ export function LoginScreen() {
         <div aria-hidden="true" className="pointer-events-none absolute -right-28 -top-24 size-96 rounded-full border border-primary-foreground/15" />
         <div aria-hidden="true" className="pointer-events-none absolute -right-12 top-8 size-64 rounded-full border border-primary-foreground/10" />
         <div className="relative z-10 flex items-center gap-3">
-          <Image src={BRAND.darkWordmarkPath} alt={BRAND.name} width={250} height={115} className="h-16 w-auto" priority />
+          <Image src={BRAND.darkWordmarkPath} alt={BRAND.name} width={250} height={115} className="h-16 w-auto" priority unoptimized />
         </div>
 
         <div className="relative z-10 mt-20 max-w-lg xl:mt-28">
@@ -96,7 +96,7 @@ export function LoginScreen() {
 
       <main className="flex min-w-0 flex-col bg-background px-4 py-6 sm:px-8 lg:px-12 lg:py-10">
         <div className="flex items-center gap-3 lg:hidden">
-          <Image src={BRAND.wordmarkPath} alt={BRAND.name} width={220} height={100} className="h-14 w-auto" priority />
+          <Image src={BRAND.wordmarkPath} alt={BRAND.name} width={220} height={100} className="h-14 w-auto" priority unoptimized />
         </div>
 
         <div className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center py-10 lg:py-0">

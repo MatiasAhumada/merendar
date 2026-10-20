@@ -57,7 +57,7 @@ export function AppShell({ children, user }: AppShellProps) {
     <div className="min-h-screen lg:flex">
       <aside className="hidden w-64 shrink-0 border-r border-sidebar-border bg-sidebar lg:flex lg:flex-col">
         <div className="flex items-center gap-3 border-b border-sidebar-border px-5 py-6">
-          <Image src={BRAND.wordmarkPath} alt={BRAND.name} width={180} height={82} className="h-12 w-auto" priority />
+          <Image src={BRAND.wordmarkPath} alt={BRAND.name} width={180} height={82} className="h-12 w-auto" priority unoptimized />
         </div>
         <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1 p-3">
           {navigation.map((item) => (
@@ -128,7 +128,7 @@ export function AppShell({ children, user }: AppShellProps) {
                   </nav>
                 </SheetContent>
               </Sheet>
-              <Image src={BRAND.logoPath} alt="" width={40} height={40} className="lg:hidden" priority />
+              <Image src={BRAND.logoPath} alt="" width={40} height={40} className="lg:hidden" priority unoptimized />
               <div className="min-w-0">
                 <p className="truncate font-display text-base font-semibold leading-tight">
                   {currentPage?.label ?? BRAND.shortName}

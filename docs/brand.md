@@ -1,30 +1,30 @@
 # Identidad Merendar
 
-Merendar es la marca del software. Orgullo y Solidaridad conserva su nombre en contextos institucionales y de negocio.
+Merendar es la marca del software. Orgullo y Solidaridad conserva su nombre en contextos institucionales y de negocio. El emblema de Merendar toma como referencia la casa, el sol, las manos y la comunidad unida por un corazón. Conserva una silueta propia y no incorpora el nombre institucional ni fechas del logo de referencia.
 
 ## Recursos
 
 | Recurso | Ruta | Uso |
 | --- | --- | --- |
-| Logo principal transparente | `public/merendar-logo.png` | Fondos claros, 2291 px de ancho |
-| Logo para fondos oscuros | `public/merendar-logo-dark.png` | Fondos oscuros, 2291 px de ancho |
+| Logo principal transparente | `public/merendar-logo.png` | Fondos claros |
+| Logo para fondos oscuros | `public/merendar-logo-dark.png` | Fondos oscuros |
 | Logo monocromático | `public/merendar-logo-monochrome.png`, `public/merendar-logo-monochrome-inverse.png` | Una tinta en fondos claros u oscuros |
 | Isotipo transparente | `public/brand/merendar-isotipo.png` | Navegación y espacios compactos |
-| Isotipo para fondos oscuros | `public/brand/merendar-isotipo-dark.png` | Fondo oscuro, tonos claros con damasco |
+| Isotipo para fondos oscuros | `public/brand/merendar-isotipo-dark.png` | Fondo oscuro |
 | Isotipo monocromático | `public/brand/merendar-isotipo-monochrome.png` | Impresión a una tinta |
-| Fuente raster del isotipo | `public/brand/merendar-mark-master.png` | Máster generado de 1254 × 1254 px con transparencia |
+| Máster raster del isotipo | `public/brand/merendar-mark-master.png` | Emblema de 1200 × 1200 px con transparencia |
 | Favicon | `src/app/favicon.ico` | ICO con tamaños 16, 32 y 48 px |
 | Icono de aplicación | `public/icon-192.png`, `public/icon-512.png` | PNG de 192 y 512 px |
-| Icono maskable | `public/icon-maskable-512.png` | PNG de 512 px; símbolo centrado dentro de la zona segura |
+| Icono maskable | `public/icon-maskable-512.png` | PNG de 512 px; símbolo dentro de la zona segura |
 | Icono Apple | `public/apple-icon.png` | PNG de 180 px |
 
-El logo principal y el isotipo tienen transparencia alfa real. Los iconos de instalación usan un fondo verde bosque y conservan margen alrededor del símbolo para evitar recortes.
+Los wordmarks e isotipos tienen canal alfa. Los iconos de instalación usan un fondo marrón cálido y dejan margen alrededor del símbolo.
 
 ## Dirección visual
 
-La composición representa dos personas compartiendo un cuenco. La paleta combina verde bosque `#143931`, verde hoja `#246B5D`, damasco `#F28B52` y crema `#FBF5E9`. La interfaz usa la fuente Geist local del proyecto. Mantener contraste de texto y foco mediante los tokens Tailwind/shadcn definidos en `src/app/globals.css`.
+El sol amarillo y la casa naranja sostienen a tres personas de colores distintos que comparten un corazón rojo; unas manos color durazno las acompañan. La paleta de interfaz usa naranja `#C9630B`, dorado `#F4A900`, rojo, azul, fucsia y verde, con fondos crema cálidos y marrón para texto y superficies oscuras. La interfaz usa la fuente Geist local. Mantener contraste de texto y foco mediante los tokens Tailwind/shadcn definidos en `src/app/globals.css`.
 
-Usar el wordmark completo en superficies de marca y el isotipo solo cuando el espacio sea reducido. Mantener espacio libre alrededor del logo equivalente al ancho de uno de los motivos circulares del símbolo. No estirar ni reconstruirlo con filtros CSS.
+Usar el wordmark completo en superficies de marca y el isotipo cuando el espacio sea reducido. Mantener espacio libre alrededor del logo; no estirarlo ni reconstruirlo con filtros CSS.
 
 ## Integración PWA para COD-1423
 
