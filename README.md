@@ -1,4 +1,6 @@
-# Merendar · Solidaridad Activa
+# Merendar
+
+La identidad de marca y las dimensiones de los recursos para instalación están documentadas en [docs/brand.md](docs/brand.md).
 
 Maqueta navegable de gestión comunitaria construida con Next.js 16, TypeScript, Tailwind CSS 4 y shadcn/ui. Traslada las cuatro vistas de Stitch del directorio `../diseño/` a una aplicación con navegación común y diseño adaptable a móvil y escritorio.
 
