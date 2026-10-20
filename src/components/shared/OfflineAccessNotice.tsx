@@ -8,7 +8,7 @@ export function OfflineAccessNotice() {
       <HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} />
       <AlertTitle>Volvé a conectarte para continuar</AlertTitle>
       <AlertDescription>
-        Iniciar o cerrar sesión, consultar información, administrar cuentas y guardar cambios requieren conexión. No se guardan operaciones sin conexión.
+        Iniciar o cerrar sesión y consultar otras vistas requieren conexión. Si tenés una sesión vigente y el padrón familiar ya estaba abierto, podés registrar familias para sincronizarlas cuando vuelva la conexión.
       </AlertDescription>
     </Alert>
   );

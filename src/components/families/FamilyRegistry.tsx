@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { FamilyDocumentType } from "@prisma/client";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
@@ -39,11 +39,17 @@ import {
 } from "@/components/ui/sheet";
 import { FAMILY_DOCUMENT_LABELS, FAMILY_DOCUMENT_OPTIONS, FAMILY_MEMBER_RELATIONSHIPS, FAMILY_NEIGHBORHOODS } from "@/constants/families.constant";
 import type { FamilyRecord } from "@/interfaces/family.interface";
+import type { JsonObject } from "@/types/json-value";
 import type { FamilyPersonInput } from "@/types/family";
+import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
+import type { OfflineOperation } from "@/types/offline-operation";
+import { familyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
 import { z } from "zod";
 
 interface FamilyRegistryProps {
   initialFamilies: FamilyRecord[];
+  userId: string;
+  sessionExpiresAt: string;
 }
 
 interface FamilyFormMember extends FamilyPersonInput {
@@ -73,9 +79,7 @@ const familyResponseSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 });
-const createFamilyResponseSchema = z.object({ family: familyResponseSchema });
 const familiesResponseSchema = z.object({ families: z.array(familyResponseSchema) });
-const errorResponseSchema = z.object({ error: z.object({ message: z.string().optional(), details: z.record(z.string(), z.array(z.string())).optional() }) });
 
 function createEmptyMember(): FamilyFormMember {
   return {
@@ -92,6 +96,99 @@ function normalizeFamilies(families: z.infer<typeof familyResponseSchema>[]): Fa
     ...family,
     members: family.members.map((member) => ({ ...member.person, missingDocuments: member.missingDocuments })),
   }));
+}
+
+function toFamilyJsonPayload(family: FamilyPayload): JsonObject {
+  const payload: JsonObject = {
+    name: family.name,
+    neighborhood: family.neighborhood,
+    address: family.address,
+    referenceMemberIndex: family.referenceMemberIndex,
+    members: family.members.map((member) => {
+      const person: JsonObject = {
+        firstName: member.firstName,
+        lastName: member.lastName,
+        relationship: member.relationship,
+        missingDocuments: [...member.missingDocuments],
+      };
+
+      if (member.dni) {
+        person.dni = member.dni;
+      }
+
+      if (member.email) {
+        person.email = member.email;
+      }
+
+      if (member.phone) {
+        person.phone = member.phone;
+      }
+
+      return person;
+    }),
+  };
+
+  if (family.contactPhone) {
+    payload.contactPhone = family.contactPhone;
+  }
+
+  if (family.contactEmail) {
+    payload.contactEmail = family.contactEmail;
+  }
+
+  return payload;
+}
+
+function familyFromOfflineOperation(operation: OfflineOperation): FamilyRecord | null {
+  const parsedFamily = familyPayloadSchema.safeParse(operation.payload);
+
+  if (!parsedFamily.success) {
+    return null;
+  }
+
+  const members = parsedFamily.data.members.map((member, index) => ({
+    id: `${operation.resourceId}-person-${index}`,
+    firstName: member.firstName,
+    lastName: member.lastName,
+    dni: member.dni ?? null,
+    email: member.email ?? null,
+    phone: member.phone ?? null,
+    relationship: member.relationship,
+    missingDocuments: member.missingDocuments.map((documentType, documentIndex) => ({
+      id: `${operation.resourceId}-document-${index}-${documentIndex}`,
+      documentType,
+    })),
+  }));
+  const referenceMember = members[parsedFamily.data.referenceMemberIndex];
+
+  return {
+    id: operation.resourceId,
+    name: parsedFamily.data.name,
+    neighborhood: parsedFamily.data.neighborhood,
+    address: parsedFamily.data.address,
+    contactPhone: parsedFamily.data.contactPhone ?? null,
+    contactEmail: parsedFamily.data.contactEmail ?? null,
+    referencePersonId: referenceMember?.id ?? null,
+    members,
+    createdAt: operation.createdAt,
+    updatedAt: operation.createdAt,
+  };
+}
+
+function offlineStatusLabel(operation: OfflineOperation) {
+  if (operation.status === "conflict") {
+    return "Conflicto por DNI";
+  }
+
+  if (operation.status === "error") {
+    return "Pendiente de atención";
+  }
+
+  if (operation.status === "syncing") {
+    return "Sincronizando";
+  }
+
+  return "Pendiente de sincronización";
 }
 
 function getMemberCountLabel(count: number) {
@@ -148,20 +245,74 @@ function FamilyDetails({ family, onClose }: { family: FamilyRecord; onClose: () 
   );
 }
 
-export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
+export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt }: FamilyRegistryProps) {
   const [families, setFamilies] = useState(initialFamilies);
+  const [offlineOperations, setOfflineOperations] = useState<OfflineOperation[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [selectedFamily, setSelectedFamily] = useState<FamilyRecord | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [members, setMembers] = useState<FamilyFormMember[]>([createEmptyMember()]);
   const [referenceMemberId, setReferenceMemberId] = useState(members[0]?.localId ?? "");
+  const [selectedNeighborhood, setSelectedNeighborhood] = useState("");
+  const [editingOperation, setEditingOperation] = useState<OfflineOperation | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string[]>>({});
   const [formMessage, setFormMessage] = useState("");
+  const [queueMessage, setQueueMessage] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const refreshOfflineFamilies = useCallback(async () => {
+    try {
+      const operations = await listOfflineOperations(userId);
+      setOfflineOperations(operations.filter((operation) =>
+        operation.resource === "families" && operation.operation === "create" && operation.status !== "synced",
+      ));
+      setQueueMessage("");
+    } catch {
+      setQueueMessage("No se pudo leer la cola offline de esta cuenta.");
+    }
+  }, [userId]);
+  const refreshFamilies = useCallback(async () => {
+    const response = await fetch("/api/families", { cache: "no-store" });
+    const parsedResponse = familiesResponseSchema.safeParse(await response.json());
+
+    if (!response.ok || !parsedResponse.success) {
+      throw new Error("No se pudo actualizar el padrón");
+    }
+
+    setFamilies(normalizeFamilies(parsedResponse.data.families));
+  }, []);
+  const familyOperations = useMemo(() => offlineOperations.filter((operation) => operation.resource === "families"), [offlineOperations]);
+  const localFamilies = useMemo(() => familyOperations.flatMap((operation) => {
+    const family = familyFromOfflineOperation(operation);
+
+    if (!family) {
+      return [];
+    }
+
+    return [family];
+  }), [familyOperations]);
+  const allFamilies = useMemo(() => [...families, ...localFamilies], [families, localFamilies]);
+  let editingPayload: FamilyPayload | undefined;
+
+  if (editingOperation) {
+    const parsedPayload = familyPayloadSchema.safeParse(editingOperation.payload);
+
+    if (parsedPayload.success) {
+      editingPayload = parsedPayload.data;
+    }
+  }
+  let submitLabel = "Guardar familia";
+
+  if (editingOperation) {
+    submitLabel = "Guardar corrección";
+  }
+
+  if (isSaving) {
+    submitLabel = "Guardando...";
+  }
   const normalizedSearch = search.trim().toLocaleLowerCase("es");
-  const neighborhoods = useMemo(() => [...new Set(families.map((family) => family.neighborhood))].sort(), [families]);
-  const visibleFamilies = families.filter((family) => {
+  const neighborhoods = useMemo(() => [...new Set(allFamilies.map((family) => family.neighborhood))].sort(), [allFamilies]);
+  const visibleFamilies = allFamilies.filter((family) => {
     const memberText = family.members.map((member) => `${member.firstName} ${member.lastName} ${member.dni ?? ""}`).join(" ");
     const matchesSearch = `${family.name} ${family.neighborhood} ${family.address} ${memberText}`.toLocaleLowerCase("es").includes(normalizedSearch);
     let matchesNeighborhood = filter === "all";
@@ -176,7 +327,21 @@ export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
 
     return matchesSearch && matchesNeighborhood;
   });
-  const alertCount = families.filter((family) => family.members.some((member) => member.missingDocuments.length)).length;
+  const alertCount = allFamilies.filter((family) => family.members.some((member) => member.missingDocuments.length)).length;
+
+  useEffect(() => {
+    void refreshOfflineFamilies();
+    const handleQueueChange = () => {
+      void refreshOfflineFamilies();
+
+      if (navigator.onLine) {
+        void refreshFamilies().catch(() => undefined);
+      }
+    };
+    window.addEventListener("offline-queue-change", handleQueueChange);
+
+    return () => window.removeEventListener("offline-queue-change", handleQueueChange);
+  }, [refreshFamilies, refreshOfflineFamilies]);
 
   function updateMember(localId: string, updater: (member: FamilyFormMember) => FamilyFormMember) {
     setMembers((currentMembers) => currentMembers.map((member) => {
@@ -192,19 +357,29 @@ export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
     setIsFormOpen(false);
     setMembers([createEmptyMember()]);
     setReferenceMemberId("");
+    setSelectedNeighborhood("");
+    setEditingOperation(null);
     setFormErrors({});
     setFormMessage("");
   }
 
-  async function refreshFamilies() {
-    const response = await fetch("/api/families", { cache: "no-store" });
-    const parsedResponse = familiesResponseSchema.safeParse(await response.json());
+  function editOfflineFamily(operation: OfflineOperation) {
+    const parsedPayload = familyPayloadSchema.safeParse(operation.payload);
 
-    if (!response.ok || !parsedResponse.success) {
-      throw new Error("No se pudo actualizar el padrón");
+    if (!parsedPayload.success) {
+      setQueueMessage("No se pudo abrir este borrador para corregirlo.");
+      return;
     }
 
-    setFamilies(normalizeFamilies(parsedResponse.data.families));
+    const nextMembers = parsedPayload.data.members.map((member) => ({ ...member, localId: crypto.randomUUID() }));
+    const referenceMember = nextMembers[parsedPayload.data.referenceMemberIndex];
+    setEditingOperation(operation);
+    setSelectedNeighborhood(parsedPayload.data.neighborhood);
+    setMembers(nextMembers);
+    setReferenceMemberId(referenceMember?.localId ?? "");
+    setFormErrors({});
+    setFormMessage("");
+    setIsFormOpen(true);
   }
 
   async function submitFamily(event: FormEvent<HTMLFormElement>) {
@@ -231,32 +406,56 @@ export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
       })),
     };
 
-    try {
-      const response = await fetch("/api/families", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const responseBody: unknown = await response.json();
+    const parsedPayload = familyPayloadSchema.safeParse(payload);
 
-      if (!response.ok) {
-        const parsedError = errorResponseSchema.safeParse(responseBody);
-        if (parsedError.success) {
-          setFormMessage(parsedError.data.error.message ?? "No se pudo guardar la familia");
-          setFormErrors(parsedError.data.error.details ?? {});
+    if (!parsedPayload.success) {
+      const errors: Record<string, string[]> = {};
+      parsedPayload.error.issues.forEach((issue) => {
+        const field = issue.path.join(".");
+
+        if (!errors[field]) {
+          errors[field] = [];
         }
-        return;
-      }
 
-      const parsedFamily = createFamilyResponseSchema.safeParse(responseBody);
-      if (!parsedFamily.success) {
-        throw new Error("La respuesta del servidor no tiene el formato esperado");
-      }
+        errors[field].push(issue.message);
+      });
+      setFormErrors(errors);
+      setFormMessage("Revisá los campos marcados antes de guardar.");
+      setIsSaving(false);
+      return;
+    }
 
-      await refreshFamilies();
+    try {
+      if (editingOperation) {
+        await updateOfflineOperationPayload(userId, editingOperation.operationId, toFamilyJsonPayload(parsedPayload.data));
+      } else {
+        await enqueueOfflineOperation(userId, sessionExpiresAt, {
+          resource: "families",
+          resourceId: crypto.randomUUID(),
+          operation: "create",
+          baseVersion: null,
+          dependencies: [],
+          payload: toFamilyJsonPayload(parsedPayload.data),
+        });
+      }
+      await refreshOfflineFamilies();
       closeForm();
-    } catch {
-      setFormMessage("No se pudo guardar la familia. Revisá tu conexión e intentá nuevamente.");
+
+      if (navigator.onLine) {
+        try {
+          await synchronizeOfflineQueue(userId);
+          await refreshOfflineFamilies();
+          await refreshFamilies();
+        } catch {
+          setQueueMessage("El borrador quedó guardado y se sincronizará cuando el servidor esté disponible.");
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        setFormMessage(error.message);
+      } else {
+        setFormMessage("No se pudo guardar el borrador en este dispositivo.");
+      }
     } finally {
       setIsSaving(false);
     }
@@ -267,13 +466,22 @@ export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
       <section className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">Padrón de familias</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{families.length} grupos familiares registrados</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {families.length} grupos registrados{localFamilies.length ? ` · ${localFamilies.length} pendientes de sincronización` : ""}
+          </p>
         </div>
         <Badge variant="success" className="h-8 px-3">
           <HugeiconsIcon icon={UserMultipleIcon} strokeWidth={1.8} data-icon="inline-start" />
           Registro comunitario
         </Badge>
       </section>
+
+      {queueMessage ? (
+        <Alert variant="info">
+          <AlertTitle>Estado de la captura offline</AlertTitle>
+          <AlertDescription>{queueMessage}</AlertDescription>
+        </Alert>
+      ) : null}
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <div className="relative min-w-0 flex-1">
@@ -289,20 +497,20 @@ export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
           </SheetTrigger>
           <SheetContent side="bottom" className="mx-auto max-h-[92dvh] max-w-3xl overflow-y-auto rounded-t-3xl">
             <SheetHeader className="pr-14">
-              <SheetTitle className="font-display text-xl font-semibold">Registrar grupo familiar</SheetTitle>
-              <SheetDescription>La ficha se guarda en el padrón de la organización.</SheetDescription>
+              <SheetTitle className="font-display text-xl font-semibold">{editingOperation ? "Corregir borrador familiar" : "Registrar grupo familiar"}</SheetTitle>
+              <SheetDescription>La ficha queda guardada por esta cuenta y se sincroniza al recuperar conexión.</SheetDescription>
             </SheetHeader>
-            <form className="px-6 pb-8" onSubmit={submitFamily}>
+            <form key={editingOperation?.operationId ?? "new-family"} className="px-6 pb-8" onSubmit={submitFamily}>
               <FieldGroup className="gap-4">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="family-name">Nombre del grupo familiar *</FieldLabel>
-                    <Input id="family-name" name="name" placeholder="Ej. Familia López" required aria-invalid={Boolean(formErrors.name?.length)} />
+                    <Input id="family-name" name="name" defaultValue={editingPayload?.name ?? ""} placeholder="Ej. Familia López" required aria-invalid={Boolean(formErrors.name?.length)} />
                     {formErrors.name?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="family-neighborhood">Barrio *</FieldLabel>
-                    <Select name="neighborhood" required>
+                    <Select name="neighborhood" value={selectedNeighborhood} onValueChange={setSelectedNeighborhood} required>
                       <SelectTrigger id="family-neighborhood" className="w-full"><SelectValue placeholder="Seleccionar barrio" /></SelectTrigger>
                       <SelectContent><SelectGroup>{FAMILY_NEIGHBORHOODS.map((neighborhood) => <SelectItem key={neighborhood} value={neighborhood}>{neighborhood}</SelectItem>)}</SelectGroup></SelectContent>
                     </Select>
@@ -311,12 +519,12 @@ export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
                 </div>
                 <Field>
                   <FieldLabel htmlFor="family-address">Domicilio *</FieldLabel>
-                  <Input id="family-address" name="address" placeholder="Calle, altura, manzana y lote" required aria-invalid={Boolean(formErrors.address?.length)} />
+                  <Input id="family-address" name="address" defaultValue={editingPayload?.address ?? ""} placeholder="Calle, altura, manzana y lote" required aria-invalid={Boolean(formErrors.address?.length)} />
                   {formErrors.address?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
                 </Field>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field><FieldLabel htmlFor="family-phone">Teléfono de contacto</FieldLabel><Input id="family-phone" name="contactPhone" type="tel" placeholder="Código de área y número" /></Field>
-                  <Field><FieldLabel htmlFor="family-email">Email de contacto</FieldLabel><Input id="family-email" name="contactEmail" type="email" placeholder="nombre@correo.com" aria-invalid={Boolean(formErrors.contactEmail?.length)} />{formErrors.contactEmail?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                  <Field><FieldLabel htmlFor="family-phone">Teléfono de contacto</FieldLabel><Input id="family-phone" name="contactPhone" type="tel" defaultValue={editingPayload?.contactPhone ?? ""} placeholder="Código de área y número" /></Field>
+                  <Field><FieldLabel htmlFor="family-email">Email de contacto</FieldLabel><Input id="family-email" name="contactEmail" type="email" defaultValue={editingPayload?.contactEmail ?? ""} placeholder="nombre@correo.com" aria-invalid={Boolean(formErrors.contactEmail?.length)} />{formErrors.contactEmail?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
                   <div><h3 className="font-semibold">Personas integrantes</h3><p className="text-xs text-muted-foreground">Registrá cada persona una sola vez en el padrón.</p></div>
@@ -335,11 +543,11 @@ export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
                     <CardContent className="space-y-4">
                       <div className="flex items-center justify-between gap-3"><h4 className="font-semibold">Integrante {index + 1}</h4>{members.length > 1 ? <Button type="button" variant="ghost" size="sm" onClick={() => { setMembers((currentMembers) => currentMembers.filter((currentMember) => currentMember.localId !== member.localId)); if (referenceMemberId === member.localId) setReferenceMemberId(members.find((currentMember) => currentMember.localId !== member.localId)?.localId ?? ""); }}>Quitar</Button> : null}</div>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <Field><FieldLabel htmlFor={`member-first-${member.localId}`}>Nombre *</FieldLabel><Input id={`member-first-${member.localId}`} value={member.firstName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, firstName: event.target.value }))} required /></Field>
-                        <Field><FieldLabel htmlFor={`member-last-${member.localId}`}>Apellido *</FieldLabel><Input id={`member-last-${member.localId}`} value={member.lastName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, lastName: event.target.value }))} required /></Field>
-                        <Field><FieldLabel htmlFor={`member-dni-${member.localId}`}>DNI</FieldLabel><Input id={`member-dni-${member.localId}`} inputMode="numeric" value={member.dni ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, dni: event.target.value.replace(/\D/g, "").slice(0, 8) }))} aria-invalid={Boolean(formErrors.members?.length)} /><FieldDescription>Ingresá 7 u 8 números. Si no tiene, dejalo vacío.</FieldDescription></Field>
+                        <Field><FieldLabel htmlFor={`member-first-${member.localId}`}>Nombre *</FieldLabel><Input id={`member-first-${member.localId}`} value={member.firstName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, firstName: event.target.value }))} required aria-invalid={Boolean(formErrors[`members.${index}.firstName`]?.length)} />{formErrors[`members.${index}.firstName`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                        <Field><FieldLabel htmlFor={`member-last-${member.localId}`}>Apellido *</FieldLabel><Input id={`member-last-${member.localId}`} value={member.lastName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, lastName: event.target.value }))} required aria-invalid={Boolean(formErrors[`members.${index}.lastName`]?.length)} />{formErrors[`members.${index}.lastName`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                        <Field><FieldLabel htmlFor={`member-dni-${member.localId}`}>DNI</FieldLabel><Input id={`member-dni-${member.localId}`} inputMode="numeric" value={member.dni ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, dni: event.target.value.replace(/\D/g, "").slice(0, 8) }))} aria-invalid={Boolean(formErrors[`members.${index}.dni`]?.length)} /><FieldDescription>Ingresá 7 u 8 números. Si no tiene, dejalo vacío.</FieldDescription>{formErrors[`members.${index}.dni`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                         <Field><FieldLabel htmlFor={`member-phone-${member.localId}`}>Teléfono</FieldLabel><Input id={`member-phone-${member.localId}`} type="tel" value={member.phone ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, phone: event.target.value }))} /></Field>
-                        <Field><FieldLabel htmlFor={`member-email-${member.localId}`}>Email</FieldLabel><Input id={`member-email-${member.localId}`} type="email" value={member.email ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, email: event.target.value }))} /></Field>
+                        <Field><FieldLabel htmlFor={`member-email-${member.localId}`}>Email</FieldLabel><Input id={`member-email-${member.localId}`} type="email" value={member.email ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, email: event.target.value }))} aria-invalid={Boolean(formErrors[`members.${index}.email`]?.length)} />{formErrors[`members.${index}.email`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                         <Field><FieldLabel htmlFor={`member-relationship-${member.localId}`}>Vínculo *</FieldLabel><Select value={member.relationship} onValueChange={(relationship) => updateMember(member.localId, (currentMember) => ({ ...currentMember, relationship }))}><SelectTrigger id={`member-relationship-${member.localId}`} className="w-full"><SelectValue /></SelectTrigger><SelectContent>{FAMILY_MEMBER_RELATIONSHIPS.map((relationship) => <SelectItem key={relationship} value={relationship}>{relationship}</SelectItem>)}</SelectContent></Select></Field>
                       </div>
                       <fieldset className="space-y-2">
@@ -356,15 +564,15 @@ export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
                 ))}
               </FieldGroup>
               {formMessage ? <Alert variant="destructive" className="mt-5"><AlertTitle>No se pudo guardar</AlertTitle><AlertDescription>{formMessage}</AlertDescription></Alert> : null}
-              <div className="mt-6 flex flex-col-reverse justify-end gap-2 sm:flex-row"><SheetClose asChild><Button variant="outline" type="button">Cancelar</Button></SheetClose><Button type="submit" disabled={isSaving}>{isSaving ? "Guardando..." : "Guardar familia"}</Button></div>
+              <div className="mt-6 flex flex-col-reverse justify-end gap-2 sm:flex-row"><SheetClose asChild><Button variant="outline" type="button">Cancelar</Button></SheetClose><Button type="submit" disabled={isSaving}>{submitLabel}</Button></div>
             </form>
           </SheetContent>
         </Sheet>
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Filtrar familias">
-        <Button variant={filter === "all" ? "secondary" : "outline"} size="sm" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>Todas ({families.length})</Button>
-        {neighborhoods.map((neighborhood) => <Button key={neighborhood} variant={filter === neighborhood ? "secondary" : "outline"} size="sm" aria-pressed={filter === neighborhood} onClick={() => setFilter(neighborhood)}>{neighborhood} ({families.filter((family) => family.neighborhood === neighborhood).length})</Button>)}
+        <Button variant={filter === "all" ? "secondary" : "outline"} size="sm" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>Todas ({allFamilies.length})</Button>
+        {neighborhoods.map((neighborhood) => <Button key={neighborhood} variant={filter === neighborhood ? "secondary" : "outline"} size="sm" aria-pressed={filter === neighborhood} onClick={() => setFilter(neighborhood)}>{neighborhood} ({allFamilies.filter((family) => family.neighborhood === neighborhood).length})</Button>)}
         <Button variant={filter === "alerts" ? "secondary" : "outline"} size="sm" aria-pressed={filter === "alerts"} onClick={() => setFilter("alerts")}>Con alertas ({alertCount})</Button>
       </div>
 
@@ -373,13 +581,36 @@ export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
           {visibleFamilies.map((family) => {
             const missingCount = family.members.reduce((total, member) => total + member.missingDocuments.length, 0);
             const referencePerson = family.members.find((member) => member.id === family.referencePersonId);
+            const offlineOperation = familyOperations.find((operation) => operation.resourceId === family.id);
+            let offlineVariant: "secondary" | "warning" | "destructive" = "secondary";
+
+            if (offlineOperation?.status === "conflict") {
+              offlineVariant = "warning";
+            }
+
+            if (offlineOperation?.status === "error") {
+              offlineVariant = "destructive";
+            }
+
+            let operationToEdit: OfflineOperation | undefined;
+
+            if (offlineOperation && (offlineOperation.status === "conflict" || offlineOperation.status === "error")) {
+              operationToEdit = offlineOperation;
+            }
+
+            function openOfflineDraftEditor() {
+              if (operationToEdit) {
+                editOfflineFamily(operationToEdit);
+              }
+            }
+
             return (
               <Card key={family.id} size="sm">
                 <CardContent className="flex flex-col gap-4">
                   <div className="flex items-start gap-3">
                     <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground"><HugeiconsIcon icon={UserMultipleIcon} strokeWidth={1.8} className="size-6" /></span>
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2"><h2 className="font-display text-base font-semibold">{family.name}</h2><Badge variant={missingCount ? "warning" : "success"}>{missingCount ? `${missingCount} faltantes` : "Documentación completa"}</Badge></div>
+                      <div className="flex flex-wrap items-center gap-2"><h2 className="font-display text-base font-semibold">{family.name}</h2><Badge variant={missingCount ? "warning" : "success"}>{missingCount ? `${missingCount} faltantes` : "Documentación completa"}</Badge>{offlineOperation ? <Badge variant={offlineVariant}>{offlineStatusLabel(offlineOperation)}</Badge> : null}</div>
                       <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><HugeiconsIcon icon={Location01Icon} strokeWidth={1.8} />{family.neighborhood} · {family.address}</p>
                     </div>
                   </div>
@@ -389,15 +620,17 @@ export function FamilyRegistry({ initialFamilies }: FamilyRegistryProps) {
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     {family.contactPhone ? <Button variant="soft" size="sm" asChild><a href={`tel:${family.contactPhone.replace(/[^\d+]/g, "")}`}><HugeiconsIcon icon={Call02Icon} strokeWidth={1.8} data-icon="inline-start" />{family.contactPhone}</a></Button> : <span className="text-xs text-muted-foreground">Sin teléfono de contacto</span>}
+                    {operationToEdit ? <Button variant="outline" size="sm" onClick={openOfflineDraftEditor}>Corregir borrador</Button> : null}
                     <Button size="sm" onClick={() => setSelectedFamily(family)}>Ver ficha familiar<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" /></Button>
                   </div>
+                  {offlineOperation?.message ? <p role="status" className="text-sm text-muted-foreground">{offlineOperation.message}</p> : null}
                 </CardContent>
               </Card>
             );
           })}
         </section>
       ) : (
-        <Card><CardContent className="py-10 text-center"><h2 className="font-semibold">{families.length ? "No hay resultados" : "Todavía no hay familias registradas"}</h2><p className="mt-1 text-sm text-muted-foreground">{families.length ? "Probá con otro nombre, DNI, barrio o domicilio." : "Creá la primera ficha para iniciar el padrón comunitario."}</p></CardContent></Card>
+        <Card><CardContent className="py-10 text-center"><h2 className="font-semibold">{allFamilies.length ? "No hay resultados" : "Todavía no hay familias registradas"}</h2><p className="mt-1 text-sm text-muted-foreground">{allFamilies.length ? "Probá con otro nombre, DNI, barrio o domicilio." : "Creá la primera ficha para iniciar el padrón comunitario."}</p></CardContent></Card>
       )}
 
       <Card variant="muted" size="sm">

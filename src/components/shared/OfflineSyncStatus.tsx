@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SYNC_MESSAGES } from "@/constants/offline.constant";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import { z } from "zod";
 import {
   listOfflineOperations,
   resolveOfflineConflict,
@@ -15,6 +16,16 @@ import {
   synchronizeOfflineQueue,
 } from "@/services/offline-queue.service";
 import type { OfflineOperation } from "@/types/offline-operation";
+
+const duplicateDniSnapshotSchema = z.object({
+  kind: z.literal("duplicate_dni"),
+  person: z.object({
+    firstName: z.string(),
+    lastName: z.string(),
+    dni: z.string().nullable(),
+    families: z.array(z.object({ name: z.string(), neighborhood: z.string(), address: z.string() })),
+  }),
+});
 
 interface OfflineSyncStatusProps {
   userId: string;
@@ -46,20 +57,42 @@ function operationStatusVariant(status: OfflineOperation["status"]): "warning" |
   return "secondary";
 }
 
-function operationStatusLabel(status: OfflineOperation["status"]) {
-  if (status === "conflict") {
+function operationStatusLabel(operation: OfflineOperation) {
+  if (operation.status === "conflict" && operation.resource === "families" && operation.operation === "create") {
+    return "Conflicto de DNI";
+  }
+
+  if (operation.status === "conflict") {
     return "Conflicto";
   }
 
-  if (status === "error") {
+  if (operation.status === "error") {
     return "Requiere atención";
   }
 
-  if (status === "syncing") {
+  if (operation.status === "syncing") {
     return "Sincronizando";
   }
 
   return "Pendiente";
+}
+
+function duplicateDniMessage(operation: OfflineOperation) {
+  const snapshot = duplicateDniSnapshotSchema.safeParse(operation.remoteSnapshot);
+
+  if (!snapshot.success) {
+    return "El padrón ya contiene una persona con un DNI de esta ficha.";
+  }
+
+  const person = snapshot.data.person;
+  const registeredFamilies = person.families.map((family) => family.name).join(", ");
+  let message = `El DNI ${person.dni ?? "sin informar"} ya pertenece a ${person.firstName} ${person.lastName}.`;
+
+  if (registeredFamilies) {
+    message = `${message} Figura en: ${registeredFamilies}.`;
+  }
+
+  return message;
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -202,24 +235,28 @@ export function OfflineSyncStatus({ userId, sessionExpiresAt, onQueueStatusChang
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="font-medium">Cambio de {resourceLabel(operation.resource)}</p>
                 <Badge variant={operationStatusVariant(operation.status)}>
-                  {operationStatusLabel(operation.status)}
+                  {operationStatusLabel(operation)}
                 </Badge>
               </div>
               {operation.message ? <p className="mt-2 text-sm text-muted-foreground">{operation.message}</p> : null}
               {operation.status === "conflict" ? (
                 <div className="mt-3 space-y-3">
-                  <p className="text-sm">Otra persona actualizó este registro. Elegí qué versión conservar.</p>
+                  <p className="text-sm">{operation.resource === "families" && operation.operation === "create" ? duplicateDniMessage(operation) : "Otra persona actualizó este registro. Elegí qué versión conservar."}</p>
                   {operation.remoteSnapshot ? (
                     <pre className="max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs whitespace-pre-wrap break-all">{JSON.stringify(operation.remoteSnapshot, null, 2)}</pre>
                   ) : null}
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => void resolveConflict(operation.operationId, "local")} disabled={!isOnline || isSyncing}>
-                      Conservar mi cambio
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => void resolveConflict(operation.operationId, "server")} disabled={!isOnline || isSyncing}>
-                      Usar versión del servidor
-                    </Button>
-                  </div>
+                  {operation.resource === "families" && operation.operation === "create" ? (
+                    <Button asChild size="sm" variant="outline"><a href="/familias">Abrir padrón para corregir el borrador</a></Button>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" onClick={() => void resolveConflict(operation.operationId, "local")} disabled={!isOnline || isSyncing}>
+                        Conservar mi cambio
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => void resolveConflict(operation.operationId, "server")} disabled={!isOnline || isSyncing}>
+                        Usar versión del servidor
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ) : null}
               {operation.status === "error" ? (

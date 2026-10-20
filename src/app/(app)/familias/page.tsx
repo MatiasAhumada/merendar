@@ -43,5 +43,9 @@ export default async function FamiliesPage() {
     })),
   }));
 
-  return <FamilyRegistry initialFamilies={families} />;
+  return <FamilyRegistry
+    initialFamilies={families}
+    userId={session.user.id}
+    sessionExpiresAt={session.expiresAt.toISOString()}
+  />;
 }

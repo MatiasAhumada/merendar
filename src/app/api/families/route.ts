@@ -1,4 +1,3 @@
-import { FamilyDocumentType } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";
@@ -6,29 +5,7 @@ import { familyService } from "@/server/services/family.service";
 import { requireFamilyAccess } from "@/server/services/family-access";
 import { isSameOriginRequest } from "@/server/services/origin.service";
 import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
-
-const personSchema = z.object({
-  firstName: z.string().trim().min(1, "Ingresá el nombre").max(80),
-  lastName: z.string().trim().min(1, "Ingresá el apellido").max(80),
-  dni: z.string().trim().regex(/^\d{7,8}$/, "Ingresá un DNI de 7 u 8 números").optional(),
-  email: z.string().trim().toLowerCase().pipe(z.email("Ingresá un email válido")).optional(),
-  phone: z.string().trim().max(40).transform((phone) => phone || undefined).optional(),
-  relationship: z.string().trim().min(1).max(40),
-  missingDocuments: z.array(z.enum(FamilyDocumentType)).max(5),
-}).strict();
-const createFamilySchema = z.object({
-  operationId: z.uuid(),
-  name: z.string().trim().min(2, "Ingresá el nombre del grupo familiar").max(120),
-  neighborhood: z.string().trim().min(2, "Seleccioná un barrio").max(100),
-  address: z.string().trim().min(2, "Ingresá el domicilio").max(180),
-  contactPhone: z.string().trim().max(40).transform((phone) => phone || undefined).optional(),
-  contactEmail: z.string().trim().toLowerCase().pipe(z.email("Ingresá un email válido")).optional(),
-  referenceMemberIndex: z.number().int().min(0),
-  members: z.array(personSchema).min(1, "Agregá al menos una persona").max(20),
-}).strict().refine((family) => family.referenceMemberIndex < family.members.length, {
-  message: "Elegí una persona referente del grupo",
-  path: ["referenceMemberIndex"],
-});
+import { createFamilyRequestSchema } from "@/validations/family.validation";
 const searchSchema = z.object({
   search: z.string().trim().max(100).optional(),
   neighborhood: z.string().trim().max(100).optional(),
@@ -86,7 +63,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: { message: "El cuerpo de la solicitud no es válido" } }, { status: 400, headers: privateHeaders });
     }
 
-    const parsedInput = createFamilySchema.safeParse(body);
+    const parsedInput = createFamilyRequestSchema.safeParse(body);
 
     if (!parsedInput.success) {
       return NextResponse.json({ error: { message: "Revisá los campos del formulario", details: parsedInput.error.flatten().fieldErrors } }, { status: 400, headers: privateHeaders });

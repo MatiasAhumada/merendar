@@ -5,6 +5,7 @@ import { AUTH } from "@/constants/auth.constant";
 import { authService } from "@/server/services/auth.service";
 import { isSameOriginRequest } from "@/server/services/origin.service";
 import { createSynchronizationHandlers, synchronizationService } from "@/server/services/synchronization.service";
+import { familyPayloadSchema } from "@/validations/family.validation";
 import {
   SynchronizationConflictError,
   SynchronizationDependencyError,
@@ -63,6 +64,22 @@ export async function POST(request: NextRequest) {
 
   if (parsedOperation.data.userId !== session.user.id) {
     return errorResponse(403, "account_changed", "El cambio pertenece a otra cuenta y no se enviará con este usuario.");
+  }
+
+  if (parsedOperation.data.resource === "families") {
+    const baseVersionValidation = z.null().safeParse(parsedOperation.data.baseVersion);
+
+    if (parsedOperation.data.operation !== "create" || !baseVersionValidation.success) {
+      return errorResponse(400, "invalid_family_operation", "El padrón solo permite sincronizar altas nuevas.");
+    }
+
+    const parsedFamilyPayload = familyPayloadSchema.safeParse(parsedOperation.data.payload);
+
+    if (!parsedFamilyPayload.success) {
+      return errorResponse(400, "invalid_family_payload", "Revisá los datos de la familia antes de sincronizar.", {
+        details: parsedFamilyPayload.error.flatten().fieldErrors,
+      });
+    }
   }
 
   const handlers = createSynchronizationHandlers();

@@ -46,6 +46,8 @@ interface AppShellProps {
   sessionExpiresAt: string;
 }
 
+const offlineFamilyRoles: UserRole[] = [UserRole.PRESIDENTE, UserRole.SECRETARIA];
+
 export function AppShell({ children, user, sessionExpiresAt }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -57,6 +59,14 @@ export function AppShell({ children, user, sessionExpiresAt }: AppShellProps) {
   const isOnline = useNetworkStatus();
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
   const navigation = PRIMARY_NAVIGATION.filter((item) => item.href !== ROUTES.USERS || user.role === UserRole.PRESIDENTE);
+  const canCaptureFamiliesOffline = pathname === ROUTES.FAMILIES &&
+    offlineFamilyRoles.includes(user.role) && Date.now() < Date.parse(sessionExpiresAt);
+  let pageContent = children;
+
+  if (!isOnline && !canCaptureFamiliesOffline) {
+    pageContent = <OfflineAccessNotice />;
+  }
+
   const onQueueStatusChange = useCallback((count: number, loaded: boolean, readError: boolean) => {
     setPendingOperationsCount(count);
     setQueueLoaded(loaded);
@@ -195,7 +205,7 @@ export function AppShell({ children, user, sessionExpiresAt }: AppShellProps) {
         />
 
         <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 pb-28 sm:px-6 lg:px-8 lg:py-8">
-          {isOnline ? children : <OfflineAccessNotice />}
+          {pageContent}
         </main>
 
         <nav

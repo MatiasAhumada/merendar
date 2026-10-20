@@ -8,6 +8,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { GET, POST } from "@/app/api/families/route";
 import { PATCH } from "@/app/api/families/[id]/route";
+import { POST as synchronizeOperation } from "@/app/api/synchronizations/route";
 
 const createdFamilySchema = z.object({
   family: z.object({
@@ -27,6 +28,13 @@ const createdFamilySchema = z.object({
 });
 const familyListSchema = z.object({ families: z.array(z.object({ id: z.string(), name: z.string(), members: z.array(z.object({ person: z.object({ dni: z.string().nullable() }) })) })) });
 const errorSchema = z.object({ error: z.object({ message: z.string(), details: z.record(z.string(), z.array(z.string())).optional() }) });
+const synchronizationResponseSchema = z.object({
+  operationId: z.uuid(),
+  resourceVersion: z.number(),
+  replayed: z.boolean(),
+  result: z.object({ resourceId: z.string(), name: z.string() }),
+});
+const synchronizationErrorSchema = z.object({ error: z.object({ code: z.string() }) });
 
 function createRequest(url: string, method: string, token: string, body?: unknown, origin = "http://localhost:3000") {
   const headers = new Headers({ origin, host: "localhost:3000", cookie: `merendar_session=${token}` });
@@ -47,7 +55,11 @@ test("family registry persists records, rejects duplicate identities and enforce
   const suffix = randomBytes(10).toString("hex");
   const userIds: string[] = [];
   const sessionTokens: string[] = [];
-  const dnis = [`${(10_000_000 + Number.parseInt(suffix.slice(0, 7), 16) % 90_000_000).toString()}`, `${(10_000_000 + Number.parseInt(suffix.slice(7, 14), 16) % 90_000_000).toString()}`];
+  const dnis = [
+    `${(10_000_000 + Number.parseInt(suffix.slice(0, 7), 16) % 90_000_000).toString()}`,
+    `${(10_000_000 + Number.parseInt(suffix.slice(7, 14), 16) % 90_000_000).toString()}`,
+    `${(10_000_000 + Number.parseInt(suffix.slice(14, 20), 16) % 90_000_000).toString()}`,
+  ];
   const users = await Promise.all([
     prisma.user.create({ data: { email: `family-president-${suffix}@example.test`, username: `family-president-${suffix}`, name: "Family Test President", role: UserRole.PRESIDENTE } }),
     prisma.user.create({ data: { email: `family-secretary-${suffix}@example.test`, username: `family-secretary-${suffix}`, name: "Family Test Secretary", role: UserRole.SECRETARIA } }),
@@ -164,6 +176,80 @@ test("family registry persists records, rejects duplicate identities and enforce
 
     const crossOriginResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, familyInput, "https://untrusted.invalid"));
     assert.equal(crossOriginResponse.status, 403);
+
+    const offlineFamilyId = randomUUID();
+    const offlineOperation = {
+      operationId: randomUUID(),
+      userId: users[0].id,
+      resource: "families",
+      resourceId: offlineFamilyId,
+      operation: "create",
+      baseVersion: null,
+      dependencies: [],
+      payload: {
+        name: `Offline Family ${suffix}`,
+        neighborhood: "Villa Nueva",
+        address: "Pasaje de prueba 12",
+        referenceMemberIndex: 0,
+        members: [{ firstName: "Offline", lastName: "Prueba", dni: dnis[2], relationship: "Referente", missingDocuments: [] }],
+      },
+    };
+    const synchronizedResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineOperation));
+    assert.equal(synchronizedResponse.status, 200);
+    assert.match(synchronizedResponse.headers.get("cache-control") ?? "", /no-store/);
+    const parsedSynchronization = synchronizationResponseSchema.safeParse(await synchronizedResponse.json());
+    assert.equal(parsedSynchronization.success, true);
+
+    if (!parsedSynchronization.success) {
+      assert.fail("La sincronización no confirmó el alta de la familia");
+    }
+
+    assert.equal(parsedSynchronization.data.result.resourceId, offlineFamilyId);
+    assert.equal(parsedSynchronization.data.replayed, false);
+    const replayedResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineOperation));
+    const parsedReplay = synchronizationResponseSchema.safeParse(await replayedResponse.json());
+    assert.equal(replayedResponse.status, 200);
+    assert.equal(parsedReplay.success, true);
+
+    if (!parsedReplay.success) {
+      assert.fail("El reintento no devolvió el recibo original de la familia");
+    }
+
+    assert.equal(parsedReplay.data.replayed, true);
+    assert.equal(await prisma.family.count({ where: { id: offlineFamilyId } }), 1);
+    assert.equal(await prisma.person.count({ where: { dni: dnis[2] } }), 1);
+
+    const duplicateOfflineOperation = {
+      ...offlineOperation,
+      operationId: randomUUID(),
+      userId: users[1].id,
+      resourceId: randomUUID(),
+      payload: {
+        ...offlineOperation.payload,
+        name: `Offline Duplicate ${suffix}`,
+        members: [{ firstName: "Different", lastName: "Persona", dni: dnis[0], relationship: "Referente", missingDocuments: [] }],
+      },
+    };
+    const duplicateOfflineResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", secretaryToken, duplicateOfflineOperation));
+    const duplicateOfflineBody: unknown = await duplicateOfflineResponse.json();
+    const parsedDuplicateOffline = synchronizationErrorSchema.safeParse(duplicateOfflineBody);
+    assert.equal(duplicateOfflineResponse.status, 409);
+    assert.equal(parsedDuplicateOffline.success, true);
+
+    if (!parsedDuplicateOffline.success) {
+      assert.fail("La colisión de DNI no incluyó un estado de conflicto");
+    }
+
+    assert.equal(parsedDuplicateOffline.data.error.code, "version_conflict");
+    assert.equal(await prisma.family.count({ where: { name: `Offline Duplicate ${suffix}` } }), 0);
+
+    const forbiddenSync = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", treasurerToken, {
+      ...offlineOperation,
+      operationId: randomUUID(),
+      userId: users[2].id,
+      resourceId: randomUUID(),
+    }));
+    assert.equal(forbiddenSync.status, 403);
   } finally {
     const familyRecords = await prisma.family.findMany({ where: { createdById: { in: userIds } }, select: { members: { select: { personId: true } } } });
     const personIds = [...new Set(familyRecords.flatMap((family) => family.members.map((member) => member.personId)))];

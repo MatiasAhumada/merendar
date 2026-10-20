@@ -462,6 +462,26 @@ export async function retryOfflineOperation(userId: string, operationId: string)
   await synchronizeOfflineQueue(userId);
 }
 
+export async function updateOfflineOperationPayload(userId: string, operationId: string, payload: JsonValue) {
+  const operations = await listOfflineOperations(userId);
+  const selectedOperation = operations.find((operation) => operation.operationId === operationId);
+
+  if (!selectedOperation || (selectedOperation.status !== "error" && selectedOperation.status !== "conflict")) {
+    throw new OfflineQueueError("Solo se pueden corregir cambios con error o conflicto.");
+  }
+
+  await updateOperation(userId, operationId, (operation) => ({
+    ...operation,
+    payload,
+    status: "pending",
+    attempts: 0,
+    leaseExpiresAt: null,
+    message: null,
+    remoteVersion: null,
+    remoteSnapshot: null,
+  }));
+}
+
 export async function resolveOfflineConflict(userId: string, operationId: string, resolution: "local" | "server") {
   const operations = await listOfflineOperations(userId);
   const selectedOperation = operations.find((operation) => operation.operationId === operationId);
