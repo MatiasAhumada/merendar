@@ -1,0 +1,52 @@
+# Matriz provisional de responsabilidades y acceso
+
+> Estado: borrador de trabajo, no aprobado por la organización. COD-1454 informa que las fotos del cliente todavía no están adjuntas. No atribuir tareas ni habilitar permisos nuevos a partir de esta matriz. Completar las fuentes pendientes y resolver las dudas antes de considerar cerrada la definición.
+
+## Alcance y lectura
+
+Esta matriz separa tres tipos de evidencia:
+
+- **Confirmado en el ticket:** requisito o antecedente expresamente indicado en COD-1454. La entrevista inicial se menciona en el ticket, pero su archivo o transcripción no está disponible en el material revisado.
+- **Comportamiento actual de la app:** capacidad observable en el código y la documentación del repositorio. Describe el producto implementado; no prueba por sí sola que la organización haya aprobado esa responsabilidad.
+- **Pendiente de confirmar:** función, acceso o límite que no debe resolverse por inferencia. No habilitarlo hasta contar con fuente del cliente o una decisión explícita.
+
+La matriz describe el alcance actual de datos de cada módulo, no una segmentación de registros por persona. No se encontró una regla documentada que limite los datos de un rol a familias, períodos o documentos individuales.
+
+## Matriz por rol
+
+| Rol | Responsabilidad / tarea | Módulo y vista actual | Acción y alcance de datos actual | Online / offline | Fuente y estado |
+|---|---|---|---|---|---|
+| Presidencia | Administrar cuentas de usuario. El ticket conserva esta exclusividad. | Usuarios (`/usuarios`) | Crear, activar y desactivar cuentas; elegir uno de los cinco roles del modelo. El endpoint y la página restringen estas operaciones a presidencia. | Requiere sesión y servidor online. | Confirmado en COD-1454, alcance y aceptación 5; comportamiento actual en `src/app/(app)/usuarios/page.tsx`, `src/app/api/users/route.ts`, `src/app/api/users/[id]/route.ts`. La administración se atribuye a presidencia, no a otros cargos. |
+| Presidencia | Consultar el resumen operativo y operar el padrón familiar. | Inicio (`/`) y Familias (`/familias`) | El resumen muestra métricas operativas; el padrón permite consultar y mantener los registros de familias e integrantes. El acceso implementado corresponde a presidencia y secretaría; no hay alcance por registro definido. | Con sesión válida y vista cargada se admiten borradores offline del padrón; leer datos privados requiere servidor. | Comportamiento actual: `src/constants/dashboard.constant.ts`, `src/server/services/dashboard-access.ts`, `src/app/(app)/familias/page.tsx`, `docs/offline.md`. La asignación organizativa de tareas requiere fotos/entrevista. |
+| Presidencia | Registrar beneficiarios y preparar planillas para firma en papel. | Registro (`/entrega`) | Registrar personas por período y emitir/descargar una planilla versionada del padrón. La firma se hace en papel; la app no captura trazos biométricos. | El registro admite cola offline con sesión vigente y vista ya abierta. Emitir o descargar una planilla requiere conexión; una planilla descargada puede imprimirse sin conexión. | Flujo de papel confirmado en COD-1454, alcance; funciones actuales en `docs/delivery.md` y `src/server/services/record-access.ts`. La responsabilidad de presidencia está mencionada en el ticket como rutina según la entrevista aún no disponible. |
+| Presidencia | Gestionar solicitudes, cupos, recepciones, remitos y documentos de mercadería. | Módulos (`/mercaderia`) | Consultar y registrar entidades del período, y consultar/descargar comprobantes privados. No equivale a aprobar rendiciones ni asigna funciones financieras adicionales. | Las altas admiten cola offline con sesión vigente y vista abierta; lectura y descarga privadas requieren servidor. | Comportamiento actual: `docs/merchandise.md`, `docs/offline.md`. Atribución organizativa pendiente de las fotos y entrevista. |
+| Presidencia | Preparar o revisar documentación de rendición. | Rendiciones dentro de `/mercaderia` | La app permite adjuntar PDF y realizar una revisión manual de rendición; la revisión no declara validez oficial ni confirma firmas. | La carga puede quedar en cola offline con sesión y vista abiertas; la revisión requiere servidor online. | `docs/delivery.md` documenta el comportamiento actual provisional para presidencia y secretaría. Las fotos deben confirmar quién prepara y quién revisa; no se presume separación ni aprobación general. |
+| Secretaría | Registrar habitualmente junto con presidencia. | Familias, Registro y Módulos | Las capacidades de consulta y escritura actualmente habilitadas para presidencia y secretaría son las descritas arriba. El acceso a usuarios no está habilitado para secretaría. | Según cada módulo descrito arriba. | COD-1454 indica esta práctica según la entrevista; la entrevista no está adjunta. Comportamiento actual en `docs/delivery.md`, `docs/merchandise.md` y `src/constants/navigation.constant.ts`. |
+| Secretaría | Preparar o revisar documentación de rendición. | Rendiciones dentro de `/mercaderia` | Puede cargar y revisar documentación según la implementación actual. No se concluye que tenga autoridad financiera o de aprobación más amplia. | Carga offline pendiente de sincronización; revisión online. | Comportamiento actual en `docs/delivery.md`; confirmación organizativa pendiente de las fotos. |
+| Tesorería | Tarea, vista, consulta y acción propias del cargo. | Sin módulo habilitado en la navegación actual. | No tiene métricas del dashboard ni acciones operativas habilitadas en la app actual. No se define acceso a documentación financiera, rendiciones ni datos privados. | No aplica hasta definir tareas y permisos respaldados. | Rol existente en `prisma/schema.prisma` y `src/constants/user-role.constant.ts`; no hay atribuciones en COD-1454 ni acceso habilitado en `src/constants/navigation.constant.ts` y `src/constants/dashboard.constant.ts`. Pendiente. |
+| Vocalía | Tarea, vista, consulta y acción propias del cargo. | Sin módulo habilitado en la navegación actual. | No tiene métricas del dashboard ni acciones operativas habilitadas en la app actual. No se define alcance de datos. | No aplica hasta definir tareas y permisos respaldados. | Rol existente en `prisma/schema.prisma` y `src/constants/user-role.constant.ts`; no hay atribuciones en COD-1454 ni acceso habilitado en `src/constants/navigation.constant.ts` y `src/constants/dashboard.constant.ts`. Pendiente. |
+| Revisión de cuentas | Alcance de revisión, documentación y eventual preparación/revisión. | Sin módulo habilitado en la navegación actual. | No tiene métricas del dashboard ni acciones operativas habilitadas en la app actual. No se equipara el nombre del cargo con aprobación general del sistema ni con acceso automático a datos financieros. | No aplica hasta definir tareas y permisos respaldados. | Rol existente en `prisma/schema.prisma` y `src/constants/user-role.constant.ts`; COD-1454 prohíbe asumir funciones por el nombre del cargo. Tarea, datos y vista pendientes de fotos/decisión explícita. |
+
+## Inicio de sesión, navegación y estados sin acceso
+
+- Los cinco roles están representados en el modelo y tienen una etiqueta de interfaz. El inicio de sesión acepta cuentas activas; después de autenticarse, la app dirige a Inicio (`/`). Fuentes: `prisma/schema.prisma`, `src/constants/user-role.constant.ts`, `src/app/login/page.tsx`.
+- Inicio muestra el nombre del rol. Presidencia y secretaría ven las métricas y accesos operativos implementados. Los demás roles reciben el estado “Resumen operativo no habilitado para este rol” y “No hay accesos operativos habilitados para este rol”, sin datos de otros roles. Fuente: `src/app/(app)/page.tsx`, `src/server/services/dashboard-access.ts`.
+- La navegación actual muestra Familias, Registro y Módulos a presidencia y secretaría, Usuarios solo a presidencia, e Inicio a los cinco roles. La autorización de datos se vuelve a comprobar en servidor; que un enlace sea visible no autoriza una operación. Fuente: `src/constants/navigation.constant.ts`, handlers y servicios indicados arriba.
+- Sin sesión, las rutas privadas redirigen a Login. Sin conexión no se abre una sesión nueva ni se recuperan vistas privadas tras recargar. Las capturas offline disponibles son borradores ligados a la cuenta y a una sesión vigente; no implican permisos offline nuevos. Fuente: `docs/authentication.md`, `docs/offline.md`.
+- Para Tesorería, Vocalía y Revisión de cuentas, el estado vacío actual es deliberado hasta que una fuente defina un destino o tarea. No agregar accesos, métricas ni instrucciones operativas por inferencia.
+
+## Flujo de planilla y firmas
+
+El flujo confirmado por COD-1454 se conserva así: descargar la planilla de beneficiarios → imprimir → firmar manualmente en papel → digitalizar por medios propios → subir el PDF desde celular o PC. La app no incorpora firma digital ni seguimiento de entregas. Las funciones de carga y revisión documental que ya existen se describen como comportamiento del producto; las fotos aún deben confirmar a qué roles corresponden.
+
+## Fuentes pendientes y decisiones necesarias
+
+1. Adjuntar e identificar todas las fotos anunciadas por el cliente. Registrar archivo y página/foto por cada responsabilidad atribuida, incluida cualquier parte ilegible.
+2. Adjuntar o identificar la entrevista inicial citada en COD-1454 para verificar las prácticas de presidencia y secretaría.
+3. Para cada rol, resolver con fuente: responsabilidades, tareas, vista y destino inicial; lectura de listados y de datos privados; altas/cambios; descargas/cargas PDF; preparación y revisión documental; disponibilidad offline; y límites de alcance de datos.
+4. Aclarar las funciones de Tesorería, Vocalía y Revisión de cuentas antes de habilitarles vistas o datos. Resolver explícitamente cualquier separación entre preparar, registrar, revisar y aprobar.
+5. Mantener la regla de que solo presidencia administra usuarios y el flujo de firma manual, salvo cambio explícito del usuario.
+
+## Estado de aceptación
+
+Esta matriz es una base trazable del comportamiento actual y registra preguntas que impiden conceder permisos por suposición. No satisface el criterio de revisión de fotos ni constituye una definición de acceso aprobada. COD-1454 no debe considerarse completo hasta incorporar y revisar las fuentes faltantes, resolver las atribuciones pendientes y actualizar esta matriz. COD-1455 puede usar los hechos de implementación documentados, pero debe esperar las decisiones organizativas aún no respaldadas.

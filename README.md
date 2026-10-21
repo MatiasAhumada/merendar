@@ -64,4 +64,6 @@ El modelo, los permisos y el flujo de recepción de mercadería están documenta
 
 Los registros de beneficiarios, planillas versionadas y permisos están documentados en [docs/delivery.md](docs/delivery.md).
 
+La matriz provisional de responsabilidades y accesos, incluidas sus fuentes pendientes, está en [docs/role-access-matrix.md](docs/role-access-matrix.md).
+
 Las pruebas de integración requieren PostgreSQL local de desarrollo (`DATABASE_URL` con nombre de base que incluya `dev`, `test` o `local`).
