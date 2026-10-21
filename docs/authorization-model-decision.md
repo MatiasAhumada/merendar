@@ -1,6 +1,6 @@
 # ADR-001: Gobierno de roles y permisos
 
-- Estado: recomendación técnica para COD-1455; pendiente de aceptación explícita de la organización.
+- Estado: aceptada por el usuario el 2026-10-21 para la implementación de COD-1456.
 - Alcance: preparar COD-1456 y COD-1457. No cambia accesos, cuentas, pantallas ni el esquema vigente.
 - Contexto: COD-1420 y COD-1421 están finalizados; COD-1454 documenta las responsabilidades y los límites operativos.
 
@@ -22,9 +22,9 @@ La aplicación no segmenta datos por persona, familia o período para estos perm
 
 ## Recomendación para la siguiente implementación
 
-Proponer roles estables con capacidades configurables por rol desde una fuente central en servidor. La propuesta responde al pedido de poder ampliar responsabilidades futuras con control de acceso; mantener el catálogo en código limita las opciones a acciones que el producto realmente implementa. La pantalla permitiría asignar capacidades existentes, no crear módulos, acciones ni permisos nuevos. Las excepciones por usuario, roles personalizados, herencia entre roles y múltiples roles quedan fuera de alcance mientras no exista una necesidad comprobada.
+Usar roles estables con capacidades configurables por rol desde una fuente central en servidor. Presidencia acepta poder habilitar o quitar capacidades operativas existentes para cada rol, con efecto para todas las personas que tengan ese rol. El catálogo es cerrado y lo define el producto: la administración no permite crear capacidades, módulos, acciones ni permisos. Cualquier capacidad que se agregue al producto requiere un cambio de código y no aparece como otorgable hasta que esa versión la incluya. Las excepciones por usuario, roles personalizados, herencia entre roles y múltiples roles quedan fuera de alcance mientras no exista una necesidad comprobada.
 
-La organización todavía no aprobó que Presidencia edite capacidades. Pregunta pendiente: **¿La organización acepta que Presidencia pueda habilitar o quitar capacidades operativas existentes para cada uno de los cinco roles, con efecto para todas las personas que tengan ese rol, bajo las protecciones indelegables de esta ADR?** COD-1456 debe mantener la política estática vigente hasta que esta respuesta se registre; no interpretar esta recomendación como autorización.
+La decisión queda aceptada: Presidencia puede habilitar o quitar únicamente capacidades ya incluidas en el catálogo del producto. La confirmación no autoriza crear capacidades desde la interfaz ni asignar acciones que todavía no existan en la aplicación. COD-1456 puede implementar la configuración por rol respetando estas restricciones.
 
 ### Matriz inicial propuesta
 
@@ -47,7 +47,7 @@ Esta matriz refleja los permisos comprobables y la matriz COD-1454. Los permisos
 - Mantener `User.role` como asignación única y los cinco roles estables. Cambiar el rol de una persona cambia su pertenencia; cambiar la política de un rol afecta a todos sus integrantes. No admitir acumulación de permisos entre varios roles.
 - Definir en código un catálogo cerrado y tipado de capacidades con acciones y alcance de datos explícitos. La base de datos puede conceder o retirar solo entradas de ese catálogo. No guardar nombres de permisos arbitrarios ni usar permisos como sustituto de validaciones de propiedad o relaciones de dominio.
 - Resolver los permisos efectivos en un servicio central del servidor a partir de la identidad consultada y la política vigente. Páginas, handlers, servicios, descargas y sincronizaciones llaman esa política. La navegación solo refleja el resultado; ocultar un enlace o pasar por `proxy.ts` no autoriza una operación.
-- Denegar por defecto roles, capacidades o asignaciones ausentes, desconocidos, incompatibles o retirados. Una capacidad nueva nace sin otorgamientos hasta que se evalúe y habilite expresamente. La retirada de una capacidad requiere una migración generada que retire su asignación; nunca reinterpretarla como otra capacidad.
+- Denegar por defecto roles, capacidades o asignaciones ausentes, desconocidos, incompatibles o retirados. La administración solo muestra capacidades incluidas en el catálogo tipado de esa versión; no acepta claves arbitrarias ni permite crear capacidades. Una capacidad incorporada por un cambio de código debe nacer sin otorgamientos hasta que Presidencia la habilite expresamente. La retirada de una capacidad requiere una migración generada que retire su asignación; nunca reinterpretarla como otra capacidad.
 - Mantener `users.manage` y `access-policy.manage` reservadas a Presidencia en una regla de servidor fuera de la tabla editable de capacidades. Rechazar cambios que dejen sin al menos una cuenta activa de Presidencia con ambas capacidades. Validar el conjunto completo antes de guardar una actualización atómica; no permitir que una solicitud del cliente indique su rol efectivo.
 - Registrar las modificaciones de política en un historial append-only con actor, fecha y valores previos/nuevos por rol. No incluir contraseñas, tokens, documentos ni datos personales ajenos al cambio. La política y su historial deben guardarse en una misma transacción.
 - Mantener sesiones de autenticación separadas de permisos. Toda operación protegida vuelve a consultar la sesión y la política desde la base de datos; respuestas y cargas privadas no se almacenan en cachés compartidas. Un cambio se aplica en la siguiente solicitud al servidor, sin requerir que el usuario vuelva a iniciar sesión.
