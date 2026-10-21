@@ -62,6 +62,7 @@ interface WorkbenchData {
 interface DeliveryWorkbenchProps {
   userId: string;
   sessionExpiresAt: string;
+  canWrite: boolean;
 }
 
 const emptyData: WorkbenchData = { periods: [], families: [], records: [], sheets: [] };
@@ -77,7 +78,7 @@ function personLabel(person: DeliveryFamily["members"][number]["person"]) {
   return `${person.firstName} ${person.lastName}`;
 }
 
-export function DeliveryWorkbench({ userId, sessionExpiresAt }: DeliveryWorkbenchProps) {
+export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite }: DeliveryWorkbenchProps) {
   const isOnline = useNetworkStatus();
   const [data, setData] = useState<WorkbenchData>(emptyData);
   const [periodId, setPeriodId] = useState("");
@@ -288,7 +289,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt }: DeliveryWorkbenc
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-        <Card>
+        {canWrite ? <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><HugeiconsIcon icon={PackageIcon} className="text-primary" /> Registrar beneficiario</CardTitle>
             <CardDescription>Los cambios se guardan en el servidor o quedan en la cola local hasta recuperar conexión.</CardDescription>
@@ -341,9 +342,9 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt }: DeliveryWorkbenc
               </Button>
             </form>
           </CardContent>
-        </Card>
+        </Card> : null}
 
-        <Card>
+        {canWrite ? <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><HugeiconsIcon icon={UserGroupIcon} className="text-primary" /> Planilla para firma en papel</CardTitle>
             <CardDescription>Seleccioná personas del padrón. La descarga no depende de confirmar sus entregas ni completar una rendición.</CardDescription>
@@ -375,7 +376,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt }: DeliveryWorkbenc
             </Button>
             {!isOnline ? <p className="text-xs text-muted-foreground">Una planilla ya descargada sigue disponible en tu dispositivo. Para emitir otra, conectate al servidor.</p> : null}
           </CardContent>
-        </Card>
+        </Card> : null}
       </div>
 
       <Card>

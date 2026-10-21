@@ -1,4 +1,3 @@
-import { UserRole } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type { SynchronizationHandler, SubmittedSyncOperation, SyncHandlerResult } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
@@ -224,8 +223,6 @@ async function applyPayload(transaction: Prisma.TransactionClient, operation: Su
 }
 
 export const merchandiseSynchronizationHandler: SynchronizationHandler = {
-  allowedRoles: [UserRole.PRESIDENTE, UserRole.SECRETARIA],
-
   async apply(transaction, operation) {
     if (operation.operation !== "create" || Number.isInteger(operation.baseVersion)) {
       throw new MerchandiseDocumentError("La recepción de mercadería solo admite altas nuevas desde la cola offline.");

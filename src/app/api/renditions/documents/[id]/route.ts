@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { prisma } from "@/lib/prisma";
-import { requireMerchandiseAccess } from "@/server/services/merchandise-access";
+import { requireRenditionReadAccess } from "@/server/services/merchandise-access";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 
 const privateHeaders = { "Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff" };
 
 export async function GET(request: NextRequest, context: RouteContext<"/api/renditions/documents/[id]">) {
   try {
-    await requireMerchandiseAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
+    await requireRenditionReadAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
     const { id } = await context.params;
     const document = await prisma.renditionDocument.findUnique({
       where: { id },

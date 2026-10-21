@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";
 import { familyService } from "@/server/services/family.service";
-import { requireFamilyAccess } from "@/server/services/family-access";
+import { requireFamilyReadAccess, requireFamilyWriteAccess } from "@/server/services/family-access";
 import { isSameOriginRequest } from "@/server/services/origin.service";
 import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
 import { createFamilyRequestSchema } from "@/validations/family.validation";
@@ -25,7 +25,7 @@ function handleError(error: unknown, request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    await requireFamilyAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
+    await requireFamilyReadAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
     const params = searchSchema.safeParse({
       search: request.nextUrl.searchParams.get("search") ?? undefined,
       neighborhood: request.nextUrl.searchParams.get("neighborhood") ?? undefined,
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
       throw new ApiError({ status: 403, message: "La solicitud no pertenece a este sitio" });
     }
 
-    const user = await requireFamilyAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
+    const user = await requireFamilyWriteAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
     let body: unknown;
 
     try {

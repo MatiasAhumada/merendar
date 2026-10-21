@@ -24,6 +24,8 @@ interface RenditionWorkspaceProps {
   userId: string;
   sessionExpiresAt: string;
   onRefresh: () => Promise<void>;
+  canWrite: boolean;
+  canReview: boolean;
 }
 
 const documentTypeSchema = z.enum([
@@ -125,7 +127,7 @@ function createReviewPayload(status: "REVISADA" | "OBSERVADA", notes: string) {
   return { status };
 }
 
-export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefresh }: RenditionWorkspaceProps) {
+export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefresh, canWrite, canReview }: RenditionWorkspaceProps) {
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
   const [selectedPeriodId, setSelectedPeriodId] = useState("");
   const [selectedSheetId, setSelectedSheetId] = useState("");
@@ -338,7 +340,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         <Button asChild size="sm" variant="outline"><a href={`/api/records/sheets/${encodeURIComponent(selectedSheet.id)}`}><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} data-icon="inline-start" /> Descargar para imprimir</a></Button>
       </div> : null}
 
-      {selectedSheet ? <form className="space-y-4 rounded-2xl border p-4" onSubmit={(event) => void submitDocuments(event)}>
+      {canWrite && selectedSheet ? <form className="space-y-4 rounded-2xl border p-4" onSubmit={(event) => void submitDocuments(event)}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="rendition-document-type">Tipo de documento</FieldLabel>
@@ -404,7 +406,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         </ul>
       </section> : <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">Todavía no se guardaron documentos para esta planilla. La falta de un PDF se muestra como documentación pendiente.</p>}
 
-      {selectedRendition ? <div className="space-y-3 rounded-2xl bg-muted/50 p-4">
+      {canReview && selectedRendition ? <div className="space-y-3 rounded-2xl bg-muted/50 p-4">
         <div className="flex items-start gap-3"><HugeiconsIcon icon={CheckmarkCircle01Icon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-primary" /><div><h3 className="font-semibold">Revisión documental manual</h3><p className="mt-1 text-sm text-muted-foreground">La app no verifica firmas ni validez ante el organismo. Revisar registra una actuación manual y no presenta ni cierra la rendición.</p>{selectedRendition.reviewNotes ? <p className="mt-2 text-sm">Observación: {selectedRendition.reviewNotes}</p> : null}</div></div>
         <form className="space-y-3" onSubmit={(event) => void saveReview(event, selectedRendition.id)}>
           <Field>

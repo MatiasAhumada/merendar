@@ -45,17 +45,18 @@ Abrí [http://localhost:3000](http://localhost:3000) e ingresá con la cuenta co
 | `/familias` | Padrón con búsqueda, filtros, ficha y formulario de alta |
 | `/entrega` | Registro de beneficiarios, cola offline y planillas PDF para firma manuscrita |
 | `/mercaderia` | Períodos, solicitudes, cupos aprobados, remitos y comprobantes privados |
+| `/permisos` | Matriz de capacidades por rol, exclusiva de Presidencia |
 
 ## Alcance actual
 
-El padrón, la recepción de mercadería y los registros de beneficiarios persisten en PostgreSQL y admiten captura offline con sincronización idempotente. Las planillas imprimibles guardan una instantánea versionada del padrón; la firma se realiza en papel y la carga del PDF escaneado corresponde a COD-1429. El dashboard sigue mostrando información ilustrativa. El acceso valida cuentas contra PostgreSQL. Las sesiones se almacenan en la base de datos, vencen a las 12 horas y se revocan al cerrar sesión. Las contraseñas se guardan con scrypt; las cookies de sesión son HttpOnly y SameSite=Lax, y usan Secure bajo HTTPS. El proxy realiza una redirección preliminar; páginas y endpoints verifican la sesión en la base de datos.
+El padrón, la recepción de mercadería y los registros de beneficiarios persisten en PostgreSQL y admiten captura offline con sincronización idempotente. Las planillas imprimibles guardan una instantánea versionada del padrón; la firma se realiza en papel y la carga del PDF escaneado corresponde a COD-1429. El dashboard sigue mostrando información ilustrativa. El acceso valida cuentas contra PostgreSQL. Las sesiones se almacenan en la base de datos, vencen a las 12 horas y se revocan al cerrar sesión. Las contraseñas se guardan con scrypt; las cookies de sesión son HttpOnly y SameSite=Lax, y usan Secure bajo HTTPS. El proxy realiza una redirección preliminar; páginas y endpoints verifican la sesión y las capacidades actuales en la base de datos. Presidencia administra la matriz cerrada de capacidades por rol desde `/permisos`; la administración de usuarios y de la política permanece reservada a Presidencia.
 
 ## Validación
 
 ```bash
 pnpm lint
 pnpm build
-ALLOW_AUTH_INTEGRATION_TESTS=true ALLOW_FAMILY_INTEGRATION_TESTS=true ALLOW_SYNC_INTEGRATION_TESTS=true ALLOW_DASHBOARD_INTEGRATION_TESTS=true ALLOW_RENDITION_INTEGRATION_TESTS=true pnpm test:integration
+ALLOW_AUTH_INTEGRATION_TESTS=true ALLOW_FAMILY_INTEGRATION_TESTS=true ALLOW_SYNC_INTEGRATION_TESTS=true ALLOW_DASHBOARD_INTEGRATION_TESTS=true ALLOW_RENDITION_INTEGRATION_TESTS=true ALLOW_ACCESS_POLICY_INTEGRATION_TESTS=true pnpm test:integration
 ```
 
 La estrategia de instalación, caché pública y acceso sin conexión está documentada en [docs/offline.md](docs/offline.md).
@@ -66,7 +67,7 @@ Los registros de beneficiarios, planillas versionadas y permisos están document
 
 La matriz de responsabilidades y accesos, con referencias a la entrevista y al estatuto, está en [docs/role-access-matrix.md](docs/role-access-matrix.md).
 
-La decisión técnica propuesta para evolucionar roles y permisos, pendiente de aceptación organizacional, está en [docs/authorization-model-decision.md](docs/authorization-model-decision.md).
+La decisión técnica aceptada y la matriz de permisos están en [docs/authorization-model-decision.md](docs/authorization-model-decision.md).
 
 La guía en PDF por rol está en [docs/matriz-roles-accesos-cod-1454.pdf](docs/matriz-roles-accesos-cod-1454.pdf).
 

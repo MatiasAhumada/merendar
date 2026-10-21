@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { prisma } from "@/lib/prisma";
 import { familyRepository } from "@/server/repository/family.repository";
-import { requireRecordAccess } from "@/server/services/record-access";
+import { requireRecordReadAccess } from "@/server/services/record-access";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 import apiErrorHandler from "@/utils/handlers/apiError.handler";
 
@@ -10,7 +10,7 @@ const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
 
 export async function GET(request: NextRequest) {
   try {
-    await requireRecordAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
+    await requireRecordReadAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
     const periodId = request.nextUrl.searchParams.get("periodId");
     const [periods, families, records, sheets] = await Promise.all([
       prisma.merchandisePeriod.findMany({

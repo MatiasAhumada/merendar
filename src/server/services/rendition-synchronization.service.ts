@@ -1,4 +1,3 @@
-import { UserRole } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 import type { SynchronizationHandler, SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
@@ -120,7 +119,6 @@ function resultPayload(result: Awaited<ReturnType<typeof applyDocuments>>): Json
 }
 
 export const renditionSynchronizationHandler: SynchronizationHandler = {
-  allowedRoles: [UserRole.PRESIDENTE, UserRole.SECRETARIA],
   async apply(transaction, operation) {
     const parsedPayload = renditionDocumentPayloadSchema.safeParse(operation.payload);
 

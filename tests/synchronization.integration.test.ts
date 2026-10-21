@@ -39,7 +39,6 @@ test("offline synchronization receipts are atomic, idempotent and bound to the o
     payload: { title: "Offline record" },
   };
   const handler: SynchronizationHandler = {
-    allowedRoles: [UserRole.PRESIDENTE, UserRole.SECRETARIA],
     async apply(transaction, submittedOperation) {
       await transaction.loginAttempt.create({ data: { candidateKey: `${candidateKeyPrefix}${submittedOperation.operationId}` } });
       return {
@@ -80,7 +79,6 @@ test("offline synchronization receipts are atomic, idempotent and bound to the o
 
     const conflictingOperation = { ...operation, operationId: randomUUID() };
     const conflictHandler: SynchronizationHandler = {
-      allowedRoles: [UserRole.PRESIDENTE],
       async apply(transaction, submittedOperation) {
         await transaction.loginAttempt.create({ data: { candidateKey: `${candidateKeyPrefix}${submittedOperation.operationId}` } });
         return { type: "conflict", resourceVersion: 4, current: { title: "Server record" } };

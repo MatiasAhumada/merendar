@@ -50,6 +50,7 @@ interface FamilyRegistryProps {
   initialFamilies: FamilyRecord[];
   userId: string;
   sessionExpiresAt: string;
+  canWrite: boolean;
 }
 
 interface FamilyFormMember extends FamilyPersonInput {
@@ -245,7 +246,7 @@ function FamilyDetails({ family, onClose }: { family: FamilyRecord; onClose: () 
   );
 }
 
-export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt }: FamilyRegistryProps) {
+export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canWrite }: FamilyRegistryProps) {
   const [families, setFamilies] = useState(initialFamilies);
   const [offlineOperations, setOfflineOperations] = useState<OfflineOperation[]>([]);
   const [search, setSearch] = useState("");
@@ -488,7 +489,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt }: Fa
           <HugeiconsIcon icon={Search01Icon} strokeWidth={1.8} className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
           <Input aria-label="Buscar familias" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por persona, DNI, barrio o domicilio..." className="pl-11" />
         </div>
-        <Sheet open={isFormOpen} onOpenChange={(open) => { if (open) setIsFormOpen(true); else closeForm(); }}>
+        {canWrite ? <Sheet open={isFormOpen} onOpenChange={(open) => { if (open) setIsFormOpen(true); else closeForm(); }}>
           <SheetTrigger asChild>
             <Button aria-label="Nueva familia" className="w-full sm:w-auto">
               <HugeiconsIcon icon={UserAdd01Icon} strokeWidth={1.8} />
@@ -567,7 +568,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt }: Fa
               <div className="mt-6 flex flex-col-reverse justify-end gap-2 sm:flex-row"><SheetClose asChild><Button variant="outline" type="button">Cancelar</Button></SheetClose><Button type="submit" disabled={isSaving}>{submitLabel}</Button></div>
             </form>
           </SheetContent>
-        </Sheet>
+        </Sheet> : null}
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Filtrar familias">

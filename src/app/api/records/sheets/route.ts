@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { AUTH } from "@/constants/auth.constant";
 import { prisma } from "@/lib/prisma";
-import { requireRecordAccess } from "@/server/services/record-access";
+import { requireRecordWriteAccess } from "@/server/services/record-access";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 import apiErrorHandler from "@/utils/handlers/apiError.handler";
 import { isSameOriginRequest } from "@/server/services/origin.service";
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
       throw new ApiError({ status: 403, message: "La solicitud no pertenece a este sitio" });
     }
 
-    const user = await requireRecordAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
+    const user = await requireRecordWriteAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
     const body = await request.json().catch(() => null);
     const parsedInput = beneficiarySheetSchema.safeParse(body);
 

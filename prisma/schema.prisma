@@ -27,6 +27,7 @@ model User {
   reviewedRenditions Rendition[] @relation("RenditionReviewer")
   renditionDocuments RenditionDocument[] @relation("RenditionDocumentUploader")
   synchronizationReceipts SynchronizationReceipt[]
+  accessPolicyChanges AccessPolicyChange[] @relation("AccessPolicyChangeActor")
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 }
@@ -120,6 +121,42 @@ enum UserRole {
   TESORERIA
   VOCALIA
   REVISION_CUENTAS
+}
+
+enum AccessCapability {
+  DASHBOARD_METRICS_READ
+  FAMILIES_READ
+  FAMILIES_WRITE
+  DELIVERY_READ
+  DELIVERY_WRITE
+  MERCHANDISE_READ
+  MERCHANDISE_WRITE
+  RENDITIONS_READ
+  RENDITIONS_WRITE
+  RENDITIONS_REVIEW
+}
+
+model RoleCapabilityPolicy {
+  role       UserRole
+  capability AccessCapability
+  enabled    Boolean          @default(false)
+  updatedAt  DateTime         @updatedAt
+
+  @@id([role, capability])
+}
+
+model AccessPolicyChange {
+  id             String           @id @default(cuid())
+  actorId        String
+  role           UserRole
+  capability     AccessCapability
+  previousValue  Boolean
+  newValue       Boolean
+  createdAt      DateTime         @default(now())
+  actor          User             @relation("AccessPolicyChangeActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([role, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model AuthSession {

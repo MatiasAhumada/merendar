@@ -1,10 +1,22 @@
 import { z } from "zod";
-import { UserRole } from "@prisma/client";
+import { AccessCapability, UserRole } from "@prisma/client";
+import { INITIAL_ACCESS_POLICY } from "../src/constants/access-policy.constant";
 import { AUTH } from "../src/constants/auth.constant";
 import { prisma } from "../src/lib/prisma";
 import { hashPassword } from "../src/server/services/auth.service";
 
 async function main() {
+  const capabilities = Object.values(AccessCapability);
+  const roles = Object.values(UserRole);
+  await prisma.roleCapabilityPolicy.createMany({
+    data: roles.flatMap((role) => capabilities.map((capability) => ({
+      role,
+      capability,
+      enabled: INITIAL_ACCESS_POLICY[role].includes(capability),
+    }))),
+    skipDuplicates: true,
+  });
+
   const rawEmail = process.env.PRESIDENT_BOOTSTRAP_EMAIL?.trim().toLowerCase() ?? "";
   const rawUsername = process.env.PRESIDENT_BOOTSTRAP_USERNAME?.trim().toLowerCase() ?? "";
   const parsedEmail = rawEmail

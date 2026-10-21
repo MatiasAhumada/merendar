@@ -22,7 +22,6 @@ import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
 import { BRAND } from "@/constants/brand.constant";
 import { ROUTES } from "@/constants/routes";
 import type { AuthenticatedUser } from "@/server/services/auth.service";
-import { UserRole } from "@prisma/client";
 import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import { API_ROUTES } from "@/constants/routes";
@@ -45,11 +44,10 @@ interface AppShellProps {
   children: React.ReactNode;
   user: AuthenticatedUser;
   sessionExpiresAt: string;
+  capabilities: string[];
 }
 
-const offlineCaptureRoles: UserRole[] = [UserRole.PRESIDENTE, UserRole.SECRETARIA];
-
-export function AppShell({ children, user, sessionExpiresAt }: AppShellProps) {
+export function AppShell({ children, user, sessionExpiresAt, capabilities }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -59,9 +57,23 @@ export function AppShell({ children, user, sessionExpiresAt }: AppShellProps) {
   const [queueReadFailed, setQueueReadFailed] = useState(false);
   const isOnline = useNetworkStatus();
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
-  const navigation = PRIMARY_NAVIGATION.filter((item) => item.roles.some((role) => role === user.role));
-  const canCaptureOffline = (pathname === ROUTES.FAMILIES || pathname === ROUTES.DELIVERY || pathname === ROUTES.GOODS) &&
-    offlineCaptureRoles.includes(user.role) && Date.now() < Date.parse(sessionExpiresAt);
+  const navigation = PRIMARY_NAVIGATION.filter((item) => {
+    if (!item.capabilities) {
+      return true;
+    }
+    return item.capabilities.some((capability) => capabilities.includes(capability));
+  });
+  const bottomNavigation = navigation.filter((item) => item.href !== ROUTES.USERS && item.href !== ROUTES.ACCESS_POLICY);
+  const offlineCapabilityByRoute: Record<string, string> = {
+    [ROUTES.FAMILIES]: "families.write",
+    [ROUTES.DELIVERY]: "delivery.write",
+    [ROUTES.GOODS]: "merchandise.write",
+  };
+  const offlineCapability = offlineCapabilityByRoute[pathname];
+  let canCaptureOffline = false;
+  if (offlineCapability) {
+    canCaptureOffline = capabilities.includes(offlineCapability) && Date.now() < Date.parse(sessionExpiresAt);
+  }
   let pageContent = children;
 
   if (!isOnline && !canCaptureOffline) {
@@ -225,7 +237,7 @@ export function AppShell({ children, user, sessionExpiresAt }: AppShellProps) {
           aria-label="Navegación inferior"
           className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-[repeat(auto-fit,minmax(0,1fr))] border-t border-border bg-card/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-lg backdrop-blur lg:hidden"
         >
-          {navigation.map((item) => (
+          {bottomNavigation.map((item) => (
             <Button
               asChild
               key={item.href}

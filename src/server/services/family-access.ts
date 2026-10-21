@@ -1,19 +1,7 @@
-import { UserRole } from "@prisma/client";
-import { authService } from "@/server/services/auth.service";
-import { ApiError } from "@/utils/handlers/apiError.handler";
+import { requireCapability } from "@/server/services/access-policy.service";
 
-export const FAMILY_WRITE_ROLES: UserRole[] = [UserRole.PRESIDENTE, UserRole.SECRETARIA];
+export const requireFamilyReadAccess = (token: string | undefined) =>
+  requireCapability(token, "families.read", "Iniciá sesión para consultar el padrón familiar", "No tenés permiso para consultar el padrón familiar");
 
-export async function requireFamilyAccess(token: string | undefined) {
-  const session = await authService.getSession(token);
-
-  if (!session) {
-    throw new ApiError({ status: 401, message: "Iniciá sesión para consultar el padrón" });
-  }
-
-  if (!FAMILY_WRITE_ROLES.includes(session.user.role)) {
-    throw new ApiError({ status: 403, message: "No tenés permiso para acceder al padrón familiar" });
-  }
-
-  return session.user;
-}
+export const requireFamilyWriteAccess = (token: string | undefined) =>
+  requireCapability(token, "families.write", "Iniciá sesión para modificar el padrón familiar", "No tenés permiso para modificar el padrón familiar");

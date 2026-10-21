@@ -5,6 +5,7 @@ export const ROUTES = {
   GOODS: "/mercaderia",
   LOGIN: "/login",
   USERS: "/usuarios",
+  ACCESS_POLICY: "/permisos",
   OFFLINE: "/offline",
   PWA_MANIFEST: "/manifest.webmanifest",
   SERVICE_WORKER: "/sw.js",
@@ -23,4 +24,5 @@ export const API_ROUTES = {
     SESSION: "/api/session",
   },
   USERS: "/api/users",
+  ACCESS_POLICY: "/api/access-policy",
 } as const;

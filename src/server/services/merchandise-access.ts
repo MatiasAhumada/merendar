@@ -1,19 +1,16 @@
-import { UserRole } from "@prisma/client";
-import { authService } from "@/server/services/auth.service";
-import { ApiError } from "@/utils/handlers/apiError.handler";
+import { requireCapability } from "@/server/services/access-policy.service";
 
-export const MERCHANDISE_WRITE_ROLES: UserRole[] = [UserRole.PRESIDENTE, UserRole.SECRETARIA];
+export const requireMerchandiseReadAccess = (token: string | undefined) =>
+  requireCapability(token, "merchandise.read", "Iniciá sesión para consultar mercadería", "No tenés permiso para consultar mercadería");
 
-export async function requireMerchandiseAccess(token: string | undefined) {
-  const session = await authService.getSession(token);
+export const requireMerchandiseWriteAccess = (token: string | undefined) =>
+  requireCapability(token, "merchandise.write", "Iniciá sesión para gestionar mercadería", "No tenés permiso para gestionar mercadería");
 
-  if (!session) {
-    throw new ApiError({ status: 401, message: "Iniciá sesión para consultar la recepción de mercadería" });
-  }
+export const requireRenditionReadAccess = (token: string | undefined) =>
+  requireCapability(token, "renditions.read", "Iniciá sesión para consultar rendiciones", "No tenés permiso para consultar rendiciones");
 
-  if (!MERCHANDISE_WRITE_ROLES.includes(session.user.role)) {
-    throw new ApiError({ status: 403, message: "Solo presidencia y secretaría pueden gestionar la recepción de mercadería" });
-  }
+export const requireRenditionWriteAccess = (token: string | undefined) =>
+  requireCapability(token, "renditions.write", "Iniciá sesión para cargar documentos de rendición", "No tenés permiso para cargar documentos de rendición");
 
-  return session.user;
-}
+export const requireRenditionReviewAccess = (token: string | undefined) =>
+  requireCapability(token, "renditions.review", "Iniciá sesión para revisar rendiciones", "No tenés permiso para revisar rendiciones");

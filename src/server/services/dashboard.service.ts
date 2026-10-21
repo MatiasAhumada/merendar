@@ -1,12 +1,11 @@
-import "server-only";
 import { UserRole } from "@prisma/client";
 import { dashboardRepository } from "@/server/repository/dashboard.repository";
-import { canViewDashboardMetrics } from "@/server/services/dashboard-access";
+import { hasEffectiveCapability } from "@/server/services/access-policy.service";
 import type { DashboardSummaryResult } from "@/types/dashboard";
 
 export const dashboardService = {
   async getSummary(role: UserRole): Promise<DashboardSummaryResult> {
-    if (!canViewDashboardMetrics(role)) {
+    if (!await hasEffectiveCapability(role, "dashboard.metrics.read")) {
       return { authorized: false };
     }
 

@@ -6,7 +6,6 @@ import {
   UserGroupIcon,
   UserMultipleIcon,
 } from "@hugeicons/core-free-icons";
-import { UserRole } from "@prisma/client";
 import { ROUTES } from "@/constants/routes";
 
 export const DASHBOARD_METRICS = [
@@ -21,34 +20,41 @@ export const DASHBOARD_ACTIONS = [
     description: "Consultar familias",
     href: ROUTES.FAMILIES,
     icon: UserGroupIcon,
-    roles: [UserRole.PRESIDENTE, UserRole.SECRETARIA],
+    capability: "families.read",
   },
   {
     label: "Registro de beneficiarios",
     description: "Planillas para firma manual",
     href: ROUTES.DELIVERY,
     icon: DocumentValidationIcon,
-    roles: [UserRole.PRESIDENTE, UserRole.SECRETARIA],
+    capability: "delivery.read",
   },
   {
     label: "Solicitudes y cupos",
     description: "Consultar módulos",
     href: ROUTES.GOODS,
     icon: PackageIcon,
-    roles: [UserRole.PRESIDENTE, UserRole.SECRETARIA],
+    capability: "merchandise.read",
   },
   {
     label: "Recepciones y remitos",
     description: "Consultar mercadería",
     href: ROUTES.GOODS,
     icon: Archive01Icon,
-    roles: [UserRole.PRESIDENTE, UserRole.SECRETARIA],
+    capability: "merchandise.read",
   },
   {
     label: "Administrar usuarios",
     description: "Cuentas y permisos",
     href: ROUTES.USERS,
     icon: UserAdd01Icon,
-    roles: [UserRole.PRESIDENTE],
+    capability: "users.manage",
+  },
+  {
+    label: "Administrar permisos",
+    description: "Configurar capacidades por rol",
+    href: ROUTES.ACCESS_POLICY,
+    icon: UserAdd01Icon,
+    capability: "access-policy.manage",
   },
 ] as const;

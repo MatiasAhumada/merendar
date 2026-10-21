@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { dashboardRepository } from "@/server/repository/dashboard.repository";
-import { canViewDashboardMetrics } from "@/server/services/dashboard-access";
+import { dashboardService } from "@/server/services/dashboard.service";
 
 test("dashboard summary reads persistent counts and restricts metrics by role", async () => {
   assert.equal(process.env.ALLOW_DASHBOARD_INTEGRATION_TESTS, "true");
@@ -29,9 +29,9 @@ test("dashboard summary reads persistent counts and restricts metrics by role", 
     select: { id: true },
   });
 
-  assert.equal(canViewDashboardMetrics(UserRole.PRESIDENTE), true);
-  assert.equal(canViewDashboardMetrics(UserRole.SECRETARIA), true);
-  assert.equal(canViewDashboardMetrics(UserRole.TESORERIA), false);
+  assert.equal((await dashboardService.getSummary(UserRole.PRESIDENTE)).authorized, true);
+  assert.equal((await dashboardService.getSummary(UserRole.SECRETARIA)).authorized, true);
+  assert.equal((await dashboardService.getSummary(UserRole.TESORERIA)).authorized, false);
 
   try {
     const user = await prisma.user.create({

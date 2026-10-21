@@ -1,4 +1,4 @@
-import type { Prisma, UserRole } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type { OfflineOperationInput } from "@/types/offline-operation";
 import type { JsonObject, JsonValue } from "@/types/json-value";
 
@@ -12,7 +12,6 @@ export type SyncHandlerResult =
   | { type: "conflict"; resourceVersion: number; current: JsonValue };
 
 export interface SynchronizationHandler {
-  allowedRoles: UserRole[];
   apply(transaction: Prisma.TransactionClient, operation: SubmittedSyncOperation): Promise<SyncHandlerResult>;
 }
 

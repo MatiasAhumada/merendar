@@ -23,6 +23,7 @@ import {
 import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
 import { requireSession } from "@/server/services/auth-session";
 import { dashboardService } from "@/server/services/dashboard.service";
+import { hasEffectiveCapability } from "@/server/services/access-policy.service";
 import type { DashboardSummary, DashboardSummaryResult } from "@/types/dashboard";
 
 function getInitials(name: string) {
@@ -54,9 +55,11 @@ export default async function DashboardPage() {
     summaryFailed = true;
   }
 
-  const dashboardActions = DASHBOARD_ACTIONS.filter((action) =>
-    action.roles.some((role) => role === session.user.role),
-  );
+  const permittedDashboardActions = await Promise.all(DASHBOARD_ACTIONS.map(async (action) => ({
+    action,
+    allowed: await hasEffectiveCapability(session.user.role, action.capability),
+  })));
+  const dashboardActions = permittedDashboardActions.filter((result) => result.allowed).map((result) => result.action);
   let authorizedSummary: DashboardSummary | null = null;
   if (summaryResult?.authorized) {
     authorizedSummary = summaryResult.summary;

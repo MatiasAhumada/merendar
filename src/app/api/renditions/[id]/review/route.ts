@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { prisma } from "@/lib/prisma";
-import { requireMerchandiseAccess } from "@/server/services/merchandise-access";
+import { requireRenditionReviewAccess } from "@/server/services/merchandise-access";
 import { isSameOriginRequest } from "@/server/services/origin.service";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 import { renditionReviewPayloadSchema } from "@/validations/rendition.validation";
@@ -14,7 +14,7 @@ export async function PATCH(request: NextRequest, context: RouteContext<"/api/re
       throw new ApiError({ status: 403, message: "La solicitud no pertenece a este sitio." });
     }
 
-    const user = await requireMerchandiseAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
+    const user = await requireRenditionReviewAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
     const body: unknown = await request.json().catch(() => null);
     const review = renditionReviewPayloadSchema.safeParse(body);
 

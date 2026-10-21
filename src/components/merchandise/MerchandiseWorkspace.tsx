@@ -45,6 +45,11 @@ import { z } from "zod";
 interface MerchandiseWorkspaceProps {
   userId: string;
   sessionExpiresAt: string;
+  canReadMerchandise: boolean;
+  canWriteMerchandise: boolean;
+  canReadRenditions: boolean;
+  canWriteRenditions: boolean;
+  canReviewRenditions: boolean;
 }
 
 interface PendingRecord {
@@ -443,7 +448,7 @@ function SaveSheet({
   );
 }
 
-export function MerchandiseWorkspace({ userId, sessionExpiresAt }: MerchandiseWorkspaceProps) {
+export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchandise, canWriteMerchandise, canReadRenditions, canWriteRenditions, canReviewRenditions }: MerchandiseWorkspaceProps) {
   const [periods, setPeriods] = useState<MerchandisePeriodRecord[]>([]);
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -653,14 +658,14 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt }: MerchandiseWo
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Badge variant={isOnline ? "success" : "warning"} className="w-fit">{isOnline ? "Conectado" : "Sin conexión"}</Badge>
-          <SaveSheet title="Nuevo período" description="Creá el ciclo del organismo antes de registrar solicitudes." triggerLabel="Nuevo período" onSave={createPeriod} submitLabel="Guardar período">
+          {canWriteMerchandise ? <SaveSheet title="Nuevo período" description="Creá el ciclo del organismo antes de registrar solicitudes." triggerLabel="Nuevo período" onSave={createPeriod} submitLabel="Guardar período">
             <Field><FieldLabel htmlFor="period-label">Nombre del período *</FieldLabel><Input id="period-label" name="label" placeholder="Ej. Septiembre 2026" minLength={2} maxLength={80} required /></Field>
             <Field><FieldLabel htmlFor="period-agency">Organismo *</FieldLabel><Input id="period-agency" name="agency" placeholder="Ministerio de Desarrollo Social" minLength={2} maxLength={120} required /></Field>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field><FieldLabel htmlFor="period-start">Desde *</FieldLabel><Input id="period-start" name="startsAt" type="date" required /></Field>
               <Field><FieldLabel htmlFor="period-end">Hasta *</FieldLabel><Input id="period-end" name="endsAt" type="date" required /></Field>
             </div>
-          </SaveSheet>
+          </SaveSheet> : null}
         </div>
       </header>
 
@@ -669,7 +674,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt }: MerchandiseWo
       ) : null}
       {loadError ? <Alert variant="destructive"><AlertTitle>No se pudieron actualizar los datos</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{loadError}<Button variant="outline" size="sm" onClick={() => void loadMerchandise()}>Reintentar</Button></AlertDescription></Alert> : null}
       {syncMessage ? <Alert variant="info"><AlertTitle>Sincronización pendiente</AlertTitle><AlertDescription>{syncMessage}</AlertDescription></Alert> : null}
-      {pendingOperations.length ? (
+      {canWriteMerchandise && pendingOperations.length ? (
         <Alert variant="info">
           <HugeiconsIcon icon={RefreshIcon} strokeWidth={1.8} />
           <AlertTitle className="flex flex-wrap items-center gap-2">Cambios guardados en este dispositivo <Badge variant="secondary">{pendingOperations.length}</Badge></AlertTitle>
@@ -702,12 +707,13 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt }: MerchandiseWo
         </Alert>
       ) : null}
 
-      <nav aria-label="Secciones de mercadería" className="grid grid-cols-3 gap-1 rounded-2xl bg-secondary p-1">
+      {canReadMerchandise ? <nav aria-label="Secciones de mercadería" className="grid grid-cols-3 gap-1 rounded-2xl bg-secondary p-1">
         <Button asChild variant="inverse" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#periodos"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="hidden sm:block" />Períodos</a></Button>
         <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#cupos"><HugeiconsIcon icon={PackageIcon} strokeWidth={1.8} className="hidden sm:block" />Cupos</a></Button>
         <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#remitos"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} className="hidden sm:block" />Remitos</a></Button>
-      </nav>
+      </nav> : null}
 
+      {canReadMerchandise ? <>
       <section id="periodos" aria-labelledby="periods-title" className="scroll-mt-28 space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-2"><div><h2 id="periods-title" className="font-display text-xl font-semibold">Períodos y solicitudes</h2><p className="text-sm text-muted-foreground">Cada pedido conserva su organismo, fecha y cantidad solicitada.</p></div><Badge variant="secondary">{visiblePeriods.length} períodos</Badge></div>
         {loading ? <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">Cargando solicitudes y remitos…</CardContent></Card> : null}
@@ -720,16 +726,16 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt }: MerchandiseWo
             return <Card key={period.id} className="overflow-hidden">
               <CardHeader className="gap-4 border-b bg-muted/40 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex gap-3"><span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="size-6" /></span><div className="min-w-0"><CardTitle><h3 className="font-display text-lg font-semibold">{period.label}</h3></CardTitle><p className="text-sm text-muted-foreground">{period.agency} · {formatDate(period.startsAt)} – {formatDate(period.endsAt)}</p></div></div>
-                <div className="flex flex-col items-start gap-2 sm:items-end"><Badge variant={periodIsLocal ? "warning" : "success"}>{periodIsLocal ? "Solo en este dispositivo" : "Confirmado en servidor"}</Badge><SaveSheet title="Nueva solicitud de módulos" description={`La solicitud quedará asociada a ${period.label}.`} triggerLabel="Registrar solicitud" onSave={(formData) => createRequest(period.id, formData)} submitLabel="Guardar solicitud">
+                <div className="flex flex-col items-start gap-2 sm:items-end"><Badge variant={periodIsLocal ? "warning" : "success"}>{periodIsLocal ? "Solo en este dispositivo" : "Confirmado en servidor"}</Badge>{canWriteMerchandise ? <SaveSheet title="Nueva solicitud de módulos" description={`La solicitud quedará asociada a ${period.label}.`} triggerLabel="Registrar solicitud" onSave={(formData) => createRequest(period.id, formData)} submitLabel="Guardar solicitud">
                   <Field><FieldLabel htmlFor={`request-number-${period.id}`}>Número de solicitud *</FieldLabel><Input id={`request-number-${period.id}`} name="requestNumber" maxLength={80} required /></Field>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`request-date-${period.id}`}>Fecha de presentación *</FieldLabel><Input id={`request-date-${period.id}`} name="requestedAt" type="date" required /></Field><Field><FieldLabel htmlFor={`request-quantity-${period.id}`}>Módulos solicitados *</FieldLabel><Input id={`request-quantity-${period.id}`} name="requestedQuantity" type="number" min="1" max="100000" required /></Field></div>
                   <Field><FieldLabel htmlFor={`request-notes-${period.id}`}>Observaciones</FieldLabel><Textarea id={`request-notes-${period.id}`} name="notes" maxLength={1000} rows={3} /></Field>
                   <DocumentField id={`request-document-${period.id}`} />
-                </SaveSheet></div>
+                </SaveSheet> : null}</div>
               </CardHeader>
               <CardContent className="space-y-4 pt-5">
                 {!period.requests.length ? <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">No hay solicitudes para este período todavía.</p> : null}
-                {period.requests.map((request) => <RequestCard key={request.id} period={period} request={request} operations={operations} createQuota={approveQuota} receiveRemittance={receiveRemittance} />)}
+                {period.requests.map((request) => <RequestCard key={request.id} period={period} request={request} operations={operations} createQuota={approveQuota} receiveRemittance={receiveRemittance} canWrite={canWriteMerchandise} />)}
               </CardContent>
               {queuedPeriodOperation?.message ? <div className="border-t px-5 py-3 text-sm text-destructive">{queuedPeriodOperation.message}</div> : null}
             </Card>;
@@ -745,9 +751,9 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt }: MerchandiseWo
       <section id="remitos" aria-labelledby="remittances-title" className="scroll-mt-28 space-y-3">
         <div><h2 id="remittances-title" className="font-display text-xl font-semibold">Remitos y recepción</h2><p className="text-sm text-muted-foreground">Los comprobantes se descargan mediante una ruta privada que vuelve a verificar el permiso.</p></div>
         {!visiblePeriods.some((period) => period.requests.some((request) => request.remittances.length)) ? <Card variant="muted"><CardContent className="flex items-center gap-3 py-5"><HugeiconsIcon icon={TruckIcon} strokeWidth={1.8} className="size-6 text-primary" /><p className="text-sm text-muted-foreground">Los remitos recibidos aparecerán vinculados a su solicitud y cupo aprobado.</p></CardContent></Card> : null}
-      </section>
+      </section></> : null}
 
-      <RenditionWorkspace periods={visiblePeriods} userId={userId} sessionExpiresAt={sessionExpiresAt} onRefresh={loadMerchandise} />
+      {canReadRenditions ? <RenditionWorkspace periods={visiblePeriods} userId={userId} sessionExpiresAt={sessionExpiresAt} onRefresh={loadMerchandise} canWrite={canWriteRenditions} canReview={canReviewRenditions} /> : null}
     </div>
   );
 }
@@ -803,9 +809,10 @@ interface RequestCardProps {
   operations: OfflineOperation[];
   createQuota: (request: MerchandiseRequestRecord, formData: FormData) => Promise<void>;
   receiveRemittance: (request: MerchandiseRequestRecord, quota: MerchandiseQuotaRecord, formData: FormData) => Promise<void>;
+  canWrite: boolean;
 }
 
-function RequestCard({ period, request, operations, createQuota, receiveRemittance }: RequestCardProps) {
+function RequestCard({ period, request, operations, createQuota, receiveRemittance, canWrite }: RequestCardProps) {
   const queuedRequestOperation = operations.find((operation) => operation.resourceId === request.id && operation.status !== "synced");
   const pendingQuotaOperation = operations.find((operation) => {
     const payload = merchandisePayloadSchema.safeParse(operation.payload);
@@ -819,13 +826,13 @@ function RequestCard({ period, request, operations, createQuota, receiveRemittan
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} /></span><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold">Solicitud {request.requestNumber}</h4><Badge variant={request.status === "APROBADA" ? "success" : request.status === "RECHAZADA" ? "destructive" : "secondary"}>{request.status === "APROBADA" ? "Cupo aprobado" : request.status === "RECHAZADA" ? "Rechazada" : "Pendiente de cupo"}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{formatDate(request.requestedAt)} · {request.requestedQuantity} módulos · Registró {request.createdBy.name}</p><p className="mt-1 text-xs text-muted-foreground">Período: {period.label}</p></div></div>
       <div className="flex flex-wrap gap-2">
-        {!quota && request.status !== "RECHAZADA" ? <SaveSheet title="Registrar cupo aprobado" description={`Solicitud ${request.requestNumber}: se solicitaron ${request.requestedQuantity} módulos.`} triggerLabel="Registrar cupo" triggerVariant="outline" onSave={(formData) => createQuota(request, formData)} submitLabel="Guardar cupo">
+        {canWrite && !quota && request.status !== "RECHAZADA" ? <SaveSheet title="Registrar cupo aprobado" description={`Solicitud ${request.requestNumber}: se solicitaron ${request.requestedQuantity} módulos.`} triggerLabel="Registrar cupo" triggerVariant="outline" onSave={(formData) => createQuota(request, formData)} submitLabel="Guardar cupo">
           <Field><FieldLabel htmlFor={`quota-quantity-${request.id}`}>Cantidad aprobada *</FieldLabel><Input id={`quota-quantity-${request.id}`} name="approvedQuantity" type="number" min="1" max={request.requestedQuantity} required /><FieldDescription>El cupo no puede superar los {request.requestedQuantity} módulos solicitados.</FieldDescription></Field>
           <Field><FieldLabel htmlFor={`quota-date-${request.id}`}>Fecha de aprobación *</FieldLabel><Input id={`quota-date-${request.id}`} name="approvedAt" type="date" required /></Field>
           <Field><FieldLabel htmlFor={`quota-notes-${request.id}`}>Observaciones</FieldLabel><Textarea id={`quota-notes-${request.id}`} name="notes" maxLength={1000} rows={3} /></Field>
           <DocumentField id={`quota-document-${request.id}`} />
         </SaveSheet> : null}
-        {quota && availableQuantity > 0 ? <SaveSheet title="Registrar recepción / remito" description={`Quedan ${availableQuantity} módulos disponibles del cupo aprobado.`} triggerLabel="Registrar remito" triggerVariant="default" onSave={(formData) => receiveRemittance(request, quota, formData)} submitLabel="Guardar remito">
+        {canWrite && quota && availableQuantity > 0 ? <SaveSheet title="Registrar recepción / remito" description={`Quedan ${availableQuantity} módulos disponibles del cupo aprobado.`} triggerLabel="Registrar remito" triggerVariant="default" onSave={(formData) => receiveRemittance(request, quota, formData)} submitLabel="Guardar remito">
           <Field><FieldLabel htmlFor={`remittance-number-${request.id}`}>Número de remito *</FieldLabel><Input id={`remittance-number-${request.id}`} name="remittanceNumber" maxLength={80} required /></Field>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`remittance-date-${request.id}`}>Fecha de recepción *</FieldLabel><Input id={`remittance-date-${request.id}`} name="receivedAt" type="date" required /></Field><Field><FieldLabel htmlFor={`remittance-quantity-${request.id}`}>Módulos recibidos *</FieldLabel><Input id={`remittance-quantity-${request.id}`} name="receivedQuantity" type="number" min="1" max={availableQuantity} required /><FieldDescription>Disponibles: {availableQuantity}</FieldDescription></Field></div>
           <Field><FieldLabel htmlFor={`remittance-manager-${request.id}`}>Responsable de recepción *</FieldLabel><Input id={`remittance-manager-${request.id}`} name="responsibleName" maxLength={120} required /></Field>

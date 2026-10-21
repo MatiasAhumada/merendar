@@ -1,19 +1,7 @@
-import { UserRole } from "@prisma/client";
-import { authService } from "@/server/services/auth.service";
-import { ApiError } from "@/utils/handlers/apiError.handler";
+import { requireCapability } from "@/server/services/access-policy.service";
 
-const recordRoles: UserRole[] = [UserRole.PRESIDENTE, UserRole.SECRETARIA];
+export const requireRecordReadAccess = (token: string | undefined) =>
+  requireCapability(token, "delivery.read", "Iniciá sesión para consultar los registros", "No tenés permiso para consultar los registros");
 
-export async function requireRecordAccess(token: string | undefined) {
-  const session = await authService.getSession(token);
-
-  if (!session) {
-    throw new ApiError({ status: 401, message: "Iniciá sesión para consultar los registros" });
-  }
-
-  if (!recordRoles.includes(session.user.role)) {
-    throw new ApiError({ status: 403, message: "Solo presidencia y secretaría pueden registrar módulos" });
-  }
-
-  return session.user;
-}
+export const requireRecordWriteAccess = (token: string | undefined) =>
+  requireCapability(token, "delivery.write", "Iniciá sesión para registrar módulos", "No tenés permiso para registrar módulos");

@@ -18,6 +18,7 @@ import { MerchandiseDocumentError } from "@/server/services/merchandise-synchron
 import { distributionRecordPayloadSchema } from "@/validations/record.validation";
 import { renditionDocumentPayloadSchema } from "@/validations/rendition.validation";
 import { RenditionDocumentError } from "@/server/services/rendition-synchronization.service";
+import { hasEffectiveCapability } from "@/server/services/access-policy.service";
 
 const synchronizationSchema = z.object({
   operationId: z.uuid(),
@@ -35,6 +36,13 @@ const prismaResourceByClientResource: Record<SyncResource, PrismaSyncResource> =
   remittances: "REMITTANCES",
   records: "RECORDS",
   renditions: "RENDITIONS",
+};
+
+const capabilityByResource: Record<PrismaSyncResource, string> = {
+  FAMILIES: "families.write",
+  REMITTANCES: "merchandise.write",
+  RECORDS: "delivery.write",
+  RENDITIONS: "renditions.write",
 };
 
 const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
@@ -155,7 +163,9 @@ export async function POST(request: NextRequest) {
     return errorResponse(501, "resource_adapter_unavailable", "La vista todavía no habilitó la sincronización de este tipo de cambio.");
   }
 
-  if (!handler.allowedRoles.includes(session.user.role)) {
+  const capabilityAllowed = await hasEffectiveCapability(session.user.role, capabilityByResource[resource]);
+
+  if (!capabilityAllowed) {
     return errorResponse(403, "permission_revoked", "La cuenta ya no tiene permiso para sincronizar este cambio.");
   }
 

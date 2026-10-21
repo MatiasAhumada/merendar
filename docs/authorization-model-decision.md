@@ -1,6 +1,6 @@
 # ADR-001: Gobierno de roles y permisos
 
-- Estado: aceptada por el usuario el 2026-10-21 para la implementación de COD-1456.
+- Estado: implementada en COD-1456; aceptada por el usuario el 2026-10-21.
 - Alcance: preparar COD-1456 y COD-1457. No cambia accesos, cuentas, pantallas ni el esquema vigente.
 - Contexto: COD-1420 y COD-1421 están finalizados; COD-1454 documenta las responsabilidades y los límites operativos.
 
@@ -20,11 +20,13 @@ La aplicación no segmenta datos por persona, familia o período para estos perm
 | Roles estables y capacidades configurables por rol | Costo inicial y de operación mayores: catálogo tipado, persistencia, administración, auditoría, validaciones y migración controlada. Mantiene el código como catálogo de acciones posibles. | Permite activar o quitar capacidades existentes para todo un rol; requiere una pantalla clara, límites protegidos y confirmación del impacto a sus integrantes. | Requiere probar la matriz completa, denegación por defecto, administración concurrente, revocación y límites de Presidencia. Un registro append-only puede identificar quién cambió cada rol y cuándo. | Se mantiene un rol único y se agregan asignaciones por rol. El siguiente acceso a servidor lee la política vigente; una sesión abierta no conserva permisos. Offline no permite comprobar revocaciones remotas y las sincronizaciones pendientes deben revalidarse. |
 | Excepciones individuales o roles personalizados | Mayor costo y mantenimiento: combinaciones por usuario, precedencia, conflictos, más casos de prueba y soporte a medida. La política puede divergir de las responsabilidades documentadas. | Más flexible para casos puntuales, pero difícil de entender y auditar en equipos pequeños. | Exige definir precedencia entre rol y excepción, justificar cada excepción y revisar combinaciones por cuenta. | Requiere nueva asignación y migración de usuarios. Cambios por persona multiplican los casos de sesión y sincronización offline. |
 
-## Recomendación para la siguiente implementación
+## Decisión implementada
 
 Usar roles estables con capacidades configurables por rol desde una fuente central en servidor. Presidencia acepta poder habilitar o quitar capacidades operativas existentes para cada rol, con efecto para todas las personas que tengan ese rol. El catálogo es cerrado y lo define el producto: la administración no permite crear capacidades, módulos, acciones ni permisos. Cualquier capacidad que se agregue al producto requiere un cambio de código y no aparece como otorgable hasta que esa versión la incluya. Las excepciones por usuario, roles personalizados, herencia entre roles y múltiples roles quedan fuera de alcance mientras no exista una necesidad comprobada.
 
 La decisión queda aceptada: Presidencia puede habilitar o quitar únicamente capacidades ya incluidas en el catálogo del producto. La confirmación no autoriza crear capacidades desde la interfaz ni asignar acciones que todavía no existan en la aplicación. COD-1456 puede implementar la configuración por rol respetando estas restricciones.
+
+COD-1456 implementa el catálogo cerrado en `AccessCapability`, los valores por rol en `RoleCapabilityPolicy` y el historial append-only en `AccessPolicyChange`. `/permisos` permite a Presidencia revisar la matriz y las cuentas afectadas antes de guardar. La autorización efectiva se comprueba en el servidor para páginas y operaciones API, incluidos documentos privados y sincronización offline; la navegación refleja la política, pero no concede acceso. La administración de usuarios y de la propia política permanece reservada a Presidencia fuera de las capacidades editables.
 
 ### Matriz inicial propuesta
 
@@ -57,7 +59,7 @@ Esta matriz refleja los permisos comprobables y la matriz COD-1454. Los permisos
 
 La implementación futura agregaría asignaciones persistidas de capacidad por rol, idealmente con clave compuesta rol-capacidad y una referencia al catálogo tipado. La política inicial debe reproducir exactamente la matriz de arriba; las tres cuentas operativas sin acceso no reciben nuevas capacidades. `User.role` permanece como está, las cuentas sin rol continúan sin autenticar y ninguna migración debe convertirlas automáticamente en Presidencia.
 
-COD-1455 no modifica Prisma ni ejecuta migraciones. Si COD-1456 implementa la propuesta tras aceptación, debe generar y aplicar el esquema mediante `pnpm prisma migrate dev --name role_access_policies`, revisar el SQL generado y probar la matriz de datos iniciales en una base de desarrollo. No crear ni editar SQL de migración manualmente.
+COD-1456 generó y aplicó el esquema en la base de desarrollo con `pnpm prisma migrate dev --name role_access_policies`. No se editó SQL de migración manualmente. `pnpm prisma db seed` inicializa los pares rol-capacidad ausentes según la matriz; al repetirse conserva decisiones ya guardadas.
 
 ## Contrato de pruebas para COD-1456
 

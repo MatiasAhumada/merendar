@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { prisma } from "@/lib/prisma";
-import { requireRecordAccess } from "@/server/services/record-access";
+import { requireRecordReadAccess } from "@/server/services/record-access";
 import { createBeneficiarySheetPdf } from "@/server/services/beneficiary-sheet.service";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 import apiErrorHandler from "@/utils/handlers/apiError.handler";
 
 export async function GET(request: NextRequest, context: RouteContext<"/api/records/sheets/[id]">) {
   try {
-    await requireRecordAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
+    await requireRecordReadAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
     const { id } = await context.params;
     const sheet = await prisma.beneficiarySheet.findUnique({ where: { id }, include: { period: { select: { label: true } } } });
 

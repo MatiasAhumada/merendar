@@ -1,11 +1,8 @@
-import { UserRole } from "@prisma/client";
 import { familyPayloadSchema } from "@/validations/family.validation";
 import type { SynchronizationHandler } from "@/interfaces/synchronization.interface";
 import { z } from "zod";
 
 export const familySynchronizationHandler: SynchronizationHandler = {
-  allowedRoles: [UserRole.PRESIDENTE, UserRole.SECRETARIA],
-
   async apply(transaction, operation) {
     const baseVersionValidation = z.null().safeParse(operation.baseVersion);
 

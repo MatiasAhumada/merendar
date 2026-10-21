@@ -1,15 +1,16 @@
-import { UserRole } from "@prisma/client";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { FamilyRegistry } from "@/components/families/FamilyRegistry";
 import { familyService } from "@/server/services/family.service";
 import { requireSession } from "@/server/services/auth-session";
-
-const familyRoles: UserRole[] = [UserRole.PRESIDENTE, UserRole.SECRETARIA];
+import { hasEffectiveCapability } from "@/server/services/access-policy.service";
 
 export default async function FamiliesPage() {
   const session = await requireSession();
 
-  if (!familyRoles.includes(session.user.role)) {
+  const canReadFamilies = await hasEffectiveCapability(session.user.role, "families.read");
+  const canWriteFamilies = await hasEffectiveCapability(session.user.role, "families.write");
+
+  if (!canReadFamilies) {
     return (
       <main className="mx-auto max-w-3xl p-4 sm:p-6">
         <Alert variant="destructive">
@@ -47,5 +48,6 @@ export default async function FamiliesPage() {
     initialFamilies={families}
     userId={session.user.id}
     sessionExpiresAt={session.expiresAt.toISOString()}
+    canWrite={canWriteFamilies}
   />;
 }
