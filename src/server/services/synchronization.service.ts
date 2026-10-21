@@ -3,6 +3,7 @@ import type { SyncResource } from "@prisma/client";
 import type { SynchronizationHandler, SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
 import { synchronizationRepository } from "@/server/repository/synchronization.repository";
 import { familySynchronizationHandler } from "@/server/services/family-synchronization.service";
+import { merchandiseSynchronizationHandler } from "@/server/services/merchandise-synchronization.service";
 import type { JsonValue } from "@/types/json-value";
 
 function hashOperation(operation: SubmittedSyncOperation) {
@@ -25,5 +26,5 @@ export const synchronizationService = {
 };
 
 export function createSynchronizationHandlers(): Partial<Record<SyncResource, SynchronizationHandler>> {
-  return { FAMILIES: familySynchronizationHandler };
+  return { FAMILIES: familySynchronizationHandler, REMITTANCES: merchandiseSynchronizationHandler };
 }

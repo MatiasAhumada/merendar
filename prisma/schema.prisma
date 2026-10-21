@@ -17,6 +17,10 @@ model User {
   sessions     AuthSession[]
   createdFamilies Family[]
   familyOperations FamilyOperation[]
+  merchandiseRequests MerchandiseRequest[] @relation("MerchandiseRequestCreator")
+  approvedMerchandiseQuotas MerchandiseQuota[] @relation("MerchandiseQuotaApprover")
+  merchandiseRemittances MerchandiseRemittance[] @relation("MerchandiseRemittanceCreator")
+  merchandiseDocuments MerchandiseDocument[] @relation("MerchandiseDocumentUploader")
   synchronizationReceipts SynchronizationReceipt[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -152,4 +156,100 @@ enum SyncResource {
   FAMILIES
   REMITTANCES
   RECORDS
+}
+
+enum MerchandiseRequestStatus {
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+}
+
+model MerchandisePeriod {
+  id        String               @id @default(cuid())
+  label     String
+  agency    String
+  startsAt  DateTime             @db.Date
+  endsAt    DateTime             @db.Date
+  requests  MerchandiseRequest[]
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@unique([label, agency])
+  @@index([startsAt, endsAt])
+}
+
+model MerchandiseRequest {
+  id                String                    @id @default(cuid())
+  periodId          String
+  requestNumber     String                    @unique
+  requestedAt       DateTime                  @db.Date
+  requestedQuantity Int
+  status            MerchandiseRequestStatus  @default(PENDIENTE)
+  notes             String?
+  period            MerchandisePeriod         @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  createdById       String
+  createdBy         User                      @relation("MerchandiseRequestCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  quota             MerchandiseQuota?
+  remittances       MerchandiseRemittance[]
+  documents         MerchandiseDocument[]
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  @@index([periodId, requestedAt])
+  @@index([status, requestedAt])
+}
+
+model MerchandiseQuota {
+  id               String                 @id @default(cuid())
+  requestId        String                 @unique
+  approvedQuantity Int
+  approvedAt       DateTime               @db.Date
+  notes            String?
+  request          MerchandiseRequest    @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  approvedById     String
+  approvedBy       User                   @relation("MerchandiseQuotaApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  remittances      MerchandiseRemittance[]
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([approvedAt])
+}
+
+model MerchandiseRemittance {
+  id                String                @id @default(cuid())
+  requestId         String
+  quotaId           String
+  remittanceNumber  String                @unique
+  receivedAt        DateTime              @db.Date
+  receivedQuantity  Int
+  responsibleName   String
+  notes             String?
+  request           MerchandiseRequest   @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  quota             MerchandiseQuota     @relation(fields: [quotaId], references: [id], onDelete: Restrict)
+  createdById       String
+  createdBy         User                  @relation("MerchandiseRemittanceCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  documents         MerchandiseDocument[]
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@index([requestId, receivedAt])
+  @@index([quotaId, receivedAt])
+}
+
+model MerchandiseDocument {
+  id              String                 @id @default(cuid())
+  originalName    String
+  contentType     String
+  byteSize        Int
+  content         Bytes
+  requestId       String?
+  request         MerchandiseRequest?    @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  remittanceId    String?
+  remittance      MerchandiseRemittance? @relation(fields: [remittanceId], references: [id], onDelete: Restrict)
+  uploadedById    String
+  uploadedBy      User                   @relation("MerchandiseDocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt       DateTime               @default(now())
+
+  @@index([requestId, createdAt])
+  @@index([remittanceId, createdAt])
 }

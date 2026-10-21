@@ -13,6 +13,8 @@ import {
 } from "@/server/repository/synchronization.repository";
 import type { SyncResource } from "@/types/offline-operation";
 import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
+import { merchandisePayloadSchema } from "@/validations/merchandise.validation";
+import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
 
 const synchronizationSchema = z.object({
   operationId: z.uuid(),
@@ -82,6 +84,33 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  if (parsedOperation.data.resource === "remittances") {
+    let rawPayload: unknown = parsedOperation.data.payload;
+
+    // Recover operations created by the earlier client serializer, which
+    // stored the JSON representation one level too deep as a string.
+    if (typeof rawPayload === "string") {
+      try {
+        rawPayload = JSON.parse(rawPayload);
+      } catch {
+        return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la recepción pendiente.");
+      }
+    }
+
+    const parsedPayload = merchandisePayloadSchema.safeParse(rawPayload);
+
+    if (!parsedPayload.success) {
+      const details = parsedPayload.error.issues.map((issue) => `${issue.path.join(".") || "datos"}: ${issue.message}`).join("; ");
+      return errorResponse(400, "invalid_merchandise_operation", `Revisá los datos de la recepción pendiente. ${details}`);
+    }
+
+    if (parsedPayload.data.id !== parsedOperation.data.resourceId) {
+      return errorResponse(400, "invalid_merchandise_operation", "El identificador del borrador no coincide con los datos guardados.");
+    }
+
+    parsedOperation.data.payload = parsedPayload.data;
+  }
+
   const handlers = createSynchronizationHandlers();
   const resource = prismaResourceByClientResource[parsedOperation.data.resource];
   const handler = handlers[resource];
@@ -109,6 +138,10 @@ export async function POST(request: NextRequest) {
     const result = await synchronizationService.apply(operation, resource, handler);
     return NextResponse.json(result, { status: 200, headers: privateHeaders });
   } catch (error) {
+    if (error instanceof MerchandiseDocumentError) {
+      return errorResponse(400, "invalid_merchandise_operation", error.message);
+    }
+
     if (error instanceof SynchronizationConflictError) {
       return errorResponse(409, "version_conflict", error.message, {
         currentVersion: error.currentVersion,

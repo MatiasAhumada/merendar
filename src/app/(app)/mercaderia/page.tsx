@@ -2,6 +2,6 @@ import { MerchandiseWorkspace } from "@/components/merchandise/MerchandiseWorksp
 import { requireSession } from "@/server/services/auth-session";
 
 export default async function MerchandisePage() {
-  await requireSession();
-  return <MerchandiseWorkspace />;
+  const session = await requireSession();
+  return <MerchandiseWorkspace userId={session.user.id} sessionExpiresAt={session.expiresAt.toISOString()} />;
 }

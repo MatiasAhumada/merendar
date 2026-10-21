@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircleIcon, CheckmarkCircle01Icon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -106,6 +106,7 @@ function errorMessage(error: unknown, fallback: string) {
 export function OfflineSyncStatus({ userId, sessionExpiresAt, onQueueStatusChange }: OfflineSyncStatusProps) {
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const synchronizingRef = useRef(false);
   const [message, setMessage] = useState("");
   const isOnline = useNetworkStatus();
   const pendingOperations = operations.filter((operation) => operation.status !== "synced");
@@ -124,10 +125,11 @@ export function OfflineSyncStatus({ userId, sessionExpiresAt, onQueueStatusChang
   }, [onQueueStatusChange, userId]);
 
   const runSynchronization = useCallback(async () => {
-    if (!isOnline || isSyncing) {
+    if (!isOnline || synchronizingRef.current) {
       return;
     }
 
+    synchronizingRef.current = true;
     setIsSyncing(true);
 
     try {
@@ -137,11 +139,17 @@ export function OfflineSyncStatus({ userId, sessionExpiresAt, onQueueStatusChang
     } catch (error) {
       setMessage(errorMessage(error, "No se pudo sincronizar la cola."));
     } finally {
+      synchronizingRef.current = false;
       setIsSyncing(false);
     }
-  }, [isOnline, isSyncing, refreshQueue, userId]);
+  }, [isOnline, refreshQueue, userId]);
 
   async function retryOperation(operationId: string) {
+    if (synchronizingRef.current) {
+      return;
+    }
+
+    synchronizingRef.current = true;
     setIsSyncing(true);
 
     try {
@@ -150,6 +158,7 @@ export function OfflineSyncStatus({ userId, sessionExpiresAt, onQueueStatusChang
     } catch (error) {
       setMessage(errorMessage(error, "No se pudo reintentar el cambio."));
     } finally {
+      synchronizingRef.current = false;
       setIsSyncing(false);
     }
   }
@@ -159,6 +168,7 @@ export function OfflineSyncStatus({ userId, sessionExpiresAt, onQueueStatusChang
       return;
     }
 
+    synchronizingRef.current = true;
     setIsSyncing(true);
 
     try {
@@ -168,6 +178,7 @@ export function OfflineSyncStatus({ userId, sessionExpiresAt, onQueueStatusChang
     } catch (error) {
       setMessage(errorMessage(error, "No se pudo resolver el conflicto."));
     } finally {
+      synchronizingRef.current = false;
       setIsSyncing(false);
     }
   }

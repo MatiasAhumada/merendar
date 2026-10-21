@@ -495,10 +495,16 @@ export async function resolveOfflineConflict(userId: string, operationId: string
   }
 
   if (resolution === "local") {
+    let baseVersion = selectedOperation.remoteVersion;
+
+    if (selectedOperation.resource === "remittances") {
+      baseVersion = null;
+    }
+
     const replacementOperation: OfflineOperation = {
       ...selectedOperation,
       operationId: crypto.randomUUID(),
-      baseVersion: selectedOperation.remoteVersion,
+      baseVersion,
       status: "pending",
       attempts: 0,
       leaseExpiresAt: null,

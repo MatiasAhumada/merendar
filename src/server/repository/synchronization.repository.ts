@@ -71,59 +71,67 @@ export const synchronizationRepository = {
       return previousResponse;
     }
 
-    try {
-      return await prisma.$transaction(async (transaction) => {
-        const concurrentReceipt = await transaction.synchronizationReceipt.findUnique({
-          where: { operationId: operation.operationId },
-        });
+    for (let attemptCount = 0; attemptCount < 3; attemptCount += 1) {
+      try {
+        return await prisma.$transaction(async (transaction) => {
+          const concurrentReceipt = await transaction.synchronizationReceipt.findUnique({
+            where: { operationId: operation.operationId },
+          });
 
-        if (concurrentReceipt) {
-          if (concurrentReceipt.userId !== operation.userId || concurrentReceipt.requestHash !== requestHash) {
-            throw new SynchronizationKeyConflictError("La clave de operación ya se usó con otra cuenta o con otros datos.");
+          if (concurrentReceipt) {
+            if (concurrentReceipt.userId !== operation.userId || concurrentReceipt.requestHash !== requestHash) {
+              throw new SynchronizationKeyConflictError("La clave de operación ya se usó con otra cuenta o con otros datos.");
+            }
+
+            return savedResponse(concurrentReceipt, true);
           }
 
-          return savedResponse(concurrentReceipt, true);
-        }
+          for (const dependencyId of operation.dependencies) {
+            const dependencyReceipt = await transaction.synchronizationReceipt.findUnique({ where: { operationId: dependencyId } });
 
-        for (const dependencyId of operation.dependencies) {
-          const dependencyReceipt = await transaction.synchronizationReceipt.findUnique({ where: { operationId: dependencyId } });
-
-          if (!dependencyReceipt || dependencyReceipt.userId !== operation.userId) {
-            throw new SynchronizationDependencyError(dependencyId);
+            if (!dependencyReceipt || dependencyReceipt.userId !== operation.userId) {
+              throw new SynchronizationDependencyError(dependencyId);
+            }
           }
+
+          const applied = await handler.apply(transaction, operation);
+
+          if (applied.type === "conflict") {
+            throw new SynchronizationConflictError("El registro cambió en otro dispositivo.", applied.resourceVersion, applied.current);
+          }
+
+          const result: Prisma.InputJsonValue = applied.result;
+          const receipt = await transaction.synchronizationReceipt.create({
+            data: {
+              operationId: operation.operationId,
+              userId: operation.userId,
+              resource,
+              resourceId: operation.resourceId,
+              requestHash,
+              resourceVersion: applied.resourceVersion,
+              result,
+            },
+          });
+
+          return savedResponse(receipt, false);
+        }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || (error.code !== "P2002" && error.code !== "P2034")) {
+          throw error;
         }
 
-        const applied = await handler.apply(transaction, operation);
-
-        if (applied.type === "conflict") {
-          throw new SynchronizationConflictError("El registro cambió en otro dispositivo.", applied.resourceVersion, applied.current);
-        }
-
-        const result: Prisma.InputJsonValue = applied.result;
-        const receipt = await transaction.synchronizationReceipt.create({
-          data: {
-            operationId: operation.operationId,
-            userId: operation.userId,
-            resource,
-            resourceId: operation.resourceId,
-            requestHash,
-            resourceVersion: applied.resourceVersion,
-            result,
-          },
-        });
-
-        return savedResponse(receipt, false);
-      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-    } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && (error.code === "P2002" || error.code === "P2034")) {
         const completedResponse = await findReceipt(operation.operationId, operation.userId, requestHash);
 
         if (completedResponse) {
           return completedResponse;
         }
-      }
 
-      throw error;
+        if (attemptCount === 2) {
+          throw error;
+        }
+      }
     }
+
+    throw new Error("No se pudo confirmar la sincronización después de varios intentos.");
   },
 };
