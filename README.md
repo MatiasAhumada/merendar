@@ -64,7 +64,7 @@ El modelo, los permisos y el flujo de recepción de mercadería están documenta
 
 Los registros de beneficiarios, planillas versionadas y permisos están documentados en [docs/delivery.md](docs/delivery.md).
 
-La matriz provisional de responsabilidades y accesos, incluidas sus fuentes pendientes, está en [docs/role-access-matrix.md](docs/role-access-matrix.md).
+La matriz de responsabilidades y accesos, con referencias a la entrevista y al estatuto, está en [docs/role-access-matrix.md](docs/role-access-matrix.md).
 
 La guía en PDF por rol está en [docs/matriz-roles-accesos-cod-1454.pdf](docs/matriz-roles-accesos-cod-1454.pdf).
 
