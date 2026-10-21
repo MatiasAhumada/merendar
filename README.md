@@ -66,4 +66,6 @@ Los registros de beneficiarios, planillas versionadas y permisos están document
 
 La matriz provisional de responsabilidades y accesos, incluidas sus fuentes pendientes, está en [docs/role-access-matrix.md](docs/role-access-matrix.md).
 
+La guía en PDF por rol está en [docs/matriz-roles-accesos-cod-1454.pdf](docs/matriz-roles-accesos-cod-1454.pdf).
+
 Las pruebas de integración requieren PostgreSQL local de desarrollo (`DATABASE_URL` con nombre de base que incluya `dev`, `test` o `local`).
