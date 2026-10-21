@@ -2,12 +2,11 @@ import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowRight01Icon,
-  CheckmarkCircle01Icon,
   CloudIcon,
-  Location01Icon,
+  RefreshIcon,
 } from "@hugeicons/core-free-icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,170 +16,267 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { requireSession } from "@/server/services/auth-session";
 import {
   DASHBOARD_ACTIONS,
-  DASHBOARD_ACTIVITY,
   DASHBOARD_METRICS,
-  DASHBOARD_SNAPSHOT,
-  DASHBOARD_STAGES,
 } from "@/constants/dashboard.constant";
-import { ROUTES } from "@/constants/routes";
+import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
+import { requireSession } from "@/server/services/auth-session";
+import { dashboardService } from "@/server/services/dashboard.service";
+import type { DashboardSummary, DashboardSummaryResult } from "@/types/dashboard";
+
+function getInitials(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0))
+    .join("")
+    .toUpperCase();
+}
+
+function formatLastUpdated(value: string) {
+  return new Intl.DateTimeFormat("es-AR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "America/Argentina/Tucuman",
+  }).format(new Date(value));
+}
 
 export default async function DashboardPage() {
-  await requireSession();
+  const session = await requireSession();
+  let summaryResult: DashboardSummaryResult | null = null;
+  let summaryFailed = false;
+
+  try {
+    summaryResult = await dashboardService.getSummary(session.user.role);
+  } catch {
+    summaryFailed = true;
+  }
+
+  const dashboardActions = DASHBOARD_ACTIONS.filter((action) =>
+    action.roles.some((role) => role === session.user.role),
+  );
+  let authorizedSummary: DashboardSummary | null = null;
+  if (summaryResult?.authorized) {
+    authorizedSummary = summaryResult.summary;
+  }
+
+  let periodHeading = "Gestión comunitaria";
+  let periodDescription = "Consultá los módulos habilitados para tu rol.";
+  let sourceBadge = "Panel informativo";
+  let sourceBadgeVariant: "success" | "secondary" | "destructive" = "secondary";
+
+  if (authorizedSummary) {
+    sourceBadge = "Datos del servidor";
+    sourceBadgeVariant = "success";
+  }
+
+  if (summaryFailed) {
+    sourceBadge = "Servidor no disponible";
+    sourceBadgeVariant = "destructive";
+  }
+
+  if (authorizedSummary?.activePeriodLabel) {
+    periodHeading = authorizedSummary.activePeriodLabel;
+    periodDescription = "Período operativo vigente";
+  }
+
   return (
     <div className="flex flex-col gap-5">
       <section className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">
-            Buenas tardes, María <span aria-hidden="true">👋</span>
+            Hola, {session.user.name}
           </h1>
-          <p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
-            <HugeiconsIcon icon={Location01Icon} strokeWidth={1.8} />
-            Asociación Civil Los Aromos · Sede Central
+          <p className="mt-1 text-sm text-muted-foreground">
+            Resumen de los módulos persistentes de Merendar
           </p>
         </div>
-        <Avatar size="lg" className="size-12">
-          <AvatarImage src="/images/community-coordinator.jpg" alt="Coordinadora comunitaria" />
-          <AvatarFallback>SA</AvatarFallback>
-        </Avatar>
+        <div className="flex shrink-0 items-center gap-3">
+          <Badge variant="secondary" className="hidden sm:inline-flex">
+            {USER_ROLE_LABELS[session.user.role]}
+          </Badge>
+          <Avatar size="lg" aria-label={session.user.name}>
+            <AvatarFallback>{getInitials(session.user.name)}</AvatarFallback>
+          </Avatar>
+        </div>
       </section>
 
-      <Alert variant="info">
-        <HugeiconsIcon icon={CloudIcon} strokeWidth={1.8} />
-        <AlertTitle>Modo demostración</AlertTitle>
-        <AlertDescription>La información de esta vista es de ejemplo.</AlertDescription>
-      </Alert>
+      {summaryFailed && (
+        <Alert variant="destructive">
+          <HugeiconsIcon icon={RefreshIcon} strokeWidth={1.8} />
+          <AlertTitle>No pudimos cargar los datos del inicio</AlertTitle>
+          <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>El servidor no respondió. Podés volver a intentar sin perder información.</span>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/">
+                Reintentar
+                <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" />
+              </Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {!summaryFailed && summaryResult && !summaryResult.authorized && (
+        <Alert variant="info">
+          <HugeiconsIcon icon={CloudIcon} strokeWidth={1.8} />
+          <AlertTitle>Resumen operativo no habilitado para este rol</AlertTitle>
+          <AlertDescription>
+            Las métricas del padrón y de cupos están disponibles para Presidencia y Secretaría.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
         <div className="flex flex-col gap-5">
-          <Card variant="hero" className="relative">
-            <div aria-hidden="true" className="pointer-events-none absolute -bottom-20 -right-12 size-60 rounded-full bg-primary-foreground/5" />
+          <Card variant="hero" className="relative overflow-hidden">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute -bottom-20 -right-12 size-60 rounded-full bg-primary-foreground/5"
+            />
             <CardHeader className="relative">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex flex-col gap-2">
-                  <Badge variant="success">PERÍODO SEPTIEMBRE 2026</Badge>
-                  <CardTitle>
-                    <h2 className="font-display text-xl font-semibold">Operativo Comunitario</h2>
-                  </CardTitle>
-                  <CardDescription>{DASHBOARD_SNAPSHOT.site} · {DASHBOARD_SNAPSHOT.distributionDate}</CardDescription>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="font-display text-3xl font-bold tabular-nums">{DASHBOARD_SNAPSHOT.approvedModules}</p>
-                  <p className="text-xs font-semibold text-primary-container-foreground">cupos aprobados</p>
-                </div>
-              </div>
+              <Badge variant={sourceBadgeVariant} className="w-fit">
+                {sourceBadge.toUpperCase()}
+              </Badge>
+              <CardTitle>
+                <h2 className="font-display text-xl font-semibold">
+                  {periodHeading}
+                </h2>
+              </CardTitle>
+              <CardDescription>
+                {periodDescription}
+              </CardDescription>
             </CardHeader>
-            <CardContent className="relative flex flex-col gap-4">
-              <Button variant="inverse" asChild className="w-full">
-                <Link href={ROUTES.DELIVERY}>
-                  Registrar una entrega
+            <CardContent className="relative">
+              <Button asChild variant="inverse" className="w-full">
+                <Link href="#acciones">
+                  Ver acciones disponibles
                   <HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" />
                 </Link>
               </Button>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle><h2 className="font-display text-lg font-semibold">Ciclo Operativo Actual</h2></CardTitle>
-                <Badge variant="secondary">{DASHBOARD_SNAPSHOT.period}</Badge>
+          <section aria-labelledby="metrics-title" className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 id="metrics-title" className="font-display text-lg font-semibold">
+                Resumen del padrón y cupos
+              </h2>
+              {authorizedSummary?.lastUpdatedAt && (
+                <span className="text-xs text-muted-foreground">
+                  Datos actualizados: {formatLastUpdated(authorizedSummary.lastUpdatedAt)}
+                </span>
+              )}
+            </div>
+            {authorizedSummary && (
+              <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-3">
+                {DASHBOARD_METRICS.map((metric) => {
+                  let metricValue = "—";
+                  let metricDescription = "No disponible";
+
+                  if (metric.label === "Familias") {
+                    metricValue = String(authorizedSummary.familyCount);
+                    if (authorizedSummary.familyCount) {
+                      metricDescription = metric.description;
+                    } else {
+                      metricDescription = "Todavía no hay familias";
+                    }
+                  }
+
+                  if (metric.label === "Personas") {
+                    metricValue = String(authorizedSummary.personCount);
+                    if (authorizedSummary.personCount) {
+                      metricDescription = metric.description;
+                    } else {
+                      metricDescription = "Todavía no hay personas";
+                    }
+                  }
+
+                  if (metric.label === "Cupos aprobados") {
+                    if (!authorizedSummary.activePeriodLabel) {
+                      metricDescription = "No hay un período vigente";
+                    } else {
+                      metricValue = String(authorizedSummary.approvedQuotaCount);
+                      if (authorizedSummary.approvedQuotaCount) {
+                        metricDescription = metric.description;
+                      } else {
+                        metricDescription = "Sin cupos aprobados en el período";
+                      }
+                    }
+                  }
+
+                  return (
+                    <Card key={metric.label} size="sm">
+                      <CardContent className="flex flex-col gap-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium">{metric.label}</span>
+                          <span className="flex size-8 items-center justify-center rounded-full bg-accent text-accent-foreground">
+                            <HugeiconsIcon icon={metric.icon} strokeWidth={1.8} />
+                          </span>
+                        </div>
+                        <p className="font-display text-3xl font-bold tabular-nums">{metricValue}</p>
+                        <p className="text-xs text-muted-foreground">{metricDescription}</p>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
-            </CardHeader>
-            <CardContent>
-              <ol className="flex flex-col gap-5">
-                {DASHBOARD_STAGES.map((stage, stageIndex) => (
-                  <li key={stage.title} className="flex items-start gap-3">
-                    <div className="flex flex-col items-center gap-1">
-                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground">
-                        {stage.status === "completed" ? <HugeiconsIcon icon={CheckmarkCircle01Icon} strokeWidth={2} /> : stageIndex + 1}
-                      </span>
-                      {stageIndex < DASHBOARD_STAGES.length - 1 ? <span aria-hidden="true" className="h-7 w-px bg-border" /> : null}
-                    </div>
-                    <div className="flex min-w-0 flex-1 flex-wrap items-start justify-between gap-2 pt-1">
-                      <div className="min-w-0">
-                        <p className="font-semibold">{stage.title}</p>
-                        <p className="text-xs text-muted-foreground">{stage.description}</p>
-                      </div>
-                      <Badge variant={stage.status === "current" ? "warning" : "secondary"}>{stage.detail}</Badge>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            </CardContent>
-          </Card>
+            )}
+            {!authorizedSummary && (
+              <Card>
+                <CardContent className="py-5 text-sm text-muted-foreground">
+                  {summaryFailed && (
+                    <span>Las métricas aparecerán cuando se recupere la conexión con el servidor.</span>
+                  )}
+                  {!summaryFailed && (
+                    <span>Este resumen no muestra datos de otros roles.</span>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </section>
         </div>
 
-        <div className="flex flex-col gap-5">
-          <section aria-labelledby="metrics-title" className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <h2 id="metrics-title" className="font-display text-lg font-semibold">Métricas del Territorio</h2>
-              <span className="text-xs text-muted-foreground">Datos de muestra</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:gap-3">
-              {DASHBOARD_METRICS.map((metric) => (
-                <Card key={metric.label} size="sm">
-                  <CardContent className="flex flex-col gap-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-medium">{metric.label}</span>
-                      <span className="flex size-8 items-center justify-center rounded-full bg-accent text-accent-foreground">
-                        <HugeiconsIcon icon={metric.icon} strokeWidth={1.8} />
-                      </span>
-                    </div>
-                    <p className="font-display text-3xl font-bold tabular-nums">{metric.value}</p>
-                    <p className="text-xs text-muted-foreground">{metric.description}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </section>
-
-          <section aria-labelledby="actions-title" className="flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <h2 id="actions-title" className="font-display text-lg font-semibold">Acciones Rápidas</h2>
-              <span className="text-xs text-muted-foreground">Gestión directa</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:gap-3">
-              {DASHBOARD_ACTIONS.map((action) => (
-                <Button key={action.label} asChild variant="outline" size="tile" className="w-full">
+        <section id="acciones" aria-labelledby="actions-title" className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 id="actions-title" className="font-display text-lg font-semibold">
+              Accesos disponibles
+            </h2>
+            <span className="text-xs text-muted-foreground">Según tu rol</span>
+          </div>
+          {dashboardActions.length > 0 && (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
+              {dashboardActions.map((action) => (
+                <Button
+                  key={action.label}
+                  asChild
+                  variant="outline"
+                  size="tile"
+                  className="w-full"
+                >
                   <Link href={action.href}>
                     <HugeiconsIcon icon={action.icon} strokeWidth={1.8} data-icon="inline-start" />
                     <span className="flex flex-col items-start leading-tight">
                       <strong>{action.label}</strong>
-                      <span className="text-xs font-normal text-muted-foreground">{action.description}</span>
+                      <span className="text-xs font-normal text-muted-foreground">
+                        {action.description}
+                      </span>
                     </span>
                   </Link>
                 </Button>
               ))}
             </div>
-          </section>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle><h2 className="font-display text-lg font-semibold">Actividad reciente</h2></CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ul className="flex flex-col gap-4">
-                {DASHBOARD_ACTIVITY.map((activity) => (
-                  <li key={activity.name} className="flex items-start gap-3">
-                    <Avatar size="lg">
-                      {activity.image ? <AvatarImage src={activity.image} alt="" /> : null}
-                      <AvatarFallback>{activity.name.slice(0, 2).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0">
-                      <p className="text-sm"><strong>{activity.name}</strong> {activity.action}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{activity.time} · {activity.detail}</p>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        </div>
+          )}
+          {!dashboardActions.length && (
+            <Card>
+              <CardContent className="py-5 text-sm text-muted-foreground">
+                No hay accesos operativos habilitados para este rol.
+              </CardContent>
+            </Card>
+          )}
+        </section>
       </div>
     </div>
   );

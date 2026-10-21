@@ -5,7 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Logout01Icon, Menu01Icon } from "@hugeicons/core-free-icons";
+import { CloudOffIcon, Logout01Icon, Menu01Icon } from "@hugeicons/core-free-icons";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,13 +59,25 @@ export function AppShell({ children, user, sessionExpiresAt }: AppShellProps) {
   const [queueReadFailed, setQueueReadFailed] = useState(false);
   const isOnline = useNetworkStatus();
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
-  const navigation = PRIMARY_NAVIGATION.filter((item) => item.href !== ROUTES.USERS || user.role === UserRole.PRESIDENTE);
+  const navigation = PRIMARY_NAVIGATION.filter((item) => item.roles.some((role) => role === user.role));
   const canCaptureOffline = (pathname === ROUTES.FAMILIES || pathname === ROUTES.DELIVERY) &&
     offlineCaptureRoles.includes(user.role) && Date.now() < Date.parse(sessionExpiresAt);
   let pageContent = children;
 
   if (!isOnline && !canCaptureOffline) {
-    pageContent = <OfflineAccessNotice />;
+    if (pathname === ROUTES.HOME) {
+      pageContent = (
+        <Alert variant="info">
+          <HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} />
+          <AlertTitle>Inicio disponible al recuperar conexión</AlertTitle>
+          <AlertDescription>
+            Las métricas se consultan en el servidor y no están guardadas en caché. Los cambios locales pendientes aparecen arriba con su fecha de guardado y se sincronizan al volver a conectarte.
+          </AlertDescription>
+        </Alert>
+      );
+    } else {
+      pageContent = <OfflineAccessNotice />;
+    }
   }
 
   const onQueueStatusChange = useCallback((count: number, loaded: boolean, readError: boolean) => {
@@ -210,7 +223,7 @@ export function AppShell({ children, user, sessionExpiresAt }: AppShellProps) {
 
         <nav
           aria-label="Navegación inferior"
-          className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border bg-card/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-lg backdrop-blur lg:hidden"
+          className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-[repeat(auto-fit,minmax(0,1fr))] border-t border-border bg-card/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-lg backdrop-blur lg:hidden"
         >
           {navigation.map((item) => (
             <Button

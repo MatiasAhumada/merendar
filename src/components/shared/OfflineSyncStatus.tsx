@@ -249,6 +249,9 @@ export function OfflineSyncStatus({ userId, sessionExpiresAt, onQueueStatusChang
                   {operationStatusLabel(operation)}
                 </Badge>
               </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Guardado en este dispositivo: {new Date(operation.createdAt).toLocaleString("es-AR")}
+              </p>
               {operation.message ? <p className="mt-2 text-sm text-muted-foreground">{operation.message}</p> : null}
               {operation.status === "conflict" ? (
                 <div className="mt-3 space-y-3">
