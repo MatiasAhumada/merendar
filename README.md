@@ -66,6 +66,8 @@ Los registros de beneficiarios, planillas versionadas y permisos están document
 
 La matriz de responsabilidades y accesos, con referencias a la entrevista y al estatuto, está en [docs/role-access-matrix.md](docs/role-access-matrix.md).
 
+La decisión técnica propuesta para evolucionar roles y permisos, pendiente de aceptación organizacional, está en [docs/authorization-model-decision.md](docs/authorization-model-decision.md).
+
 La guía en PDF por rol está en [docs/matriz-roles-accesos-cod-1454.pdf](docs/matriz-roles-accesos-cod-1454.pdf).
 
 Las pruebas de integración requieren PostgreSQL local de desarrollo (`DATABASE_URL` con nombre de base que incluya `dev`, `test` o `local`).
