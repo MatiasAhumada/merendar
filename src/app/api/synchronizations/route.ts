@@ -15,6 +15,7 @@ import type { SyncResource } from "@/types/offline-operation";
 import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
 import { merchandisePayloadSchema } from "@/validations/merchandise.validation";
 import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
+import { distributionRecordPayloadSchema } from "@/validations/record.validation";
 
 const synchronizationSchema = z.object({
   operationId: z.uuid(),
@@ -89,9 +90,11 @@ export async function POST(request: NextRequest) {
 
     // Recover operations created by the earlier client serializer, which
     // stored the JSON representation one level too deep as a string.
-    if (typeof rawPayload === "string") {
+    const serializedPayload = z.string().safeParse(rawPayload);
+
+    if (serializedPayload.success) {
       try {
-        rawPayload = JSON.parse(rawPayload);
+        rawPayload = JSON.parse(serializedPayload.data);
       } catch {
         return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la recepción pendiente.");
       }
@@ -106,6 +109,21 @@ export async function POST(request: NextRequest) {
 
     if (parsedPayload.data.id !== parsedOperation.data.resourceId) {
       return errorResponse(400, "invalid_merchandise_operation", "El identificador del borrador no coincide con los datos guardados.");
+    }
+
+    parsedOperation.data.payload = parsedPayload.data;
+  }
+
+  if (parsedOperation.data.resource === "records") {
+    const parsedPayload = distributionRecordPayloadSchema.safeParse(parsedOperation.data.payload);
+    const validBaseVersion = z.null().safeParse(parsedOperation.data.baseVersion);
+
+    if (!parsedPayload.success || parsedPayload.data.id !== parsedOperation.data.resourceId) {
+      return errorResponse(400, "invalid_record_operation", "Revisá los datos del registro antes de sincronizar.");
+    }
+
+    if (parsedOperation.data.operation !== "create" || !validBaseVersion.success) {
+      return errorResponse(400, "invalid_record_operation", "El registro solo admite altas nuevas.");
     }
 
     parsedOperation.data.payload = parsedPayload.data;

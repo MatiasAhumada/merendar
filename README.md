@@ -43,23 +43,25 @@ Abrí [http://localhost:3000](http://localhost:3000) e ingresá con la cuenta co
 | `/login` | Acceso de usuarios |
 | `/` | Dashboard operativo, métricas y accesos rápidos |
 | `/familias` | Padrón con búsqueda, filtros, ficha y formulario de alta |
-| `/entrega` | Registro de entrega de prueba con ficha, checklist y firma |
+| `/entrega` | Registro de beneficiarios, cola offline y planillas PDF para firma manuscrita |
 | `/mercaderia` | Períodos, solicitudes, cupos aprobados, remitos y comprobantes privados |
 
 ## Alcance actual
 
-El padrón y la recepción de mercadería persisten en PostgreSQL y admiten captura offline con sincronización idempotente. El dashboard y el registro individual de entregas siguen mostrando información ilustrativa; la consolidación y exportación de rendiciones corresponde a COD-1429. El acceso valida cuentas contra PostgreSQL. Las sesiones se almacenan en la base de datos, vencen a las 12 horas y se revocan al cerrar sesión. Las contraseñas se guardan con scrypt; las cookies de sesión son HttpOnly y SameSite=Lax, y usan Secure bajo HTTPS. El proxy realiza una redirección preliminar; páginas y endpoints verifican la sesión en la base de datos.
+El padrón, la recepción de mercadería y los registros de beneficiarios persisten en PostgreSQL y admiten captura offline con sincronización idempotente. Las planillas imprimibles guardan una instantánea versionada del padrón; la firma se realiza en papel y la carga del PDF escaneado corresponde a COD-1429. El dashboard sigue mostrando información ilustrativa. El acceso valida cuentas contra PostgreSQL. Las sesiones se almacenan en la base de datos, vencen a las 12 horas y se revocan al cerrar sesión. Las contraseñas se guardan con scrypt; las cookies de sesión son HttpOnly y SameSite=Lax, y usan Secure bajo HTTPS. El proxy realiza una redirección preliminar; páginas y endpoints verifican la sesión en la base de datos.
 
 ## Validación
 
 ```bash
 pnpm lint
 pnpm build
-ALLOW_AUTH_INTEGRATION_TESTS=true pnpm test:integration
+ALLOW_AUTH_INTEGRATION_TESTS=true ALLOW_FAMILY_INTEGRATION_TESTS=true ALLOW_SYNC_INTEGRATION_TESTS=true pnpm test:integration
 ```
 
 La estrategia de instalación, caché pública y acceso sin conexión está documentada en [docs/offline.md](docs/offline.md).
 
 El modelo, los permisos y el flujo de recepción de mercadería están documentados en [docs/merchandise.md](docs/merchandise.md).
+
+Los registros de beneficiarios, planillas versionadas y permisos están documentados en [docs/delivery.md](docs/delivery.md).
 
 Las pruebas de integración requieren PostgreSQL local de desarrollo (`DATABASE_URL` con nombre de base que incluya `dev`, `test` o `local`).

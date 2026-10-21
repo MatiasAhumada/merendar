@@ -1,7 +1,20 @@
 import { Prisma, type SyncResource } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import type { SubmittedSyncOperation, SynchronizationHandler } from "@/interfaces/synchronization.interface";
 import type { JsonValue } from "@/types/json-value";
+
+const adapterSerializationConflictSchema = z.object({
+  cause: z.object({ originalCode: z.literal("40001") }).passthrough(),
+}).passthrough();
+
+function isRetryableTransactionError(error: unknown) {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return error.code === "P2002" || error.code === "P2034";
+  }
+
+  return adapterSerializationConflictSchema.safeParse(error).success;
+}
 
 export class SynchronizationConflictError extends Error {
   readonly currentVersion: number;
@@ -116,7 +129,7 @@ export const synchronizationRepository = {
           return savedResponse(receipt, false);
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
       } catch (error) {
-        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || (error.code !== "P2002" && error.code !== "P2034")) {
+        if (!isRetryableTransactionError(error)) {
           throw error;
         }
 

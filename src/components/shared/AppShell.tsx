@@ -46,7 +46,7 @@ interface AppShellProps {
   sessionExpiresAt: string;
 }
 
-const offlineFamilyRoles: UserRole[] = [UserRole.PRESIDENTE, UserRole.SECRETARIA];
+const offlineCaptureRoles: UserRole[] = [UserRole.PRESIDENTE, UserRole.SECRETARIA];
 
 export function AppShell({ children, user, sessionExpiresAt }: AppShellProps) {
   const pathname = usePathname();
@@ -59,11 +59,11 @@ export function AppShell({ children, user, sessionExpiresAt }: AppShellProps) {
   const isOnline = useNetworkStatus();
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
   const navigation = PRIMARY_NAVIGATION.filter((item) => item.href !== ROUTES.USERS || user.role === UserRole.PRESIDENTE);
-  const canCaptureFamiliesOffline = pathname === ROUTES.FAMILIES &&
-    offlineFamilyRoles.includes(user.role) && Date.now() < Date.parse(sessionExpiresAt);
+  const canCaptureOffline = (pathname === ROUTES.FAMILIES || pathname === ROUTES.DELIVERY) &&
+    offlineCaptureRoles.includes(user.role) && Date.now() < Date.parse(sessionExpiresAt);
   let pageContent = children;
 
-  if (!isOnline && !canCaptureFamiliesOffline) {
+  if (!isOnline && !canCaptureOffline) {
     pageContent = <OfflineAccessNotice />;
   }
 

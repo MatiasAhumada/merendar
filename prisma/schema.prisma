@@ -21,6 +21,8 @@ model User {
   approvedMerchandiseQuotas MerchandiseQuota[] @relation("MerchandiseQuotaApprover")
   merchandiseRemittances MerchandiseRemittance[] @relation("MerchandiseRemittanceCreator")
   merchandiseDocuments MerchandiseDocument[] @relation("MerchandiseDocumentUploader")
+  distributionRecords DistributionRecord[] @relation("DistributionRecordCreator")
+  beneficiarySheets BeneficiarySheet[] @relation("BeneficiarySheetCreator")
   synchronizationReceipts SynchronizationReceipt[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -69,6 +71,7 @@ model FamilyMember {
   family             Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
   person             Person            @relation(fields: [personId], references: [id], onDelete: Restrict)
   missingDocuments   MissingDocument[]
+  distributionRecords DistributionRecord[]
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
@@ -171,6 +174,8 @@ model MerchandisePeriod {
   startsAt  DateTime             @db.Date
   endsAt    DateTime             @db.Date
   requests  MerchandiseRequest[]
+  distributionRecords DistributionRecord[]
+  beneficiarySheets BeneficiarySheet[]
   createdAt DateTime             @default(now())
   updatedAt DateTime             @updatedAt
 
@@ -252,4 +257,39 @@ model MerchandiseDocument {
 
   @@index([requestId, createdAt])
   @@index([remittanceId, createdAt])
+}
+
+model DistributionRecord {
+  id                 String             @id @default(cuid())
+  operationId        String             @unique @db.Uuid
+  periodId           String
+  familyMemberId     String
+  receivedAt         DateTime           @db.Date
+  moduleType         String
+  quantity           Int
+  physicalDniChecked Boolean            @default(false)
+  documentsChecked   Boolean            @default(false)
+  notes              String?
+  period             MerchandisePeriod  @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  familyMember       FamilyMember       @relation(fields: [familyMemberId], references: [id], onDelete: Restrict)
+  createdById        String
+  createdBy          User               @relation("DistributionRecordCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt          DateTime           @default(now())
+
+  @@unique([periodId, familyMemberId])
+  @@index([familyMemberId, receivedAt])
+}
+
+model BeneficiarySheet {
+  id          String            @id @default(cuid())
+  periodId    String
+  version     Int
+  snapshot    Json
+  period      MerchandisePeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  createdById String
+  createdBy   User              @relation("BeneficiarySheetCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt   DateTime          @default(now())
+
+  @@unique([periodId, version])
+  @@index([periodId, createdAt])
 }

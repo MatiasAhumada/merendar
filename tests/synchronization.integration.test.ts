@@ -98,7 +98,7 @@ test("offline synchronization receipts are atomic, idempotent and bound to the o
   }
 });
 
-test("synchronization endpoint rejects cross-origin, expired and cross-account operations", async () => {
+test("synchronization endpoint rejects cross-origin, expired, cross-account and malformed record operations", async () => {
   assert.equal(process.env.ALLOW_SYNC_INTEGRATION_TESTS, "true");
   const suffix = randomBytes(10).toString("hex");
   const user = await prisma.user.create({
@@ -142,7 +142,7 @@ test("synchronization endpoint rejects cross-origin, expired and cross-account o
     assert.equal((await POST(createRequest(operation, token, "https://outside.example"))).status, 403);
     assert.equal((await POST(createRequest(operation))).status, 401);
     assert.equal((await POST(createRequest({ ...operation, userId: `another-${user.id}` }, token))).status, 403);
-    assert.equal((await POST(createRequest(operation, token))).status, 501);
+    assert.equal((await POST(createRequest(operation, token))).status, 400);
 
     await prisma.user.update({ where: { id: user.id }, data: { isActive: false } });
     assert.equal((await POST(createRequest(operation, token))).status, 401);
