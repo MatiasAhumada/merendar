@@ -1,6 +1,6 @@
 import type { JsonValue } from "@/types/json-value";
 
-export type SyncResource = "families" | "remittances" | "records";
+export type SyncResource = "families" | "remittances" | "records" | "renditions";
 export type SyncOperationStatus = "pending" | "syncing" | "synced" | "error" | "conflict";
 
 export interface OfflineOperationInput {

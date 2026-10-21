@@ -23,6 +23,9 @@ model User {
   merchandiseDocuments MerchandiseDocument[] @relation("MerchandiseDocumentUploader")
   distributionRecords DistributionRecord[] @relation("DistributionRecordCreator")
   beneficiarySheets BeneficiarySheet[] @relation("BeneficiarySheetCreator")
+  createdRenditions Rendition[] @relation("RenditionCreator")
+  reviewedRenditions Rendition[] @relation("RenditionReviewer")
+  renditionDocuments RenditionDocument[] @relation("RenditionDocumentUploader")
   synchronizationReceipts SynchronizationReceipt[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -159,6 +162,7 @@ enum SyncResource {
   FAMILIES
   REMITTANCES
   RECORDS
+  RENDITIONS
 }
 
 enum MerchandiseRequestStatus {
@@ -176,6 +180,7 @@ model MerchandisePeriod {
   requests  MerchandiseRequest[]
   distributionRecords DistributionRecord[]
   beneficiarySheets BeneficiarySheet[]
+  renditions Rendition[]
   createdAt DateTime             @default(now())
   updatedAt DateTime             @updatedAt
 
@@ -288,8 +293,65 @@ model BeneficiarySheet {
   period      MerchandisePeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
   createdById String
   createdBy   User              @relation("BeneficiarySheetCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  renditions Rendition[]
   createdAt   DateTime          @default(now())
 
   @@unique([periodId, version])
   @@index([periodId, createdAt])
+}
+
+enum RenditionReviewStatus {
+  PENDIENTE
+  REVISADA
+  OBSERVADA
+}
+
+enum RenditionDocumentType {
+  PLANILLA_FIRMADA
+  REMITO
+  RESPALDO
+}
+
+model Rendition {
+  id                 String                @id @default(cuid())
+  periodId           String
+  beneficiarySheetId String                @unique
+  reviewStatus       RenditionReviewStatus @default(PENDIENTE)
+  reviewNotes        String?
+  reviewedAt         DateTime?
+  reviewedById       String?
+  period             MerchandisePeriod     @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  beneficiarySheet   BeneficiarySheet      @relation(fields: [beneficiarySheetId], references: [id], onDelete: Restrict)
+  createdById        String
+  createdBy          User                  @relation("RenditionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewedBy         User?                 @relation("RenditionReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  documents          RenditionDocument[]
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@index([periodId, createdAt])
+  @@index([reviewStatus, updatedAt])
+}
+
+model RenditionDocument {
+  id           String                @id @default(cuid())
+  operationId  String                @db.Uuid
+  renditionId  String
+  documentType RenditionDocumentType
+  version      Int
+  supersedesId String?
+  originalName String
+  contentType  String
+  byteSize     Int
+  content      Bytes
+  rendition    Rendition             @relation(fields: [renditionId], references: [id], onDelete: Restrict)
+  supersedes   RenditionDocument?    @relation("RenditionDocumentVersions", fields: [supersedesId], references: [id], onDelete: Restrict)
+  supersededBy RenditionDocument[]   @relation("RenditionDocumentVersions")
+  uploadedById String
+  uploadedBy   User                  @relation("RenditionDocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime              @default(now())
+
+  @@unique([renditionId, documentType, version])
+  @@index([renditionId, documentType, createdAt])
+  @@index([operationId])
 }

@@ -5,6 +5,7 @@ import { synchronizationRepository } from "@/server/repository/synchronization.r
 import { familySynchronizationHandler } from "@/server/services/family-synchronization.service";
 import { merchandiseSynchronizationHandler } from "@/server/services/merchandise-synchronization.service";
 import { recordSynchronizationHandler } from "@/server/services/record-synchronization.service";
+import { renditionSynchronizationHandler } from "@/server/services/rendition-synchronization.service";
 import type { JsonValue } from "@/types/json-value";
 
 function hashOperation(operation: SubmittedSyncOperation) {
@@ -27,5 +28,5 @@ export const synchronizationService = {
 };
 
 export function createSynchronizationHandlers(): Partial<Record<SyncResource, SynchronizationHandler>> {
-  return { FAMILIES: familySynchronizationHandler, REMITTANCES: merchandiseSynchronizationHandler, RECORDS: recordSynchronizationHandler };
+  return { FAMILIES: familySynchronizationHandler, REMITTANCES: merchandiseSynchronizationHandler, RECORDS: recordSynchronizationHandler, RENDITIONS: renditionSynchronizationHandler };
 }

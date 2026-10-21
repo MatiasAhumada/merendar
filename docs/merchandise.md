@@ -1,6 +1,6 @@
 # Recepción de mercadería
 
-El módulo `/mercaderia` persiste los ciclos de solicitudes de módulos alimentarios, cupos aprobados y remitos de recepción. La sección de rendiciones permanece como referencia visual hasta COD-1429; no deriva stock ni métricas de distribución.
+El módulo `/mercaderia` persiste los ciclos de solicitudes de módulos alimentarios, cupos aprobados, remitos de recepción y rendiciones vinculadas a versiones emitidas de planillas de beneficiarios. La revisión de una rendición es manual; no deriva stock ni métricas de distribución ni declara una presentación oficial.
 
 ## Relaciones y reglas
 
@@ -17,6 +17,8 @@ Las operaciones de alta del flujo offline usan identificadores estables. La soli
 Solo los roles `PRESIDENTE` y `SECRETARIA` pueden consultar o registrar estas entidades. El servidor repite la comprobación de sesión y rol en cada endpoint de lectura, sincronización y descarga.
 
 Los comprobantes aceptados son PDF, JPEG o PNG, con un límite de 512 KiB. El servidor valida el tamaño y la firma de los bytes antes de persistirlos. La descarga usa `/api/merchandise/documents/[id]`, responde con `Cache-Control: private, no-store` y `X-Content-Type-Options: nosniff`.
+
+Las planillas firmadas, remitos y respaldos de rendición son PDF privados. El flujo se documenta en `docs/delivery.md`; sus límites se centralizan en `src/constants/rendition.constant.ts` y las cargas offline usan operaciones idempotentes de `RENDITIONS`.
 
 ## Migración
 

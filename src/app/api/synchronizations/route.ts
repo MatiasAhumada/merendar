@@ -16,11 +16,13 @@ import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interf
 import { merchandisePayloadSchema } from "@/validations/merchandise.validation";
 import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
 import { distributionRecordPayloadSchema } from "@/validations/record.validation";
+import { renditionDocumentPayloadSchema } from "@/validations/rendition.validation";
+import { RenditionDocumentError } from "@/server/services/rendition-synchronization.service";
 
 const synchronizationSchema = z.object({
   operationId: z.uuid(),
   userId: z.string().min(1),
-  resource: z.enum(["families", "remittances", "records"]),
+  resource: z.enum(["families", "remittances", "records", "renditions"]),
   resourceId: z.string().min(1),
   operation: z.enum(["create", "update", "delete"]),
   baseVersion: z.number().int().nonnegative().nullable(),
@@ -32,6 +34,7 @@ const prismaResourceByClientResource: Record<SyncResource, PrismaSyncResource> =
   families: "FAMILIES",
   remittances: "REMITTANCES",
   records: "RECORDS",
+  renditions: "RENDITIONS",
 };
 
 const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
@@ -129,6 +132,21 @@ export async function POST(request: NextRequest) {
     parsedOperation.data.payload = parsedPayload.data;
   }
 
+  if (parsedOperation.data.resource === "renditions") {
+    const parsedPayload = renditionDocumentPayloadSchema.safeParse(parsedOperation.data.payload);
+    const validBaseVersion = z.null().safeParse(parsedOperation.data.baseVersion);
+
+    if (!parsedPayload.success || parsedPayload.data.id !== parsedOperation.data.resourceId) {
+      return errorResponse(400, "invalid_rendition_operation", "Revisá los archivos y la referencia de planilla antes de sincronizar.");
+    }
+
+    if (parsedOperation.data.operation !== "create" || !validBaseVersion.success) {
+      return errorResponse(400, "invalid_rendition_operation", "Los documentos de rendición solo admiten cargas nuevas.");
+    }
+
+    parsedOperation.data.payload = parsedPayload.data;
+  }
+
   const handlers = createSynchronizationHandlers();
   const resource = prismaResourceByClientResource[parsedOperation.data.resource];
   const handler = handlers[resource];
@@ -158,6 +176,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     if (error instanceof MerchandiseDocumentError) {
       return errorResponse(400, "invalid_merchandise_operation", error.message);
+    }
+
+    if (error instanceof RenditionDocumentError) {
+      return errorResponse(400, "invalid_rendition_operation", error.message);
     }
 
     if (error instanceof SynchronizationConflictError) {

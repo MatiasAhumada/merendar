@@ -22,7 +22,7 @@ const offlineOperationSchema = z.object({
   operationId: z.uuid(),
   userId: z.string().min(1),
   sessionExpiresAt: z.iso.datetime(),
-  resource: z.enum(["families", "remittances", "records"]),
+  resource: z.enum(["families", "remittances", "records", "renditions"]),
   resourceId: z.string().min(1),
   operation: z.enum(["create", "update", "delete"]),
   baseVersion: z.number().int().nonnegative().nullable(),

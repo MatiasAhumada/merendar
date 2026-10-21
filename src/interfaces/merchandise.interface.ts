@@ -1,3 +1,5 @@
+import type { RenditionRecord } from "@/interfaces/rendition.interface";
+
 export interface MerchandiseDocumentSummary {
   id: string;
   originalName: string;
@@ -55,6 +57,8 @@ export interface MerchandisePeriodRecord {
   startsAt: string;
   endsAt: string;
   requests: MerchandiseRequestRecord[];
+  beneficiarySheets: Array<{ id: string; version: number; createdAt: string; beneficiaryCount: number }>;
+  renditions: RenditionRecord[];
   createdAt: string;
   updatedAt: string;
 }

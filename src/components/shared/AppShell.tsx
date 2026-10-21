@@ -60,7 +60,7 @@ export function AppShell({ children, user, sessionExpiresAt }: AppShellProps) {
   const isOnline = useNetworkStatus();
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
   const navigation = PRIMARY_NAVIGATION.filter((item) => item.roles.some((role) => role === user.role));
-  const canCaptureOffline = (pathname === ROUTES.FAMILIES || pathname === ROUTES.DELIVERY) &&
+  const canCaptureOffline = (pathname === ROUTES.FAMILIES || pathname === ROUTES.DELIVERY || pathname === ROUTES.GOODS) &&
     offlineCaptureRoles.includes(user.role) && Date.now() < Date.parse(sessionExpiresAt);
   let pageContent = children;
 

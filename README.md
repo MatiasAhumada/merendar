@@ -55,7 +55,7 @@ El padrón, la recepción de mercadería y los registros de beneficiarios persis
 ```bash
 pnpm lint
 pnpm build
-ALLOW_AUTH_INTEGRATION_TESTS=true ALLOW_FAMILY_INTEGRATION_TESTS=true ALLOW_SYNC_INTEGRATION_TESTS=true pnpm test:integration
+ALLOW_AUTH_INTEGRATION_TESTS=true ALLOW_FAMILY_INTEGRATION_TESTS=true ALLOW_SYNC_INTEGRATION_TESTS=true ALLOW_DASHBOARD_INTEGRATION_TESTS=true ALLOW_RENDITION_INTEGRATION_TESTS=true pnpm test:integration
 ```
 
 La estrategia de instalación, caché pública y acceso sin conexión está documentada en [docs/offline.md](docs/offline.md).

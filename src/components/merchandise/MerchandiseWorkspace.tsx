@@ -7,7 +7,6 @@ import {
   Calendar03Icon,
   CheckmarkCircle01Icon,
   File01Icon,
-  FileSpreadsheetIcon,
   PackageIcon,
   ReceiptTextIcon,
   RefreshIcon,
@@ -39,6 +38,7 @@ import type {
   MerchandiseRemittanceRecord,
   MerchandiseRequestRecord,
 } from "@/interfaces/merchandise.interface";
+import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace";
 import { merchandisePayloadSchema, type MerchandisePayload } from "@/validations/merchandise.validation";
 import { z } from "zod";
 
@@ -59,6 +59,32 @@ const merchandiseResponseSchema = z.object({
     agency: z.string(),
     startsAt: z.iso.datetime(),
     endsAt: z.iso.datetime(),
+    beneficiarySheets: z.array(z.object({
+      id: z.string(),
+      version: z.number().int(),
+      createdAt: z.iso.datetime(),
+      beneficiaryCount: z.number().int().nonnegative(),
+    })),
+    renditions: z.array(z.object({
+      id: z.string(),
+      periodId: z.string(),
+      beneficiarySheetId: z.string(),
+      reviewStatus: z.enum(["PENDIENTE", "REVISADA", "OBSERVADA"]),
+      reviewNotes: z.string().nullable(),
+      reviewedAt: z.iso.datetime().nullable(),
+      beneficiarySheet: z.object({ id: z.string(), version: z.number().int(), createdAt: z.iso.datetime(), beneficiaryCount: z.number().int().nonnegative() }),
+      documents: z.array(z.object({
+        id: z.string(),
+        documentType: z.enum(["PLANILLA_FIRMADA", "REMITO", "RESPALDO"]),
+        version: z.number().int(),
+        supersedesId: z.string().nullable(),
+        originalName: z.string(),
+        byteSize: z.number().int(),
+        createdAt: z.iso.datetime(),
+      })),
+      createdAt: z.iso.datetime(),
+      updatedAt: z.iso.datetime(),
+    })),
     requests: z.array(z.object({
       id: z.string(),
       periodId: z.string(),
@@ -112,13 +138,6 @@ const merchandiseResponseSchema = z.object({
     updatedAt: z.iso.datetime(),
   })),
 });
-
-const renditionChecks = [
-  { label: "Remito original digitalizado", status: "Pendiente" },
-  { label: "Cupo ministerial cotejado", status: "Pendiente" },
-  { label: "Documentación de recepción", status: "Pendiente" },
-  { label: "Planilla oficial del período", status: "Pendiente" },
-] as const;
 
 const receiptLimitConflictSchema = z.object({
   kind: z.literal("receipt_exceeds_quota"),
@@ -241,6 +260,8 @@ function queuedPeriod(payload: Extract<MerchandisePayload, { kind: "period" }>, 
     startsAt: new Date(`${payload.startsAt}T00:00:00.000Z`).toISOString(),
     endsAt: new Date(`${payload.endsAt}T00:00:00.000Z`).toISOString(),
     requests: [],
+    beneficiarySheets: [],
+    renditions: [],
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -450,11 +471,15 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt }: MerchandiseWo
       setPeriods(parsed.data.periods);
       setLoadError("");
     } catch (error) {
-      setLoadError(errorMessage(error));
+      if (isOnline) {
+        setLoadError(errorMessage(error));
+      } else {
+        setLoadError("Sin conexión. Se muestran los períodos y las planillas que ya estaban cargados en esta vista.");
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isOnline]);
 
   const refreshQueue = useCallback(async () => {
     try {
@@ -722,10 +747,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt }: MerchandiseWo
         {!visiblePeriods.some((period) => period.requests.some((request) => request.remittances.length)) ? <Card variant="muted"><CardContent className="flex items-center gap-3 py-5"><HugeiconsIcon icon={TruckIcon} strokeWidth={1.8} className="size-6 text-primary" /><p className="text-sm text-muted-foreground">Los remitos recibidos aparecerán vinculados a su solicitud y cupo aprobado.</p></CardContent></Card> : null}
       </section>
 
-      <section id="rendiciones" aria-labelledby="renditions-title" className="scroll-mt-28 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2"><div><h2 id="renditions-title" className="font-display text-xl font-semibold">Rendiciones oficiales</h2><p className="text-sm text-muted-foreground">La preparación y exportación corresponden al ticket COD-1429.</p></div><Badge variant="secondary">Maqueta</Badge></div>
-        <Card><CardHeader><CardTitle><h3 className="font-display text-base font-semibold">Control documental del período</h3></CardTitle><p className="text-sm text-muted-foreground">Esta sección es ilustrativa y todavía no consolida ni exporta documentación.</p></CardHeader><CardContent><ul className="flex flex-col gap-3 rounded-xl bg-muted p-3">{renditionChecks.map((item) => <li key={item.label} className="flex items-center justify-between gap-3 text-sm"><span className="flex items-center gap-2"><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} className="size-4 shrink-0 text-muted-foreground" />{item.label}</span><Badge variant="secondary">{item.status}</Badge></li>)}</ul><Button variant="secondary" className="mt-4 w-full whitespace-normal" disabled><HugeiconsIcon icon={FileSpreadsheetIcon} strokeWidth={1.8} /> Generar planilla oficial de rendición</Button></CardContent></Card>
-      </section>
+      <RenditionWorkspace periods={visiblePeriods} userId={userId} sessionExpiresAt={sessionExpiresAt} onRefresh={loadMerchandise} />
     </div>
   );
 }
