@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Calendar03Icon, Download04Icon, File01Icon, PackageIcon, UserGroupIcon } from "@hugeicons/core-free-icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -8,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -63,6 +64,8 @@ interface DeliveryWorkbenchProps {
   userId: string;
   sessionExpiresAt: string;
   canWrite: boolean;
+  canCreateFamilies: boolean;
+  canCreatePeriods: boolean;
 }
 
 const emptyData: WorkbenchData = { periods: [], families: [], records: [], sheets: [] };
@@ -78,7 +81,7 @@ function personLabel(person: DeliveryFamily["members"][number]["person"]) {
   return `${person.firstName} ${person.lastName}`;
 }
 
-export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite }: DeliveryWorkbenchProps) {
+export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreateFamilies, canCreatePeriods }: DeliveryWorkbenchProps) {
   const isOnline = useNetworkStatus();
   const [data, setData] = useState<WorkbenchData>(emptyData);
   const [periodId, setPeriodId] = useState("");
@@ -92,6 +95,8 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite }: Delive
   const [notes, setNotes] = useState("");
   const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasLoadedData, setHasLoadedData] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isIssuingSheet, setIsIssuingSheet] = useState(false);
   const [notice, setNotice] = useState("");
@@ -107,6 +112,8 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite }: Delive
 
     const result = await response.json() as WorkbenchData;
     setData((current) => ({ ...result, records: selectedPeriodId ? result.records : current.records, sheets: selectedPeriodId ? result.sheets : current.sheets }));
+    setHasLoadedData(true);
+    setLoadFailed(false);
 
     if (!selectedPeriodId && !periodId && result.periods[0]) {
       setPeriodId(result.periods[0].id);
@@ -125,9 +132,11 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite }: Delive
 
     setIsLoading(true);
     setError("");
+    setLoadFailed(false);
     fetchData(periodId || undefined)
       .catch((loadError: unknown) => {
         if (!cancelled) {
+          setLoadFailed(true);
           setError(loadError instanceof Error ? loadError.message : "No se pudo cargar el registro.");
         }
       })
@@ -146,6 +155,42 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite }: Delive
   const selectedFamily = data.families.find((family) => family.id === familyId);
   const familyMembers = selectedFamily?.members ?? [];
   const recordedPeople = new Set(data.records.map((record) => record.personId));
+  let periodAvailabilityMessage = "";
+  let familyAvailabilityMessage = "";
+
+  if (isLoading) {
+    periodAvailabilityMessage = "Cargando períodos…";
+    familyAvailabilityMessage = "Cargando grupos familiares…";
+  } else if (!isOnline && !hasLoadedData) {
+    periodAvailabilityMessage = "No hay períodos preparados en esta vista sin conexión.";
+    familyAvailabilityMessage = "No hay grupos familiares preparados en esta vista sin conexión.";
+  } else if (loadFailed && !hasLoadedData) {
+    periodAvailabilityMessage = "No se pudo confirmar si hay períodos. Reintentá la carga para actualizar la lista.";
+    familyAvailabilityMessage = "No se pudo confirmar si hay grupos familiares. Reintentá la carga para actualizar la lista.";
+  } else {
+    if (!data.periods.length) {
+      periodAvailabilityMessage = "No hay períodos cargados.";
+    }
+
+    if (!data.families.length) {
+      familyAvailabilityMessage = "No hay grupos familiares cargados en el padrón.";
+    }
+  }
+
+  async function retryData() {
+    setIsLoading(true);
+    setLoadFailed(false);
+    setError("");
+
+    try {
+      await fetchData(periodId || undefined);
+    } catch (loadError) {
+      setLoadFailed(true);
+      setError(loadError instanceof Error ? loadError.message : "No se pudo cargar el registro.");
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
   function toggleBeneficiary(beneficiaryId: string, checked: boolean | "indeterminate") {
     if (checked === "indeterminate") {
@@ -266,7 +311,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite }: Delive
         <Badge variant={isOnline ? "success" : "warning"} className="w-fit">{isOnline ? "Conectado" : "Sin conexión"}</Badge>
       </header>
 
-      {error ? <Alert variant="destructive"><AlertTitle>No se completó la operación</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
+      {error ? <Alert variant="destructive"><AlertTitle>No se completó la operación</AlertTitle><AlertDescription className="flex flex-wrap items-center gap-3">{error}{loadFailed ? <Button variant="outline" size="sm" onClick={() => void retryData()}>Reintentar</Button> : null}</AlertDescription></Alert> : null}
       {notice ? <Alert variant="info"><AlertTitle>Estado del registro</AlertTitle><AlertDescription>{notice}</AlertDescription></Alert> : null}
 
       <Card>
@@ -277,12 +322,13 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite }: Delive
         <CardContent>
           <Field>
             <FieldLabel htmlFor="record-period">Período</FieldLabel>
-            <Select value={periodId} onValueChange={(value) => { setPeriodId(value); setSelectedPersonIds([]); }}>
+            <Select value={periodId} onValueChange={(value) => { setPeriodId(value); setSelectedPersonIds([]); }} disabled={isLoading || !data.periods.length}>
               <SelectTrigger id="record-period" aria-label="Seleccionar módulo o período"><SelectValue placeholder="Seleccionar un período" /></SelectTrigger>
               <SelectContent>
                 {data.periods.map((period) => <SelectItem key={period.id} value={period.id}>{period.label} · {period.agency}</SelectItem>)}
               </SelectContent>
             </Select>
+            {periodAvailabilityMessage ? <div className="mt-2 flex flex-col items-start gap-2 sm:flex-row sm:items-center"><FieldDescription>{periodAvailabilityMessage}</FieldDescription>{!isLoading && !loadFailed && isOnline && !data.periods.length && canCreatePeriods ? <Button asChild variant="outline" size="sm"><Link href="/mercaderia#periodos">Crear un período en Mercadería</Link></Button> : null}{!isLoading && !loadFailed && isOnline && !data.periods.length && !canCreatePeriods ? <FieldDescription>Pedile a Presidencia o Secretaría que cargue un período.</FieldDescription> : null}</div> : null}
           </Field>
           {selectedPeriod ? <p className="mt-3 text-xs text-muted-foreground">Vigencia: {selectedPeriod.startsAt.slice(0, 10)} al {selectedPeriod.endsAt.slice(0, 10)}</p> : null}
         </CardContent>
@@ -299,10 +345,11 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite }: Delive
               <FieldGroup className="gap-4 sm:grid sm:grid-cols-2">
                 <Field>
                   <FieldLabel htmlFor="record-family">Grupo familiar</FieldLabel>
-                  <Select value={familyId} onValueChange={(value) => { setFamilyId(value); setPersonId(""); }}>
+                  <Select value={familyId} onValueChange={(value) => { setFamilyId(value); setPersonId(""); }} disabled={isLoading || !data.families.length}>
                     <SelectTrigger id="record-family"><SelectValue placeholder="Seleccionar grupo" /></SelectTrigger>
                     <SelectContent>{data.families.map((family) => <SelectItem key={family.id} value={family.id}>{family.name} · {family.neighborhood}</SelectItem>)}</SelectContent>
                   </Select>
+                  {familyAvailabilityMessage ? <div className="mt-2 flex flex-col items-start gap-2"><FieldDescription>{familyAvailabilityMessage}</FieldDescription>{!isLoading && !loadFailed && isOnline && !data.families.length && canCreateFamilies ? <Button asChild variant="outline" size="sm"><Link href="/familias">Cargar grupo familiar</Link></Button> : null}{!isLoading && !loadFailed && isOnline && !data.families.length && !canCreateFamilies ? <FieldDescription>Pedile a Presidencia o Secretaría que cargue un grupo familiar.</FieldDescription> : null}</div> : null}
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="record-person">Beneficiario</FieldLabel>

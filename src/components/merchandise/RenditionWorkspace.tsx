@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CheckmarkCircle01Icon, File01Icon, RefreshIcon, Upload01Icon } from "@hugeicons/core-free-icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -26,6 +27,8 @@ interface RenditionWorkspaceProps {
   onRefresh: () => Promise<void>;
   canWrite: boolean;
   canReview: boolean;
+  canCreatePeriods: boolean;
+  periodStatus: "loading" | "error" | "offline-unprepared" | "empty" | "ready";
 }
 
 const documentTypeSchema = z.enum([
@@ -127,7 +130,7 @@ function createReviewPayload(status: "REVISADA" | "OBSERVADA", notes: string) {
   return { status };
 }
 
-export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefresh, canWrite, canReview }: RenditionWorkspaceProps) {
+export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefresh, canWrite, canReview, canCreatePeriods, periodStatus }: RenditionWorkspaceProps) {
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
   const [selectedPeriodId, setSelectedPeriodId] = useState("");
   const [selectedSheetId, setSelectedSheetId] = useState("");
@@ -174,6 +177,17 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
   const pendingDocumentCount = queuedUploads.reduce((count, upload) => count + upload.payload.documents.length, 0);
   const hasSignedSheet = currentDocuments.some((document) => document.documentType === RENDITION_DOCUMENT_TYPES.SIGNED_SHEET) ||
     queuedUploads.some(({ payload }) => payload.documents.some((document) => document.type === RENDITION_DOCUMENT_TYPES.SIGNED_SHEET));
+  let periodAvailabilityMessage = "";
+
+  if (periodStatus === "loading") {
+    periodAvailabilityMessage = "Cargando períodos…";
+  } else if (periodStatus === "error") {
+    periodAvailabilityMessage = "No se pudo confirmar si hay períodos. Reintentá la carga antes de seleccionar.";
+  } else if (periodStatus === "offline-unprepared") {
+    periodAvailabilityMessage = "No hay períodos preparados en esta vista sin conexión.";
+  } else if (periodStatus === "empty") {
+    periodAvailabilityMessage = "No hay períodos cargados.";
+  }
 
   useEffect(() => {
     if (!periods.some((period) => period.id === selectedPeriodId)) {
@@ -320,10 +334,11 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field>
           <FieldLabel htmlFor="rendition-period">Módulo o período</FieldLabel>
-          <Select value={selectedPeriod?.id ?? ""} onValueChange={setSelectedPeriodId}>
+          <Select value={selectedPeriod?.id ?? ""} onValueChange={setSelectedPeriodId} disabled={periodStatus !== "ready"}>
             <SelectTrigger id="rendition-period"><SelectValue placeholder="Elegí un período" /></SelectTrigger>
             <SelectContent>{periods.map((period) => <SelectItem key={period.id} value={period.id}>{period.label} · {period.agency}</SelectItem>)}</SelectContent>
           </Select>
+          {periodAvailabilityMessage ? <div className="mt-2 flex flex-col items-start gap-2"><FieldDescription>{periodAvailabilityMessage}</FieldDescription>{periodStatus === "empty" && canCreatePeriods ? <Button asChild variant="outline" size="sm"><Link href="#periodos">Ir a Períodos y solicitudes</Link></Button> : null}{periodStatus === "empty" && !canCreatePeriods ? <FieldDescription>Pedile a Presidencia o Secretaría que cargue un período.</FieldDescription> : null}</div> : null}
         </Field>
         <Field>
           <FieldLabel htmlFor="rendition-sheet">Planilla emitida</FieldLabel>

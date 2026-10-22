@@ -582,6 +582,28 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
   const visiblePeriods = useMemo(() => addQueuedRecords(periods, localRecords), [localRecords, periods]);
   const pendingOperations = operations.filter((operation) => operation.resource === "remittances" && operation.status !== "synced");
   const queuedPeriodIds = new Set(localRecords.filter((record) => record.payload.kind === "period").map((record) => record.payload.id));
+  let periodStatus: "loading" | "error" | "offline-unprepared" | "empty" | "ready" = "loading";
+
+  if (!loading && visiblePeriods.length) {
+    periodStatus = "ready";
+  } else if (!loading && isOnline && loadError) {
+    periodStatus = "error";
+  } else if (!loading && !isOnline) {
+    periodStatus = "offline-unprepared";
+  } else if (!loading) {
+    periodStatus = "empty";
+  }
+  let periodCountLabel = "Sin preparar";
+
+  if (periodStatus === "ready") {
+    periodCountLabel = `${visiblePeriods.length} períodos`;
+  } else if (periodStatus === "empty") {
+    periodCountLabel = "0 períodos";
+  } else if (periodStatus === "loading") {
+    periodCountLabel = "Cargando…";
+  } else if (periodStatus === "error") {
+    periodCountLabel = "No disponible";
+  }
 
   async function createPeriod(formData: FormData) {
     await savePayload({
@@ -715,9 +737,9 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
 
       {canReadMerchandise ? <>
       <section id="periodos" aria-labelledby="periods-title" className="scroll-mt-28 space-y-4">
-        <div className="flex flex-wrap items-end justify-between gap-2"><div><h2 id="periods-title" className="font-display text-xl font-semibold">Períodos y solicitudes</h2><p className="text-sm text-muted-foreground">Cada pedido conserva su organismo, fecha y cantidad solicitada.</p></div><Badge variant="secondary">{visiblePeriods.length} períodos</Badge></div>
+        <div className="flex flex-wrap items-end justify-between gap-2"><div><h2 id="periods-title" className="font-display text-xl font-semibold">Períodos y solicitudes</h2><p className="text-sm text-muted-foreground">Cada pedido conserva su organismo, fecha y cantidad solicitada.</p></div><Badge variant="secondary">{periodCountLabel}</Badge></div>
         {loading ? <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">Cargando solicitudes y remitos…</CardContent></Card> : null}
-        {!loading && !visiblePeriods.length ? <Card variant="muted"><CardContent className="flex flex-col items-start gap-3 py-7"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="size-6 text-primary" /><div><h3 className="font-semibold">Todavía no hay períodos</h3><p className="text-sm text-muted-foreground">Creá un período para registrar la solicitud de módulos.</p></div></CardContent></Card> : null}
+        {periodStatus === "empty" ? <Card variant="muted"><CardContent className="flex flex-col items-start gap-3 py-7"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="size-6 text-primary" /><div><h3 className="font-semibold">Todavía no hay períodos</h3><p className="text-sm text-muted-foreground">{canWriteMerchandise ? "Creá un período para registrar la solicitud de módulos." : "Pedile a Presidencia o Secretaría que cargue un período."}</p></div></CardContent></Card> : null}
         <div className="flex flex-col gap-4">
           {visiblePeriods.map((period) => {
             const queuedPeriodOperation = operations.find((operation) => operation.resourceId === period.id && operation.status !== "synced");
@@ -753,7 +775,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
         {!visiblePeriods.some((period) => period.requests.some((request) => request.remittances.length)) ? <Card variant="muted"><CardContent className="flex items-center gap-3 py-5"><HugeiconsIcon icon={TruckIcon} strokeWidth={1.8} className="size-6 text-primary" /><p className="text-sm text-muted-foreground">Los remitos recibidos aparecerán vinculados a su solicitud y cupo aprobado.</p></CardContent></Card> : null}
       </section></> : null}
 
-      {canReadRenditions ? <RenditionWorkspace periods={visiblePeriods} userId={userId} sessionExpiresAt={sessionExpiresAt} onRefresh={loadMerchandise} canWrite={canWriteRenditions} canReview={canReviewRenditions} /> : null}
+      {canReadRenditions ? <RenditionWorkspace periods={visiblePeriods} userId={userId} sessionExpiresAt={sessionExpiresAt} onRefresh={loadMerchandise} canWrite={canWriteRenditions} canReview={canReviewRenditions} canCreatePeriods={canReadMerchandise && canWriteMerchandise} periodStatus={periodStatus} /> : null}
     </div>
   );
 }
