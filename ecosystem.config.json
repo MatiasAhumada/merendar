@@ -1,0 +1,18 @@
+{
+  "apps": [
+    {
+      "name": "merendar",
+      "script": "pnpm",
+      "args": "start",
+      "cwd": "/root/merendar",
+      "instances": 1,
+      "autorestart": true,
+      "watch": false,
+      "max_memory_restart": "1G",
+      "env": {
+        "NODE_ENV": "production",
+        "PORT": "3022"
+      }
+    }
+  ]
+}

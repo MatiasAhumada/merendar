@@ -1,0 +1,33 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            cd merendar/
+            git fetch origin main
+            git reset --hard origin/main
+            git clean -fd -e .next
+            corepack enable
+            corepack prepare pnpm@latest --activate
+            pnpm install
+            pnpm prisma generate
+            pnpm prisma migrate deploy
+            pnpm build
+            pm2 restart merendar || pm2 start ecosystem.config.json
