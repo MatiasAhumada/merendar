@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -32,6 +32,13 @@ import { OfflineSyncStatus } from "@/components/shared/OfflineSyncStatus";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { clearOfflineQueue } from "@/services/offline-queue.service";
 import {
+  clearActiveOfflineAccount,
+  clearOfflinePreparation,
+  prepareOfflineWorkspace,
+  readOfflinePreparation,
+  setActiveOfflineAccount,
+} from "@/services/offline-preparation.service";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -55,7 +62,29 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
   const [pendingOperationsCount, setPendingOperationsCount] = useState(0);
   const [queueLoaded, setQueueLoaded] = useState(false);
   const [queueReadFailed, setQueueReadFailed] = useState(false);
+  const [isPreparingOffline, setIsPreparingOffline] = useState(false);
+  const [preparationMessage, setPreparationMessage] = useState("");
+  const [preparationError, setPreparationError] = useState("");
+  const [hasOfflinePreparation, setHasOfflinePreparation] = useState(false);
   const isOnline = useNetworkStatus();
+
+  useEffect(() => {
+    let isMounted = true;
+    void setActiveOfflineAccount(user.id).then(() => readOfflinePreparation(user.id)).then((preparation) => {
+      if (isMounted && preparation) {
+        setHasOfflinePreparation(true);
+        setPreparationMessage(`Preparado el ${new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(preparation.preparedAt))}`);
+      }
+    }).catch((error: unknown) => {
+      if (isMounted) {
+        clientErrorHandler(error, () => {}, { logToConsole: false, showToast: false });
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user.id]);
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
   const navigation = PRIMARY_NAVIGATION.filter((item) => {
     if (!item.capabilities) {
@@ -103,7 +132,7 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
       return;
     }
 
-    if ((pendingOperationsCount || queueReadFailed) && !isLogoutConfirmationOpen) {
+    if ((pendingOperationsCount || queueReadFailed || hasOfflinePreparation) && !isLogoutConfirmationOpen) {
       setIsLogoutConfirmationOpen(true);
       return;
     }
@@ -114,6 +143,12 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
       await clientAxios.delete(API_ROUTES.AUTH.SESSION);
       try {
         await clearOfflineQueue(user.id);
+      } catch (error) {
+        clientErrorHandler(error);
+      }
+      try {
+        await clearOfflinePreparation(user.id);
+        await clearActiveOfflineAccount(user.id);
       } catch (error) {
         clientErrorHandler(error);
       }
@@ -128,6 +163,32 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
 
   function signOut() {
     void completeSignOut();
+  }
+
+  async function prepareOfflineAccess() {
+    setIsPreparingOffline(true);
+    setPreparationError("");
+    setPreparationMessage("Guardando las vistas habilitadas y sus datos para este dispositivo…");
+
+    try {
+      const preparation = await prepareOfflineWorkspace(
+        user.id,
+        user.name,
+        USER_ROLE_LABELS[user.role],
+        capabilities,
+        sessionExpiresAt,
+      );
+      setHasOfflinePreparation(true);
+      const formattedDate = new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(preparation.preparedAt));
+      setPreparationMessage(`Vistas preparadas el ${formattedDate}. Válido hasta que venza la sesión o por 12 horas.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo preparar el acceso sin conexión.";
+      setPreparationError(message);
+      setPreparationMessage("");
+      clientErrorHandler(error, () => {}, { logToConsole: false, showToast: false });
+    } finally {
+      setIsPreparingOffline(false);
+    }
   }
 
   return (
@@ -215,6 +276,9 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <ConnectionStatus />
+              <Button variant="outline" size="sm" onClick={() => void prepareOfflineAccess()} disabled={!isOnline || isPreparingOffline}>
+                {isPreparingOffline ? "Preparando…" : "Preparar offline"}
+              </Button>
               <Badge variant="secondary">{USER_ROLE_LABELS[user.role]}</Badge>
               <Avatar size="lg">
                 <AvatarFallback>{user.name.slice(0, 2).toUpperCase()}</AvatarFallback>
@@ -228,6 +292,15 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
           sessionExpiresAt={sessionExpiresAt}
           onQueueStatusChange={onQueueStatusChange}
         />
+
+        {(preparationMessage || preparationError) && (
+          <div className="mx-auto w-full max-w-7xl px-4 pt-3 sm:px-6 lg:px-8" aria-live="polite">
+            <Alert variant={preparationError ? "destructive" : "info"}>
+              <AlertTitle>{preparationError ? "No se pudo preparar el acceso offline" : "Acceso offline"}</AlertTitle>
+              <AlertDescription>{preparationError || preparationMessage}</AlertDescription>
+            </Alert>
+          </div>
+        )}
 
         <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 pb-28 sm:px-6 lg:px-8 lg:py-8">
           {pageContent}
@@ -258,8 +331,8 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
             <DialogTitle>¿Cerrar sesión y borrar cambios pendientes?</DialogTitle>
             <DialogDescription>
               {queueReadFailed
-                ? "No pudimos leer la cola local. Cerrar sesión eliminará toda la información offline de esta cuenta en este dispositivo."
-                : `Hay ${pendingOperationsCount} cambio(s) todavía sin sincronizar. Cerrar sesión elimina estos borradores de este dispositivo y no los envía con otra cuenta.`}
+                ? "No pudimos leer la cola local. Cerrar sesión elimina los borradores y las vistas preparadas de esta cuenta en este dispositivo."
+                : `Hay ${pendingOperationsCount} cambio(s) todavía sin sincronizar. Cerrar sesión elimina los borradores y las vistas preparadas de esta cuenta en este dispositivo.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
