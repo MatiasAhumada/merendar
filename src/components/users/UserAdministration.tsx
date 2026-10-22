@@ -51,10 +51,11 @@ export function UserAdministration() {
     event.preventDefault();
     setSaving(true);
     setFormError("");
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
       await clientAxios.post(API_ROUTES.USERS, Object.fromEntries(form.entries()));
-      event.currentTarget.reset();
+      formElement.reset();
       await loadUsers();
     } catch (cause) {
       setFormError("Revisá los datos e intentá nuevamente. Verificá que el email no esté registrado.");

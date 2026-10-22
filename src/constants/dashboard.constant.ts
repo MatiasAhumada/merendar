@@ -44,6 +44,13 @@ export const DASHBOARD_ACTIONS = [
     capability: "merchandise.read",
   },
   {
+    label: "Rendición documental",
+    description: "Consultar planillas y documentos",
+    href: ROUTES.GOODS,
+    icon: Archive01Icon,
+    capability: "renditions.read",
+  },
+  {
     label: "Administrar usuarios",
     description: "Cuentas y permisos",
     href: ROUTES.USERS,

@@ -26,11 +26,29 @@ import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import { clientErrorHandler } from "@/utils/handlers/clientHandler";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import { z } from "zod";
 
-function getDestination() {
+const loginResponseSchema = z.object({
+  capabilities: z.array(z.string()),
+});
+
+function getDestination(capabilities: string[]) {
   const requestedPath = new URLSearchParams(window.location.search).get("next");
   const requestedPage = PRIMARY_NAVIGATION.find((page) => page.href === requestedPath);
-  return requestedPage?.href ?? ROUTES.HOME;
+
+  if (requestedPage && (!requestedPage.capabilities || requestedPage.capabilities.some((capability) => capabilities.includes(capability)))) {
+    return requestedPage.href;
+  }
+
+  const firstAvailablePage = PRIMARY_NAVIGATION.find((page) =>
+    page.href !== ROUTES.HOME && page.capabilities?.some((capability) => capabilities.includes(capability)),
+  );
+
+  if (firstAvailablePage) {
+    return firstAvailablePage.href;
+  }
+
+  return ROUTES.HOME;
 }
 
 export function LoginScreen() {
@@ -54,8 +72,15 @@ export function LoginScreen() {
     setIsSubmitting(true);
 
     try {
-      await clientAxios.post(API_ROUTES.AUTH.SESSION, { identifier, password });
-      router.replace(getDestination());
+      const response = await clientAxios.post(API_ROUTES.AUTH.SESSION, { identifier, password });
+      const parsedResponse = loginResponseSchema.safeParse(response.data);
+
+      if (!parsedResponse.success) {
+        setErrorMessage(AUTH_MESSAGES.LOGIN_UNAVAILABLE);
+        return;
+      }
+
+      router.replace(getDestination(parsedResponse.data.capabilities));
       router.refresh();
     } catch (error) {
       clientErrorHandler(error, () => setErrorMessage(AUTH_MESSAGES.LOGIN_UNAVAILABLE), { logToConsole: false, showToast: false });

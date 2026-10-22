@@ -273,11 +273,12 @@ export default async function DashboardPage() {
             </div>
           )}
           {!dashboardActions.length && (
-            <Card>
-              <CardContent className="py-5 text-sm text-muted-foreground">
-                No hay accesos operativos habilitados para este rol.
-              </CardContent>
-            </Card>
+            <Alert variant="info">
+              <AlertTitle>Tu cuenta todavía no tiene módulos operativos</AlertTitle>
+              <AlertDescription>
+                Si necesitás consultar o registrar una tarea de la organización, pedile a Presidencia que revise las capacidades habilitadas para tu rol.
+              </AlertDescription>
+            </Alert>
           )}
         </section>
       </div>

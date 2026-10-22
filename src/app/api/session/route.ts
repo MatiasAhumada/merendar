@@ -2,6 +2,7 @@ import { z } from "zod";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH, AUTH_MESSAGES } from "@/constants/auth.constant";
 import { authService } from "@/server/services/auth.service";
+import { getEffectiveCapabilities } from "@/server/services/access-policy.service";
 
 const loginSchema = z
   .object({
@@ -79,7 +80,10 @@ export async function POST(request: NextRequest) {
       return jsonResponse({ error: { message: AUTH_MESSAGES.LOGIN_UNAVAILABLE } }, 429);
     }
 
-    const response = jsonResponse({ user: result.user }, 200);
+    const response = jsonResponse({
+      user: result.user,
+      capabilities: await getEffectiveCapabilities(result.user.role),
+    }, 200);
     response.cookies.set(AUTH.SESSION_COOKIE, result.token, {
       httpOnly: true,
       secure: request.nextUrl.protocol === "https:",
