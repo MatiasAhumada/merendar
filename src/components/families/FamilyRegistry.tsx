@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { FamilyDocumentType } from "@prisma/client";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowRight01Icon,
@@ -38,13 +37,14 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { FAMILY_DOCUMENT_LABELS, FAMILY_DOCUMENT_OPTIONS, FAMILY_MEMBER_RELATIONSHIPS, FAMILY_NEIGHBORHOODS } from "@/constants/families.constant";
-import type { FamilyRecord } from "@/interfaces/family.interface";
+import type { FamilyPersonRecord, FamilyRecord } from "@/interfaces/family.interface";
 import type { JsonObject } from "@/types/json-value";
-import type { FamilyPersonInput } from "@/types/family";
+import type { FamilyMemberChangeInput, FamilyPersonInput } from "@/types/family";
 import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import type { OfflineOperation } from "@/types/offline-operation";
-import { familyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
+import { familyCollectionSchema, familyMemberChangeSchema, familyMemberInputSchema, familyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
 import { z } from "zod";
+import clientAxios from "@/utils/clientAxios.util";
 
 interface FamilyRegistryProps {
   initialFamilies: FamilyRecord[];
@@ -57,46 +57,18 @@ interface FamilyFormMember extends FamilyPersonInput {
   localId: string;
 }
 
-const familyDocumentSchema = z.object({ id: z.string(), documentType: z.enum(FamilyDocumentType) });
-const familyPersonSchema = z.object({
-  id: z.string(),
-  firstName: z.string(),
-  lastName: z.string(),
-  dni: z.string().nullable(),
-  email: z.string().nullable(),
-  phone: z.string().nullable(),
-  relationship: z.string(),
-  missingDocuments: z.array(familyDocumentSchema),
-});
-const familyResponseSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  neighborhood: z.string(),
-  address: z.string(),
-  contactPhone: z.string().nullable(),
-  contactEmail: z.string().nullable(),
-  referencePersonId: z.string().nullable(),
-  members: z.array(z.object({ id: z.string(), person: familyPersonSchema, missingDocuments: z.array(familyDocumentSchema) })),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-});
-const familiesResponseSchema = z.object({ families: z.array(familyResponseSchema) });
-
 function createEmptyMember(): FamilyFormMember {
+  const personId = crypto.randomUUID();
+
   return {
-    localId: crypto.randomUUID(),
+    localId: personId,
+    personId,
+    membershipId: crypto.randomUUID(),
     firstName: "",
     lastName: "",
     relationship: "Hija o hijo",
     missingDocuments: [],
   };
-}
-
-function normalizeFamilies(families: z.infer<typeof familyResponseSchema>[]): FamilyRecord[] {
-  return families.map((family) => ({
-    ...family,
-    members: family.members.map((member) => ({ ...member.person, missingDocuments: member.missingDocuments })),
-  }));
 }
 
 function toFamilyJsonPayload(family: FamilyPayload): JsonObject {
@@ -107,6 +79,8 @@ function toFamilyJsonPayload(family: FamilyPayload): JsonObject {
     referenceMemberIndex: family.referenceMemberIndex,
     members: family.members.map((member) => {
       const person: JsonObject = {
+        personId: member.personId ?? crypto.randomUUID(),
+        membershipId: member.membershipId ?? crypto.randomUUID(),
         firstName: member.firstName,
         lastName: member.lastName,
         relationship: member.relationship,
@@ -148,7 +122,8 @@ function familyFromOfflineOperation(operation: OfflineOperation): FamilyRecord |
   }
 
   const members = parsedFamily.data.members.map((member, index) => ({
-    id: `${operation.resourceId}-person-${index}`,
+    id: member.personId ?? `${operation.resourceId}-person-${index}`,
+    membershipId: member.membershipId ?? `${operation.resourceId}-membership-${index}`,
     firstName: member.firstName,
     lastName: member.lastName,
     dni: member.dni ?? null,
@@ -173,7 +148,67 @@ function familyFromOfflineOperation(operation: OfflineOperation): FamilyRecord |
     members,
     createdAt: operation.createdAt,
     updatedAt: operation.createdAt,
+    version: 1,
   };
+}
+
+function applyPendingMemberChanges(family: FamilyRecord, operations: OfflineOperation[]) {
+  return operations.reduce((currentFamily, operation) => {
+    if (operation.resourceId !== family.id || operation.operation !== "update" || operation.status === "synced") {
+      return currentFamily;
+    }
+
+    const parsedChange = familyMemberChangeSchema.safeParse(operation.payload);
+
+    if (!parsedChange.success) {
+      return currentFamily;
+    }
+
+    const memberChange = parsedChange.data;
+    let personRecordId = "";
+
+    if (memberChange.action === "add-member") {
+      personRecordId = memberChange.personId;
+    } else {
+      personRecordId = currentFamily.members.find((member) => member.membershipId === memberChange.memberId)?.id ?? "";
+    }
+
+    const nextMember: FamilyPersonRecord = {
+      id: personRecordId,
+      membershipId: memberChange.memberId,
+      firstName: memberChange.member.firstName,
+      lastName: memberChange.member.lastName,
+      dni: memberChange.member.dni ?? null,
+      email: memberChange.member.email ?? null,
+      phone: memberChange.member.phone ?? null,
+      relationship: memberChange.member.relationship,
+      missingDocuments: memberChange.member.missingDocuments.map((documentType, index) => ({ id: `${memberChange.memberId}-document-${index}`, documentType })),
+    };
+    let members = currentFamily.members;
+
+    if (memberChange.action === "add-member" && !members.some((member) =>
+      member.membershipId === memberChange.memberId || member.id === memberChange.personId,
+    )) {
+      members = [...members, nextMember];
+    }
+
+    if (memberChange.action === "update-member") {
+      members = members.map((member) => {
+        if (member.membershipId === memberChange.memberId) {
+          return nextMember;
+        }
+
+        return member;
+      });
+    }
+
+    let nextVersion = currentFamily.version + 1;
+    if (operation.baseVersion && operation.baseVersion + 1 > nextVersion) {
+      nextVersion = operation.baseVersion + 1;
+    }
+
+    return { ...currentFamily, members, referencePersonId: memberChange.referencePersonId, version: nextVersion };
+  }, family);
 }
 
 function offlineStatusLabel(operation: OfflineOperation) {
@@ -196,7 +231,121 @@ function getMemberCountLabel(count: number) {
   return `${count} ${count === 1 ? "integrante" : "integrantes"}`;
 }
 
-function FamilyDetails({ family, onClose }: { family: FamilyRecord; onClose: () => void }) {
+type FamilyMemberValues = z.infer<typeof familyMemberInputSchema>;
+
+function FamilyMemberForm({ family, member, onClose, onSave }: {
+  family: FamilyRecord;
+  member?: FamilyPersonRecord;
+  onClose: () => void;
+  onSave: (values: FamilyMemberValues, referencePersonId: string, memberId: string, personId: string) => Promise<string | null>;
+}) {
+  const [personId] = useState(() => member?.id ?? crypto.randomUUID());
+  const [membershipId] = useState(() => member?.membershipId ?? crypto.randomUUID());
+  const [firstName, setFirstName] = useState(member?.firstName ?? "");
+  const [lastName, setLastName] = useState(member?.lastName ?? "");
+  const [dni, setDni] = useState(member?.dni ?? "");
+  const [email, setEmail] = useState(member?.email ?? "");
+  const [phone, setPhone] = useState(member?.phone ?? "");
+  const [relationship, setRelationship] = useState(member?.relationship ?? "Hija o hijo");
+  const [missingDocuments, setMissingDocuments] = useState(member?.missingDocuments.map((document) => document.documentType) ?? []);
+  const [referencePersonId, setReferencePersonId] = useState(family.referencePersonId ?? personId);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+  const [formMessage, setFormMessage] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function submitMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFieldErrors({});
+    setFormMessage("");
+    const parsedMember = familyMemberInputSchema.safeParse({
+      firstName,
+      lastName,
+      dni: dni || undefined,
+      email: email || undefined,
+      phone: phone || undefined,
+      relationship,
+      missingDocuments,
+    });
+
+    if (!parsedMember.success) {
+      const errors: Record<string, string[]> = {};
+      parsedMember.error.issues.forEach((issue) => {
+        const field = issue.path.join(".");
+        if (!errors[field]) {
+          errors[field] = [];
+        }
+        errors[field].push(issue.message);
+      });
+      setFieldErrors(errors);
+      setFormMessage("Revisá los campos marcados antes de guardar.");
+      return;
+    }
+
+    setIsSaving(true);
+    const result = await onSave(parsedMember.data, referencePersonId, membershipId, personId);
+    setIsSaving(false);
+
+    if (result) {
+      setFormMessage(result);
+      return;
+    }
+
+    onClose();
+  }
+
+  return (
+    <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <SheetContent side="bottom" className="mx-auto max-h-[92dvh] max-w-3xl overflow-y-auto rounded-t-3xl">
+        <SheetHeader className="pr-14">
+          <SheetTitle className="font-display text-xl font-semibold">{member ? "Actualizar integrante" : "Agregar integrante"}</SheetTitle>
+          <SheetDescription>Los cambios se guardan en esta ficha y se sincronizan al recuperar conexión.</SheetDescription>
+        </SheetHeader>
+        <form className="px-6 pb-8" onSubmit={submitMember}>
+          <FieldGroup className="gap-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field><FieldLabel htmlFor="family-member-first-name">Nombre *</FieldLabel><Input id="family-member-first-name" value={firstName} onChange={(event) => setFirstName(event.target.value)} required aria-invalid={Boolean(fieldErrors.firstName?.length)} />{fieldErrors.firstName?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+              <Field><FieldLabel htmlFor="family-member-last-name">Apellido *</FieldLabel><Input id="family-member-last-name" value={lastName} onChange={(event) => setLastName(event.target.value)} required aria-invalid={Boolean(fieldErrors.lastName?.length)} />{fieldErrors.lastName?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+              <Field><FieldLabel htmlFor="family-member-dni">DNI</FieldLabel><Input id="family-member-dni" inputMode="numeric" value={dni} onChange={(event) => setDni(event.target.value.replace(/\D/g, "").slice(0, 8))} aria-invalid={Boolean(fieldErrors.dni?.length)} /><FieldDescription>Ingresá 7 u 8 números. Si no tiene, dejalo vacío.</FieldDescription>{fieldErrors.dni?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+              <Field><FieldLabel htmlFor="family-member-phone">Teléfono</FieldLabel><Input id="family-member-phone" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} /></Field>
+              <Field><FieldLabel htmlFor="family-member-email">Email</FieldLabel><Input id="family-member-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(fieldErrors.email?.length)} />{fieldErrors.email?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+              <Field><FieldLabel htmlFor="family-member-relationship">Vínculo *</FieldLabel><Select value={relationship} onValueChange={setRelationship}><SelectTrigger id="family-member-relationship" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{FAMILY_MEMBER_RELATIONSHIPS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent></Select></Field>
+            </div>
+            <Field>
+              <FieldLabel htmlFor="family-member-reference">Persona referente *</FieldLabel>
+              <Select value={referencePersonId} onValueChange={setReferencePersonId}>
+                <SelectTrigger id="family-member-reference" className="w-full"><SelectValue placeholder="Seleccionar referente" /></SelectTrigger>
+                <SelectContent>
+                  {family.members.map((familyMember) => <SelectItem key={familyMember.id} value={familyMember.id}>{familyMember.firstName} {familyMember.lastName}</SelectItem>)}
+                  {!member ? <SelectItem value={personId}>{firstName || lastName ? `${firstName} ${lastName}`.trim() : "Nuevo integrante"}</SelectItem> : null}
+                </SelectContent>
+              </Select>
+            </Field>
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">Documentación faltante</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {FAMILY_DOCUMENT_OPTIONS.map((document) => {
+                  const isMissing = missingDocuments.includes(document.value);
+                  return <label key={document.value} className="flex min-h-10 items-center gap-2 text-sm"><Checkbox checked={isMissing} onCheckedChange={(checked) => setMissingDocuments(checked ? [...missingDocuments, document.value] : missingDocuments.filter((currentDocument) => currentDocument !== document.value))} />{document.label}</label>;
+                })}
+              </div>
+            </fieldset>
+          </FieldGroup>
+          {formMessage ? <Alert variant="destructive" className="mt-5"><AlertTitle>No se pudo guardar</AlertTitle><AlertDescription>{formMessage}</AlertDescription></Alert> : null}
+          <div className="mt-6 flex flex-col-reverse justify-end gap-2 sm:flex-row"><Button variant="outline" type="button" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={isSaving}>{isSaving ? "Guardando…" : "Guardar integrante"}</Button></div>
+        </form>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function FamilyDetails({ family, canWrite, pendingMemberIds, onClose, onAddMember, onEditMember }: {
+  family: FamilyRecord;
+  canWrite: boolean;
+  pendingMemberIds: string[];
+  onClose: () => void;
+  onAddMember: () => void;
+  onEditMember: (member: FamilyPersonRecord) => void;
+}) {
   const referencePerson = family.members.find((member) => member.id === family.referencePersonId);
 
   return (
@@ -213,9 +362,9 @@ function FamilyDetails({ family, onClose }: { family: FamilyRecord; onClose: () 
             <div><p className="text-xs text-muted-foreground">Referente</p><p className="font-medium">{referencePerson ? `${referencePerson.firstName} ${referencePerson.lastName}` : "Sin referente"}</p></div>
           </div>
           <section aria-label="Integrantes de la familia" className="space-y-3">
-            <h3 className="font-semibold">Integrantes ({family.members.length})</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Integrantes ({family.members.length})</h3>{canWrite ? <Button size="sm" onClick={onAddMember}><HugeiconsIcon icon={UserAdd01Icon} strokeWidth={1.8} data-icon="inline-start" />Agregar integrante</Button> : null}</div>
             {family.members.map((member) => (
-              <Card key={member.id} size="sm">
+              <Card key={member.membershipId} size="sm">
                 <CardContent className="space-y-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
@@ -235,6 +384,8 @@ function FamilyDetails({ family, onClose }: { family: FamilyRecord; onClose: () 
                       {member.missingDocuments.map((document) => <Badge key={document.id} variant="warning">{FAMILY_DOCUMENT_LABELS[document.documentType]}</Badge>)}
                     </div>
                   ) : null}
+                  {pendingMemberIds.includes(member.id) ? <Badge variant="warning">Pendiente de sincronización</Badge> : null}
+                  {canWrite ? <Button size="sm" variant="outline" onClick={() => onEditMember(member)}>Editar datos</Button> : null}
                 </CardContent>
               </Card>
             ))}
@@ -252,6 +403,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [selectedFamily, setSelectedFamily] = useState<FamilyRecord | null>(null);
+  const [memberEditor, setMemberEditor] = useState<{ member?: FamilyPersonRecord; operation?: OfflineOperation } | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [members, setMembers] = useState<FamilyFormMember[]>([createEmptyMember()]);
   const [referenceMemberId, setReferenceMemberId] = useState(members[0]?.localId ?? "");
@@ -264,26 +416,26 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
   const refreshOfflineFamilies = useCallback(async () => {
     try {
       const operations = await listOfflineOperations(userId);
-      setOfflineOperations(operations.filter((operation) =>
-        operation.resource === "families" && operation.operation === "create" && operation.status !== "synced",
-      ));
+      const familyOperations = operations.filter((operation) => operation.resource === "families" && operation.status !== "synced");
+      setOfflineOperations(familyOperations);
       setQueueMessage("");
+      return familyOperations;
     } catch {
       setQueueMessage("No se pudo leer la cola offline de esta cuenta.");
+      return [];
     }
   }, [userId]);
   const refreshFamilies = useCallback(async () => {
-    const response = await fetch("/api/families", { cache: "no-store" });
-    const parsedResponse = familiesResponseSchema.safeParse(await response.json());
+    const response = await clientAxios.get<unknown>("/api/families", { headers: { "Cache-Control": "no-store" } });
+    const parsedResponse = familyCollectionSchema.safeParse(response.data);
 
-    if (!response.ok || !parsedResponse.success) {
+    if (!parsedResponse.success) {
       throw new Error("No se pudo actualizar el padrón");
     }
 
-    setFamilies(normalizeFamilies(parsedResponse.data.families));
+    setFamilies(parsedResponse.data.families);
   }, []);
-  const familyOperations = useMemo(() => offlineOperations.filter((operation) => operation.resource === "families"), [offlineOperations]);
-  const localFamilies = useMemo(() => familyOperations.flatMap((operation) => {
+  const localFamilies = useMemo(() => offlineOperations.filter((operation) => operation.operation === "create").flatMap((operation) => {
     const family = familyFromOfflineOperation(operation);
 
     if (!family) {
@@ -291,8 +443,17 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     }
 
     return [family];
-  }), [familyOperations]);
-  const allFamilies = useMemo(() => [...families, ...localFamilies], [families, localFamilies]);
+  }), [offlineOperations]);
+  const allFamilies = useMemo(() => [
+    ...families.map((family) => applyPendingMemberChanges(family, offlineOperations)),
+    ...localFamilies.map((family) => applyPendingMemberChanges(family, offlineOperations)),
+  ], [families, localFamilies, offlineOperations]);
+  const familyOperations = offlineOperations;
+  let selectedFamilyView: FamilyRecord | null = null;
+
+  if (selectedFamily) {
+    selectedFamilyView = allFamilies.find((family) => family.id === selectedFamily.id) ?? selectedFamily;
+  }
   let editingPayload: FamilyPayload | undefined;
 
   if (editingOperation) {
@@ -339,10 +500,17 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
         void refreshFamilies().catch(() => undefined);
       }
     };
+    const handleReconnect = () => {
+      void synchronizeOfflineQueue(userId).then(() => refreshOfflineFamilies()).then(() => refreshFamilies()).catch(() => undefined);
+    };
     window.addEventListener("offline-queue-change", handleQueueChange);
+    window.addEventListener("online", handleReconnect);
 
-    return () => window.removeEventListener("offline-queue-change", handleQueueChange);
-  }, [refreshFamilies, refreshOfflineFamilies]);
+    return () => {
+      window.removeEventListener("offline-queue-change", handleQueueChange);
+      window.removeEventListener("online", handleReconnect);
+    };
+  }, [refreshFamilies, refreshOfflineFamilies, userId]);
 
   function updateMember(localId: string, updater: (member: FamilyFormMember) => FamilyFormMember) {
     setMembers((currentMembers) => currentMembers.map((member) => {
@@ -397,6 +565,8 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       contactEmail: String(formData.get("contactEmail") ?? "") || undefined,
       referenceMemberIndex: members.findIndex((member) => member.localId === referenceMemberId),
       members: members.map((member) => ({
+        personId: member.personId,
+        membershipId: member.membershipId,
         firstName: member.firstName,
         lastName: member.lastName,
         dni: member.dni || undefined,
@@ -459,6 +629,95 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       }
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function saveFamilyMember(values: FamilyMemberValues, referencePersonId: string, memberId: string, personId: string) {
+    if (!selectedFamilyView) {
+      return "No encontramos la familia que querés actualizar.";
+    }
+
+    const editingMember = memberEditor?.member;
+    const duplicateDni = values.dni && selectedFamilyView.members.some((familyMember) =>
+      familyMember.id !== editingMember?.id && familyMember.dni === values.dni,
+    );
+
+    if (duplicateDni) {
+      return "Ese DNI ya está registrado en esta familia.";
+    }
+
+    let change: FamilyMemberChangeInput;
+
+    if (editingMember) {
+      change = { action: "update-member", memberId: editingMember.membershipId, member: values, referencePersonId };
+    } else {
+      change = { action: "add-member", memberId, personId, member: values, referencePersonId };
+    }
+
+    const parsedChange = familyMemberChangeSchema.safeParse(change);
+
+    if (!parsedChange.success) {
+      return "Revisá los datos del integrante antes de guardar.";
+    }
+
+    const previousOperations = offlineOperations
+      .filter((operation) => operation.resourceId === selectedFamilyView.id)
+      .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+    const previousOperation = previousOperations[previousOperations.length - 1];
+    const dependencies: string[] = [];
+
+    if (previousOperation) {
+      dependencies.push(previousOperation.operationId);
+    }
+
+    try {
+      await enqueueOfflineOperation(userId, sessionExpiresAt, {
+        resource: "families",
+        resourceId: selectedFamilyView.id,
+        operation: "update",
+        baseVersion: selectedFamilyView.version,
+        dependencies,
+        payload: parsedChange.data,
+      });
+
+      const currentOperations = await refreshOfflineFamilies();
+      setSelectedFamily(applyPendingMemberChanges(selectedFamilyView, currentOperations));
+
+      if (navigator.onLine) {
+        await synchronizeOfflineQueue(userId);
+        const remainingOperations = await refreshOfflineFamilies();
+        const thisOperation = remainingOperations.find((operation) => operation.resourceId === selectedFamilyView.id && operation.operation === "update");
+
+        if (thisOperation?.status === "conflict") {
+          return thisOperation.message ?? "La ficha cambió en otro dispositivo. Actualizá y volvé a intentar.";
+        }
+
+        if (thisOperation?.status === "error") {
+          return thisOperation.message ?? "El cambio quedó guardado en este dispositivo y espera sincronización.";
+        }
+
+        const response = await clientAxios.get<unknown>("/api/families", { headers: { "Cache-Control": "no-store" } });
+        const parsedFamilies = familyCollectionSchema.safeParse(response.data);
+
+        if (!parsedFamilies.success) {
+          return "El cambio quedó guardado. No pudimos actualizar la lista; volvé a intentar sin volver a cargar los datos.";
+        }
+
+        setFamilies(parsedFamilies.data.families);
+        const updatedFamily = parsedFamilies.data.families.find((family) => family.id === selectedFamilyView.id);
+
+        if (updatedFamily) {
+          setSelectedFamily(updatedFamily);
+        }
+      }
+
+      return null;
+    } catch (error) {
+      if (error instanceof Error) {
+        return error.message;
+      }
+
+      return "No se pudo guardar el integrante.";
     }
   }
 
@@ -641,7 +900,41 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
         </CardContent>
       </Card>
 
-      {selectedFamily ? <FamilyDetails family={selectedFamily} onClose={() => setSelectedFamily(null)} /> : null}
+      {selectedFamilyView ? <FamilyDetails
+        family={selectedFamilyView}
+        canWrite={canWrite}
+        pendingMemberIds={offlineOperations.flatMap((operation) => {
+          if (operation.resourceId !== selectedFamilyView.id || operation.operation !== "update") {
+            return [];
+          }
+
+          const parsedChange = familyMemberChangeSchema.safeParse(operation.payload);
+          if (!parsedChange.success) {
+            return [];
+          }
+
+          if (parsedChange.data.action === "add-member") {
+            return [parsedChange.data.personId];
+          }
+
+          const member = selectedFamilyView.members.find((familyMember) => familyMember.membershipId === parsedChange.data.memberId);
+          if (!member) {
+            return [];
+          }
+
+          return [member.id];
+        })}
+        onClose={() => setSelectedFamily(null)}
+        onAddMember={() => setMemberEditor({})}
+        onEditMember={(member) => setMemberEditor({ member })}
+      /> : null}
+      {selectedFamilyView && memberEditor ? <FamilyMemberForm
+        key={memberEditor.member?.membershipId ?? selectedFamilyView.id}
+        family={selectedFamilyView}
+        member={memberEditor.member}
+        onClose={() => setMemberEditor(null)}
+        onSave={saveFamilyMember}
+      /> : null}
     </div>
   );
 }

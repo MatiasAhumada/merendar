@@ -45,6 +45,7 @@ model Family {
   operations         FamilyOperation[]
   referencePerson    Person?        @relation("FamilyReference", fields: [referencePersonId], references: [id], onDelete: SetNull)
   createdBy          User           @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  version            Int            @default(1)
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
 

@@ -22,6 +22,8 @@ import {
 import type { JsonValue } from "@/types/json-value";
 import { listOfflineOperations } from "@/services/offline-queue.service";
 import type { OfflineOperation } from "@/types/offline-operation";
+import { FamilyRegistry } from "@/components/families/FamilyRegistry";
+import { familyCollectionSchema } from "@/validations/family.validation";
 
 const ROUTE_LABELS: Record<OfflinePreparedRoute, string> = {
   "/": "Inicio",
@@ -249,7 +251,7 @@ function PendingOperations({ operations }: { operations: OfflineOperation[] }) {
   );
 }
 
-function PreparedRoute({ route, preparation, documents, operations, searchTerm, setSearchTerm }: { route: OfflinePreparedRoute; preparation: OfflinePreparation; documents: OfflinePreparedDocument[]; operations: OfflineOperation[]; searchTerm: string; setSearchTerm: (value: string) => void }) {
+function PreparedRoute({ route, preparation, preparationIsValid, documents, operations, searchTerm, setSearchTerm }: { route: OfflinePreparedRoute; preparation: OfflinePreparation; preparationIsValid: boolean; documents: OfflinePreparedDocument[]; operations: OfflineOperation[]; searchTerm: string; setSearchTerm: (value: string) => void }) {
   const snapshot = preparation.snapshots[route]?.data;
 
   if (!snapshot) {
@@ -259,6 +261,26 @@ function PreparedRoute({ route, preparation, documents, operations, searchTerm, 
         <AlertDescription>{OFFLINE_PREPARATION.MESSAGES.NOT_PREPARED} Conectate, abrí la app y usá “Preparar offline”.</AlertDescription>
       </Alert>
     );
+  }
+
+  if (route === "/familias") {
+    const familySnapshot = familyCollectionSchema.safeParse(snapshot);
+    if (familySnapshot.success) {
+      return (
+        <div className="space-y-4">
+          <Alert variant="info">
+            <AlertTitle>Ficha familiar preparada</AlertTitle>
+            <AlertDescription>Captura de {formatDate(preparation.snapshots[route].capturedAt)}. Los cambios quedan pendientes hasta reconectar.</AlertDescription>
+          </Alert>
+          <FamilyRegistry
+            initialFamilies={familySnapshot.data.families}
+            userId={preparation.userId}
+            sessionExpiresAt={preparation.sessionExpiresAt}
+            canWrite={preparationIsValid && preparation.capabilities.includes("families.write")}
+          />
+        </div>
+      );
+    }
   }
 
   return (
@@ -284,6 +306,7 @@ export function OfflineScreen() {
   const [preparation, setPreparation] = useState<OfflinePreparation | null>(null);
   const [documents, setDocuments] = useState<OfflinePreparedDocument[]>([]);
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
+  const [preparationIsValid, setPreparationIsValid] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -297,13 +320,25 @@ export function OfflineScreen() {
       return Promise.all([readOfflinePreparedWorkspace(userId), listOfflineOperations(userId)]);
     }).then((savedPreparation) => {
       if (isMounted) {
-        setPreparation(savedPreparation?.[0].preparation ?? null);
+        const savedPreparationValue = savedPreparation?.[0].preparation ?? null;
+        setPreparation(savedPreparationValue);
+        let preparationIsValid = false;
+        if (savedPreparationValue) {
+          preparationIsValid = Date.now() < Date.parse(savedPreparationValue.sessionExpiresAt) && Date.now() < Date.parse(savedPreparationValue.expiresAt);
+        }
+        setPreparationIsValid(preparationIsValid);
         setDocuments(savedPreparation?.[0].documents ?? []);
         setOperations(savedPreparation?.[1] ?? []);
       }
     }).catch((error: unknown) => {
       if (isMounted) {
-        setLoadError(error instanceof Error ? error.message : "No se pudo leer la preparación offline.");
+        let message = "No se pudo leer la preparación offline.";
+
+        if (error instanceof Error) {
+          message = error.message;
+        }
+
+        setLoadError(message);
       }
     }).finally(() => {
       if (isMounted) {
@@ -367,7 +402,7 @@ export function OfflineScreen() {
         </Alert>
       ) : null}
 
-      {preparation && !isLoading ? <PreparedRoute route={route} preparation={preparation} documents={documents} operations={operations} searchTerm={searchTerm} setSearchTerm={setSearchTerm} /> : null}
+      {preparation && !isLoading ? <PreparedRoute route={route} preparation={preparation} preparationIsValid={preparationIsValid} documents={documents} operations={operations} searchTerm={searchTerm} setSearchTerm={setSearchTerm} /> : null}
 
       <Card variant="muted" className="mt-auto">
         <CardContent className="flex flex-col items-start gap-4 pt-5 sm:flex-row sm:items-center sm:justify-between">

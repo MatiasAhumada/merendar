@@ -7,6 +7,7 @@ export interface FamilyDocumentRecord {
 
 export interface FamilyPersonRecord {
   id: string;
+  membershipId: string;
   firstName: string;
   lastName: string;
   dni: string | null;
@@ -27,4 +28,5 @@ export interface FamilyRecord {
   members: FamilyPersonRecord[];
   createdAt: string;
   updatedAt: string;
+  version: number;
 }

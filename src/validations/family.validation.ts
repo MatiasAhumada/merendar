@@ -2,6 +2,8 @@ import { FamilyDocumentType } from "@prisma/client";
 import { z } from "zod";
 
 const familyPersonSchema = z.object({
+  personId: z.uuid().optional(),
+  membershipId: z.uuid().optional(),
   firstName: z.string().trim().min(1, "Ingresá el nombre").max(80),
   lastName: z.string().trim().min(1, "Ingresá el apellido").max(80),
   dni: z.string().trim().regex(/^\d{7,8}$/, "Ingresá un DNI de 7 u 8 números").optional(),
@@ -51,6 +53,77 @@ function validateFamilyMembers(
 }
 
 export const familyPayloadSchema = z.object(familyFields).strict().superRefine(validateFamilyMembers);
+
+export const familyMemberInputSchema = z.object({
+  firstName: z.string().trim().min(1, "Ingresá el nombre").max(80),
+  lastName: z.string().trim().min(1, "Ingresá el apellido").max(80),
+  dni: z.string().trim().regex(/^\d{7,8}$/, "Ingresá un DNI de 7 u 8 números").optional(),
+  email: z.string().trim().toLowerCase().pipe(z.email("Ingresá un email válido")).optional(),
+  phone: z.string().trim().max(40).transform((phone) => phone || undefined).optional(),
+  relationship: z.string().trim().min(1).max(40),
+  missingDocuments: z.array(z.enum(FamilyDocumentType)).max(5),
+}).strict();
+
+export const addFamilyMemberRequestSchema = z.object({
+  operationId: z.uuid(),
+  baseVersion: z.number().int().nonnegative(),
+  memberId: z.uuid(),
+  personId: z.uuid(),
+  member: familyMemberInputSchema,
+  referencePersonId: z.string().min(1),
+}).strict();
+
+export const updateFamilyMemberRequestSchema = z.object({
+  operationId: z.uuid(),
+  baseVersion: z.number().int().nonnegative(),
+  member: familyMemberInputSchema,
+  referencePersonId: z.string().min(1),
+}).strict();
+
+export const familyMemberChangeSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("add-member"),
+    memberId: z.uuid(),
+    personId: z.uuid(),
+    member: familyMemberInputSchema,
+    referencePersonId: z.string().min(1),
+  }).strict(),
+  z.object({
+    action: z.literal("update-member"),
+    memberId: z.string().min(1),
+    member: familyMemberInputSchema,
+    referencePersonId: z.string().min(1),
+  }).strict(),
+]);
+
+export const familyPersonRecordSchema = z.object({
+  id: z.string(),
+  firstName: z.string(),
+  lastName: z.string(),
+  dni: z.string().nullable(),
+  email: z.string().nullable(),
+  phone: z.string().nullable(),
+  relationship: z.string(),
+  missingDocuments: z.array(z.object({ id: z.string(), documentType: z.enum(FamilyDocumentType) })),
+  membershipId: z.string(),
+});
+
+export const familyRecordSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  neighborhood: z.string(),
+  address: z.string(),
+  contactPhone: z.string().nullable(),
+  contactEmail: z.string().nullable(),
+  referencePersonId: z.string().nullable(),
+  members: z.array(familyPersonRecordSchema),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  version: z.number().int().nonnegative(),
+});
+
+export const familyCollectionSchema = z.object({ families: z.array(familyRecordSchema) });
+export const familyResponseSchema = z.object({ family: familyRecordSchema });
 
 export const createFamilyRequestSchema = z.object({
   ...familyFields,

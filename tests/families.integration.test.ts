@@ -8,6 +8,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { GET, POST } from "@/app/api/families/route";
 import { PATCH } from "@/app/api/families/[id]/route";
+import { POST as addFamilyMember } from "@/app/api/families/[id]/members/route";
+import { PATCH as updateFamilyMember } from "@/app/api/families/[id]/members/[memberId]/route";
 import { POST as synchronizeOperation } from "@/app/api/synchronizations/route";
 
 const createdFamilySchema = z.object({
@@ -20,13 +22,18 @@ const createdFamilySchema = z.object({
     contactEmail: z.string().nullable(),
     referencePersonId: z.string().nullable(),
     updatedAt: z.string(),
+    version: z.number(),
     members: z.array(z.object({
-      person: z.object({ id: z.string(), firstName: z.string(), lastName: z.string(), dni: z.string().nullable() }),
+      id: z.string(),
+      membershipId: z.string(),
+      firstName: z.string(),
+      lastName: z.string(),
+      dni: z.string().nullable(),
       missingDocuments: z.array(z.object({ id: z.string(), documentType: z.string() })),
     })),
   }),
 });
-const familyListSchema = z.object({ families: z.array(z.object({ id: z.string(), name: z.string(), members: z.array(z.object({ person: z.object({ dni: z.string().nullable() }) })) })) });
+const familyListSchema = z.object({ families: z.array(z.object({ id: z.string(), name: z.string(), members: z.array(z.object({ dni: z.string().nullable() })) })) });
 const errorSchema = z.object({ error: z.object({ message: z.string(), details: z.record(z.string(), z.array(z.string())).optional() }) });
 const synchronizationResponseSchema = z.object({
   operationId: z.uuid(),
@@ -55,11 +62,7 @@ test("family registry persists records, rejects duplicate identities and enforce
   const suffix = randomBytes(10).toString("hex");
   const userIds: string[] = [];
   const sessionTokens: string[] = [];
-  const dnis = [
-    `${(10_000_000 + Number.parseInt(suffix.slice(0, 7), 16) % 90_000_000).toString()}`,
-    `${(10_000_000 + Number.parseInt(suffix.slice(7, 14), 16) % 90_000_000).toString()}`,
-    `${(10_000_000 + Number.parseInt(suffix.slice(14, 20), 16) % 90_000_000).toString()}`,
-  ];
+  const dnis = Array.from({ length: 4 }, () => `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`);
   const users = await Promise.all([
     prisma.user.create({ data: { email: `family-president-${suffix}@example.test`, username: `family-president-${suffix}`, name: "Family Test President", role: UserRole.PRESIDENTE } }),
     prisma.user.create({ data: { email: `family-secretary-${suffix}@example.test`, username: `family-secretary-${suffix}`, name: "Family Test Secretary", role: UserRole.SECRETARIA } }),
@@ -111,7 +114,7 @@ test("family registry persists records, rejects duplicate identities and enforce
     assert.equal(createdFamily.contactEmail, `family-${suffix}@example.test`);
     assert.equal(createdFamily.members.length, 2);
     assert.equal(createdFamily.members.reduce((total, member) => total + member.missingDocuments.length, 0), 1);
-    assert.equal(createdFamily.members.some((member) => member.person.dni === dnis[0]), true);
+    assert.equal(createdFamily.members.some((member) => member.dni === dnis[0]), true);
 
     const retriedResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, familyInput));
     const parsedRetry = createdFamilySchema.safeParse(await retriedResponse.json());
@@ -159,7 +162,7 @@ test("family registry persists records, rejects duplicate identities and enforce
       address: "Calle de prueba 84",
       contactPhone: createdFamily.contactPhone,
       contactEmail: createdFamily.contactEmail,
-      baseUpdatedAt: createdFamily.updatedAt,
+      baseVersion: createdFamily.version,
     }), { params: Promise.resolve({ id: createdFamily.id }) });
     assert.equal(changedResponse.status, 200);
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -170,9 +173,74 @@ test("family registry persists records, rejects duplicate identities and enforce
       address: createdFamily.address,
       contactPhone: createdFamily.contactPhone,
       contactEmail: createdFamily.contactEmail,
-      baseUpdatedAt: createdFamily.updatedAt,
+      baseVersion: createdFamily.version,
     }), { params: Promise.resolve({ id: createdFamily.id }) });
     assert.equal(staleResponse.status, 409);
+
+    const familyAfterHeaderUpdate = await prisma.family.findUniqueOrThrow({ where: { id: createdFamily.id }, select: { version: true, referencePersonId: true } });
+    const addedMemberId = randomUUID();
+    const addedPersonId = randomUUID();
+    const addOperationId = randomUUID();
+    const addMemberBody = {
+      operationId: addOperationId,
+      baseVersion: familyAfterHeaderUpdate.version,
+      memberId: addedMemberId,
+      personId: addedPersonId,
+      member: { firstName: "Sol", lastName: "Prueba", dni: dnis[2], relationship: "Hermana o hermano", missingDocuments: ["PARTIDA_NACIMIENTO"] },
+      referencePersonId: addedPersonId,
+    };
+    const addMemberResponse = await addFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members`, "POST", secretaryToken, addMemberBody), { params: Promise.resolve({ id: createdFamily.id }) });
+    assert.equal(addMemberResponse.status, 201);
+    const parsedAddedMember = createdFamilySchema.safeParse(await addMemberResponse.json());
+    assert.equal(parsedAddedMember.success, true);
+
+    if (!parsedAddedMember.success) {
+      assert.fail("La ficha no devolvió el integrante agregado");
+    }
+
+    assert.equal(parsedAddedMember.data.family.members.length, 3);
+    assert.equal(parsedAddedMember.data.family.version, familyAfterHeaderUpdate.version + 1);
+    assert.equal(parsedAddedMember.data.family.referencePersonId, addedPersonId);
+    assert.equal(parsedAddedMember.data.family.members.some((member) => member.membershipId === addedMemberId), true);
+
+    const replayedAddMember = await addFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members`, "POST", secretaryToken, addMemberBody), { params: Promise.resolve({ id: createdFamily.id }) });
+    assert.equal(replayedAddMember.status, 201);
+    const replayedFamilyBody = createdFamilySchema.safeParse(await replayedAddMember.json());
+    assert.equal(replayedFamilyBody.success, true);
+
+    if (!replayedFamilyBody.success) {
+      assert.fail("El reintento no devolvió el resultado idempotente");
+    }
+
+    assert.equal(replayedFamilyBody.data.family.members.length, 3);
+
+    const duplicateMemberResponse = await addFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members`, "POST", presidentToken, {
+      ...addMemberBody,
+      operationId: randomUUID(),
+      memberId: randomUUID(),
+      personId: randomUUID(),
+      member: { ...addMemberBody.member, firstName: "Duplicada", dni: dnis[0] },
+    }), { params: Promise.resolve({ id: createdFamily.id }) });
+    assert.equal(duplicateMemberResponse.status, 409);
+    assert.equal(await prisma.family.findUniqueOrThrow({ where: { id: createdFamily.id }, select: { version: true } }).then((family) => family.version), familyAfterHeaderUpdate.version + 1);
+
+    const updateMemberResponse = await updateFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members/${addedMemberId}`, "PATCH", presidentToken, {
+      operationId: randomUUID(),
+      baseVersion: familyAfterHeaderUpdate.version + 1,
+      member: { firstName: "Sol corregida", lastName: "Prueba", dni: dnis[2], relationship: "Hermana o hermano", missingDocuments: [] },
+      referencePersonId: createdFamily.members[0]?.id ?? "",
+    }), { params: Promise.resolve({ id: createdFamily.id, memberId: addedMemberId }) });
+    assert.equal(updateMemberResponse.status, 200);
+    const parsedUpdatedFamily = createdFamilySchema.safeParse(await updateMemberResponse.json());
+    assert.equal(parsedUpdatedFamily.success, true);
+
+    if (!parsedUpdatedFamily.success) {
+      assert.fail("La actualización no devolvió la ficha del integrante");
+    }
+
+    assert.equal(parsedUpdatedFamily.data.family.version, familyAfterHeaderUpdate.version + 2);
+    assert.equal(parsedUpdatedFamily.data.family.referencePersonId, createdFamily.members[0]?.id);
+    assert.equal(parsedUpdatedFamily.data.family.members.find((member) => member.membershipId === addedMemberId)?.firstName, "Sol corregida");
 
     const crossOriginResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, familyInput, "https://untrusted.invalid"));
     assert.equal(crossOriginResponse.status, 403);
@@ -191,7 +259,7 @@ test("family registry persists records, rejects duplicate identities and enforce
         neighborhood: "Villa Nueva",
         address: "Pasaje de prueba 12",
         referenceMemberIndex: 0,
-        members: [{ firstName: "Offline", lastName: "Prueba", dni: dnis[2], relationship: "Referente", missingDocuments: [] }],
+        members: [{ firstName: "Offline", lastName: "Prueba", dni: dnis[3], relationship: "Referente", missingDocuments: [] }],
       },
     };
     const synchronizedResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineOperation));
@@ -217,7 +285,49 @@ test("family registry persists records, rejects duplicate identities and enforce
 
     assert.equal(parsedReplay.data.replayed, true);
     assert.equal(await prisma.family.count({ where: { id: offlineFamilyId } }), 1);
-    assert.equal(await prisma.person.count({ where: { dni: dnis[2] } }), 1);
+    assert.equal(await prisma.person.count({ where: { dni: dnis[3] } }), 1);
+
+    const offlineMemberId = randomUUID();
+    const offlinePersonId = randomUUID();
+    const offlineMemberOperation = {
+      operationId: randomUUID(),
+      userId: users[0].id,
+      resource: "families",
+      resourceId: offlineFamilyId,
+      operation: "update",
+      baseVersion: 1,
+      dependencies: [offlineOperation.operationId],
+      payload: {
+        action: "add-member",
+        memberId: offlineMemberId,
+        personId: offlinePersonId,
+        member: { firstName: "Operación", lastName: "Dependiente", relationship: "Hija o hijo", missingDocuments: ["DNI"] },
+        referencePersonId: offlinePersonId,
+      },
+    };
+    const offlineMemberResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineMemberOperation));
+    assert.equal(offlineMemberResponse.status, 200);
+    const parsedOfflineMemberResponse = synchronizationResponseSchema.safeParse(await offlineMemberResponse.json());
+    assert.equal(parsedOfflineMemberResponse.success, true);
+
+    if (!parsedOfflineMemberResponse.success) {
+      assert.fail("La sincronización no aplicó el integrante dependiente");
+    }
+
+    assert.equal(parsedOfflineMemberResponse.data.resourceVersion, 2);
+    assert.equal(await prisma.familyMember.count({ where: { id: offlineMemberId, familyId: offlineFamilyId } }), 1);
+    assert.equal(await prisma.person.count({ where: { id: offlinePersonId } }), 1);
+    const replayedOfflineMemberResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineMemberOperation));
+    const parsedOfflineMemberReplay = synchronizationResponseSchema.safeParse(await replayedOfflineMemberResponse.json());
+    assert.equal(replayedOfflineMemberResponse.status, 200);
+    assert.equal(parsedOfflineMemberReplay.success, true);
+
+    if (!parsedOfflineMemberReplay.success) {
+      assert.fail("El reintento del integrante dependiente no devolvió su recibo");
+    }
+
+    assert.equal(parsedOfflineMemberReplay.data.replayed, true);
+    assert.equal(await prisma.familyMember.count({ where: { familyId: offlineFamilyId } }), 2);
 
     const duplicateOfflineOperation = {
       ...offlineOperation,

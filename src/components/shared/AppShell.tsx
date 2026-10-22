@@ -279,7 +279,7 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
               <Button variant="outline" size="sm" onClick={() => void prepareOfflineAccess()} disabled={!isOnline || isPreparingOffline}>
                 {isPreparingOffline ? "Preparando…" : "Preparar offline"}
               </Button>
-              <Badge variant="secondary">{USER_ROLE_LABELS[user.role]}</Badge>
+              <Badge variant="secondary" className="hidden sm:inline-flex">{USER_ROLE_LABELS[user.role]}</Badge>
               <Avatar size="lg">
                 <AvatarFallback>{user.name.slice(0, 2).toUpperCase()}</AvatarFallback>
               </Avatar>

@@ -12,7 +12,7 @@ const updateFamilySchema = z.object({
   address: z.string().trim().min(2, "Ingresá el domicilio").max(180),
   contactPhone: z.string().trim().max(40).transform((phone) => phone || undefined).optional(),
   contactEmail: z.string().trim().toLowerCase().pipe(z.email("Ingresá un email válido")).optional(),
-  baseUpdatedAt: z.iso.datetime(),
+  baseVersion: z.number().int().nonnegative(),
 }).strict();
 const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
 

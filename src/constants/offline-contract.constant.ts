@@ -3,7 +3,7 @@ import type { SyncResource } from "@/types/offline-operation";
 export type OfflineOperationKind = "create" | "update" | "delete";
 
 export const OFFLINE_ENABLED_OPERATIONS = {
-  families: ["create"],
+  families: ["create", "update"],
   remittances: ["create"],
   records: ["create"],
   renditions: ["create"],
