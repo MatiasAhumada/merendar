@@ -1,4 +1,5 @@
 import { OFFLINE_STORAGE, SYNC_MESSAGES, SYNC_ROUTES } from "@/constants/offline.constant";
+import { isOfflineOperationEnabled } from "@/constants/offline-contract.constant";
 import type { JsonValue } from "@/types/json-value";
 import type { OfflineOperation, OfflineOperationInput, SynchronizationResult } from "@/types/offline-operation";
 import { z } from "zod";
@@ -103,6 +104,10 @@ export async function enqueueOfflineOperation(
 ): Promise<OfflineOperation> {
   if (!userId || !Number.isFinite(Date.parse(sessionExpiresAt)) || Date.now() >= Date.parse(sessionExpiresAt)) {
     throw new OfflineQueueError(SYNC_MESSAGES.SESSION_EXPIRED);
+  }
+
+  if (!isOfflineOperationEnabled(input.resource, input.operation)) {
+    throw new OfflineQueueError("Esta acción todavía no está habilitada para guardarse offline en este módulo.");
   }
 
   const existingOperations = await listOfflineOperations(userId);

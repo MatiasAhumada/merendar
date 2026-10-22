@@ -11,7 +11,8 @@ export const OFFLINE_STORAGE = {
 
 export const OFFLINE_PREPARATION = {
   DATABASE_PREFIX: "merendar-offline-preparation",
-  DATABASE_VERSION: 2,
+  DATABASE_VERSION: 3,
+  SNAPSHOT_SCHEMA_VERSION: 2,
   STORE: "workspace",
   DOCUMENTS_STORE: "documents",
   KEY: "latest",

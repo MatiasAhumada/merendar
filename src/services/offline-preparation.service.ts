@@ -3,7 +3,23 @@ import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import type { JsonValue } from "@/types/json-value";
 
+const offlineSnapshotSchema = z.object({
+  schemaVersion: z.literal(OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION),
+  capturedAt: z.iso.datetime(),
+  data: z.json(),
+});
 const offlinePreparationSchema = z.object({
+  schemaVersion: z.literal(OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION),
+  userId: z.string().min(1),
+  userName: z.string().min(1),
+  roleLabel: z.string().min(1),
+  capabilities: z.array(z.string()),
+  sessionExpiresAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime(),
+  preparedAt: z.iso.datetime(),
+  snapshots: z.record(z.string(), offlineSnapshotSchema),
+});
+const legacyOfflinePreparationSchema = z.object({
   userId: z.string().min(1),
   userName: z.string().min(1),
   roleLabel: z.string().min(1),
@@ -41,6 +57,35 @@ export class OfflinePreparationError extends Error {
     super(message);
     this.name = "OfflinePreparationError";
   }
+}
+
+export function normalizeStoredOfflinePreparation(value: unknown) {
+  const currentPreparation = offlinePreparationSchema.safeParse(value);
+  if (currentPreparation.success) {
+    return { preparation: currentPreparation.data, needsMigration: false };
+  }
+
+  const legacyPreparation = legacyOfflinePreparationSchema.safeParse(value);
+  if (!legacyPreparation.success) {
+    return { preparation: null, needsMigration: false };
+  }
+
+  const migratedSnapshots = Object.fromEntries(
+    Object.entries(legacyPreparation.data.snapshots).map(([route, data]) => [route, {
+      schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
+      capturedAt: legacyPreparation.data.preparedAt,
+      data,
+    }]),
+  );
+
+  return {
+    preparation: {
+      ...legacyPreparation.data,
+      schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
+      snapshots: migratedSnapshots,
+    },
+    needsMigration: true,
+  };
 }
 
 const ACCOUNT_DATABASE = "merendar-offline-account-index";
@@ -204,10 +249,10 @@ function collectDocumentReferences(value: JsonValue, references: OfflineDocument
   }
 }
 
-async function downloadPreparedDocuments(snapshots: Record<string, JsonValue>) {
+async function downloadPreparedDocuments(snapshots: OfflinePreparation["snapshots"]) {
   const documentReferences: OfflineDocumentReference[] = [];
   for (const snapshot of Object.values(snapshots)) {
-    collectDocumentReferences(snapshot, documentReferences);
+    collectDocumentReferences(snapshot.data, documentReferences);
   }
 
   const uniqueReferences = [...new Map(documentReferences.map((reference) => [`${reference.url}:${reference.id}`, reference])).values()];
@@ -240,7 +285,7 @@ async function downloadPreparedDocuments(snapshots: Record<string, JsonValue>) {
   return documents;
 }
 
-async function ensurePreparationStorageCapacity(snapshots: Record<string, JsonValue>, documents: OfflinePreparedDocument[]) {
+async function ensurePreparationStorageCapacity(snapshots: OfflinePreparation["snapshots"], documents: OfflinePreparedDocument[]) {
   const snapshotBytes = new TextEncoder().encode(JSON.stringify(snapshots)).length;
   const documentBytes = documents.reduce((totalBytes, document) => totalBytes + document.byteSize, 0);
   const requiredBytes = snapshotBytes + documentBytes + OFFLINE_PREPARATION.STORAGE_RESERVE_BYTES;
@@ -272,6 +317,22 @@ async function savePreparation(preparation: OfflinePreparation, documents: Offli
   }
 }
 
+async function saveMigratedPreparation(preparation: OfflinePreparation) {
+  const database = await openDatabase(preparation.userId);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(OFFLINE_PREPARATION.STORE, "readwrite");
+      transaction.objectStore(OFFLINE_PREPARATION.STORE).put({ key: OFFLINE_PREPARATION.KEY, ...preparation });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo actualizar el formato de la preparación offline."));
+      transaction.onabort = () => reject(new OfflinePreparationError("No se pudo actualizar el formato de la preparación offline."));
+    });
+  } finally {
+    database.close();
+  }
+}
+
 export async function readOfflinePreparation(userId: string): Promise<OfflinePreparation | null> {
   if (!globalThis.indexedDB) {
     return null;
@@ -289,23 +350,26 @@ export async function readOfflinePreparation(userId: string): Promise<OfflinePre
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(new OfflinePreparationError("No se pudo leer la preparación offline."));
     });
-    const parsedPreparation = offlinePreparationSchema.safeParse(storedPreparation);
+    const parsedPreparation = normalizeStoredOfflinePreparation(storedPreparation);
 
-    if (!parsedPreparation.success || parsedPreparation.data.userId !== userId) {
+    if (!parsedPreparation.preparation || parsedPreparation.preparation.userId !== userId) {
       return null;
     }
 
     const currentTime = Date.now();
-    const preparedTime = Date.parse(parsedPreparation.data.preparedAt);
-    const expirationTime = Date.parse(parsedPreparation.data.expiresAt);
-    const sessionExpirationTime = Date.parse(parsedPreparation.data.sessionExpiresAt);
+    const preparedTime = Date.parse(parsedPreparation.preparation.preparedAt);
+    const expirationTime = Date.parse(parsedPreparation.preparation.expiresAt);
+    const sessionExpirationTime = Date.parse(parsedPreparation.preparation.sessionExpiresAt);
     const preparedDuration = OFFLINE_PREPARATION.MAX_AGE_HOURS * 60 * 60_000;
     const expirationExceedsPolicy = expirationTime > sessionExpirationTime || expirationTime > preparedTime + preparedDuration;
 
     if (currentTime >= expirationTime || currentTime >= preparedTime + preparedDuration || expirationExceedsPolicy) {
       storedPreparation = null;
     } else {
-      return parsedPreparation.data;
+      if (parsedPreparation.needsMigration) {
+        await saveMigratedPreparation(parsedPreparation.preparation);
+      }
+      return parsedPreparation.preparation;
     }
   } finally {
     database.close();
@@ -347,48 +411,12 @@ export async function readOfflinePreparedWorkspace(userId: string): Promise<Offl
     return { preparation: null, documents: [] };
   }
 
-  const database = await openDatabase(userId);
-  let storedPreparation: unknown;
-  let storedDocuments: unknown;
-
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction([OFFLINE_PREPARATION.STORE, OFFLINE_PREPARATION.DOCUMENTS_STORE], "readonly");
-      const preparationRequest = transaction.objectStore(OFFLINE_PREPARATION.STORE).get(OFFLINE_PREPARATION.KEY);
-      const documentsRequest = transaction.objectStore(OFFLINE_PREPARATION.DOCUMENTS_STORE).getAll();
-      preparationRequest.onsuccess = () => { storedPreparation = preparationRequest.result; };
-      documentsRequest.onsuccess = () => { storedDocuments = documentsRequest.result; };
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo leer la preparación offline."));
-      transaction.onabort = () => reject(new OfflinePreparationError("No se pudo leer la preparación offline."));
-    });
-  } finally {
-    database.close();
-  }
-
-  const parsedPreparation = offlinePreparationSchema.safeParse(storedPreparation);
-  if (!parsedPreparation.success || parsedPreparation.data.userId !== userId) {
+  const preparation = await readOfflinePreparation(userId);
+  if (!preparation) {
     return { preparation: null, documents: [] };
   }
 
-  const currentTime = Date.now();
-  const preparedTime = Date.parse(parsedPreparation.data.preparedAt);
-  const expirationTime = Date.parse(parsedPreparation.data.expiresAt);
-  const sessionExpirationTime = Date.parse(parsedPreparation.data.sessionExpiresAt);
-  const preparedDuration = OFFLINE_PREPARATION.MAX_AGE_HOURS * 60 * 60_000;
-  const expirationExceedsPolicy = expirationTime > sessionExpirationTime || expirationTime > preparedTime + preparedDuration;
-
-  if (currentTime >= expirationTime || currentTime >= preparedTime + preparedDuration || expirationExceedsPolicy) {
-    await clearOfflinePreparation(userId);
-    return { preparation: null, documents: [] };
-  }
-
-  const parsedDocuments = z.array(offlinePreparedDocumentSchema).safeParse(storedDocuments);
-  if (!parsedDocuments.success) {
-    throw new OfflinePreparationError("Los documentos preparados tienen un formato que esta versión no reconoce.");
-  }
-
-  return { preparation: parsedPreparation.data, documents: parsedDocuments.data };
+  return { preparation, documents: await readOfflinePreparedDocuments(userId) };
 }
 
 export async function prepareOfflineWorkspace(
@@ -403,7 +431,14 @@ export async function prepareOfflineWorkspace(
   }
 
   await cachePublicOfflineShellAssets();
-  const snapshots: Record<string, JsonValue> = { "/": { status: "prepared" } };
+  const capturedAt = new Date().toISOString();
+  const snapshots: OfflinePreparation["snapshots"] = {
+    "/": {
+      schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
+      capturedAt,
+      data: { status: "prepared" },
+    },
+  };
   const routeRequests: Array<{ route: string; endpoint: string; capabilities: string[] }> = [
     { route: "/familias", endpoint: "/api/families", capabilities: ["families.read"] },
     { route: "/mercaderia", endpoint: "/api/merchandise", capabilities: ["merchandise.read", "renditions.read"] },
@@ -421,20 +456,25 @@ export async function prepareOfflineWorkspace(
         throw new OfflinePreparationError("El servidor devolvió datos que no se pudieron guardar de forma segura.");
       }
 
-      snapshots[request.route] = parsedSnapshot.data;
+      snapshots[request.route] = {
+        schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
+        capturedAt,
+        data: parsedSnapshot.data,
+      };
     }
   }
 
   const documents = await downloadPreparedDocuments(snapshots);
   await ensurePreparationStorageCapacity(snapshots, documents);
   const preparation: OfflinePreparation = {
+    schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
     userId,
     userName,
     roleLabel,
     capabilities,
     sessionExpiresAt,
     expiresAt: new Date(Math.min(Date.now() + OFFLINE_PREPARATION.MAX_AGE_HOURS * 60 * 60_000, Date.parse(sessionExpiresAt))).toISOString(),
-    preparedAt: new Date().toISOString(),
+    preparedAt: capturedAt,
     snapshots,
   };
   await savePreparation(preparation, documents);

@@ -9,6 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { BRAND } from "@/constants/brand.constant";
 import { OFFLINE_PREPARATION, type OfflinePreparedRoute } from "@/constants/offline.constant";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
@@ -19,6 +20,8 @@ import {
   type OfflinePreparedDocument,
 } from "@/services/offline-preparation.service";
 import type { JsonValue } from "@/types/json-value";
+import { listOfflineOperations } from "@/services/offline-queue.service";
+import type { OfflineOperation } from "@/types/offline-operation";
 
 const ROUTE_LABELS: Record<OfflinePreparedRoute, string> = {
   "/": "Inicio",
@@ -29,8 +32,22 @@ const ROUTE_LABELS: Record<OfflinePreparedRoute, string> = {
   "/permisos": "Permisos",
 };
 
-const SNAPSHOT_ARRAY_KEYS = ["families", "periods", "users", "roles", "records", "sheets"] as const;
 const SNAPSHOT_LABEL_KEYS = ["name", "label", "periodLabel", "fullName", "requestNumber", "remittanceNumber", "id"] as const;
+const SNAPSHOT_SECTION_LABELS: Record<string, string> = {
+  families: "Familias",
+  periods: "Períodos",
+  requests: "Solicitudes",
+  quotas: "Cupos",
+  remittances: "Remitos",
+  records: "Registros",
+  sheets: "Planillas",
+  renditions: "Rendiciones",
+  documents: "Documentos",
+  users: "Cuentas",
+  roles: "Roles",
+  policies: "Permisos",
+  history: "Cambios de permisos",
+};
 const offlineRouteSchema = z.enum(OFFLINE_PREPARATION.ROUTES);
 
 function recordFrom(value: JsonValue): Record<string, JsonValue> | null {
@@ -38,20 +55,28 @@ function recordFrom(value: JsonValue): Record<string, JsonValue> | null {
   return parsedRecord.success ? parsedRecord.data : null;
 }
 
-function firstArray(value: JsonValue) {
+function snapshotSections(value: JsonValue, searchTerm: string) {
   const record = recordFrom(value);
   if (!record) {
     return [];
   }
 
-  for (const key of SNAPSHOT_ARRAY_KEYS) {
-    const candidate = record[key];
-    if (Array.isArray(candidate)) {
-      return candidate;
+  const normalizedSearch = searchTerm.trim().toLocaleLowerCase("es-AR");
+  return Object.entries(record).flatMap(([key, candidate]) => {
+    if (!Array.isArray(candidate)) {
+      return [];
     }
-  }
 
-  return [];
+    const filteredEntries = candidate.filter((entry) =>
+      !normalizedSearch || (JSON.stringify(entry) ?? "").toLocaleLowerCase("es-AR").includes(normalizedSearch),
+    );
+    return [{
+      key,
+      label: SNAPSHOT_SECTION_LABELS[key] ?? key,
+      entries: filteredEntries,
+      totalCount: candidate.length,
+    }];
+  });
 }
 
 function itemLabel(value: JsonValue, index: number) {
@@ -99,24 +124,66 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-function SnapshotSummary({ snapshot }: { snapshot: JsonValue }) {
-  const entries = firstArray(snapshot);
+function operationLabel(operation: OfflineOperation["operation"]) {
+  if (operation === "create") {
+    return "Alta";
+  }
+  if (operation === "update") {
+    return "Modificación";
+  }
+  return "Baja";
+}
 
-  if (!entries.length) {
+function pendingOperationVariant(status: OfflineOperation["status"]): "warning" | "destructive" | "secondary" {
+  if (status === "error") {
+    return "destructive";
+  }
+  if (status === "conflict") {
+    return "warning";
+  }
+  return "secondary";
+}
+
+function pendingOperationStatus(status: OfflineOperation["status"]) {
+  if (status === "error") {
+    return "Requiere atención";
+  }
+  if (status === "conflict") {
+    return "Conflicto";
+  }
+  if (status === "syncing") {
+    return "Sincronizando";
+  }
+  return "Pendiente";
+}
+
+function SnapshotSummary({ snapshot, searchTerm }: { snapshot: JsonValue; searchTerm: string }) {
+  const sections = snapshotSections(snapshot, searchTerm);
+
+  if (!sections.length) {
     return <p className="text-sm text-muted-foreground">La ruta está autorizada y preparada. Los datos detallados se conservan en el almacenamiento local de esta cuenta.</p>;
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">{entries.length} registro(s) guardados al preparar esta vista.</p>
-      <ul className="divide-y rounded-lg border">
-        {entries.slice(0, 8).map((entry, index) => (
-          <li key={`${itemLabel(entry, index)}-${index}`} className="px-3 py-2 text-sm">
-            {itemLabel(entry, index)}
-          </li>
-        ))}
-      </ul>
-      {entries.length > 8 ? <p className="text-xs text-muted-foreground">Hay {entries.length - 8} registros más guardados.</p> : null}
+    <div className="space-y-4">
+      {sections.map((section) => (
+        <section key={section.key} aria-label={section.label} className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-medium">{section.label}</h3>
+            <Badge variant="secondary">{section.entries.length} de {section.totalCount}</Badge>
+          </div>
+          {section.entries.length ? (
+            <ul className="divide-y rounded-lg border">
+              {section.entries.slice(0, 40).map((entry, index) => (
+                <li key={`${itemLabel(entry, index)}-${index}`} className="px-3 py-2 text-sm">
+                  {itemLabel(entry, index)}
+                </li>
+              ))}
+            </ul>
+          ) : <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">No hay resultados para esta búsqueda.</p>}
+          {section.entries.length > 40 ? <p className="text-xs text-muted-foreground">Se muestran 40 de {section.entries.length} coincidencias.</p> : null}
+        </section>
+      ))}
     </div>
   );
 }
@@ -156,8 +223,34 @@ function PreparedDocuments({ documents }: { documents: OfflinePreparedDocument[]
   );
 }
 
-function PreparedRoute({ route, preparation, documents }: { route: OfflinePreparedRoute; preparation: OfflinePreparation; documents: OfflinePreparedDocument[] }) {
-  const snapshot = preparation.snapshots[route];
+function PendingOperations({ operations }: { operations: OfflineOperation[] }) {
+  const pendingOperations = operations.filter((operation) => operation.status !== "synced");
+
+  return (
+    <section aria-labelledby="offline-pending-title" className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="offline-pending-title" className="font-display text-base font-semibold">Cambios pendientes</h2>
+        <Badge variant={pendingOperations.length ? "warning" : "success"}>{pendingOperations.length}</Badge>
+      </div>
+      {pendingOperations.length ? (
+        <ul className="divide-y rounded-lg border">
+          {pendingOperations.map((operation) => (
+            <li key={operation.operationId} className="flex flex-wrap items-center justify-between gap-3 px-3 py-3">
+              <div>
+                <p className="text-sm font-medium">{operationLabel(operation.operation)} · {operation.resourceId}</p>
+                <p className="text-xs text-muted-foreground">{new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(operation.createdAt))}</p>
+              </div>
+              <Badge variant={pendingOperationVariant(operation.status)}>{pendingOperationStatus(operation.status)}</Badge>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="text-sm text-muted-foreground">No hay cambios pendientes en esta cuenta.</p>}
+    </section>
+  );
+}
+
+function PreparedRoute({ route, preparation, documents, operations, searchTerm, setSearchTerm }: { route: OfflinePreparedRoute; preparation: OfflinePreparation; documents: OfflinePreparedDocument[]; operations: OfflineOperation[]; searchTerm: string; setSearchTerm: (value: string) => void }) {
+  const snapshot = preparation.snapshots[route]?.data;
 
   if (!snapshot) {
     return (
@@ -175,7 +268,10 @@ function PreparedRoute({ route, preparation, documents }: { route: OfflinePrepar
         <CardDescription>Datos privados recuperados del almacenamiento local de {preparation.userName}.</CardDescription>
       </CardHeader>
       <CardContent>
-        <SnapshotSummary snapshot={snapshot} />
+        <p className="mb-4 text-xs text-muted-foreground">Lectura capturada {formatDate(preparation.snapshots[route].capturedAt)} · esquema {preparation.snapshots[route].schemaVersion}</p>
+        <Input aria-label="Filtrar datos preparados" placeholder="Filtrar datos preparados" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} />
+        <div className="mt-4"><SnapshotSummary snapshot={snapshot} searchTerm={searchTerm} /></div>
+        <div className="mt-6"><PendingOperations operations={operations} /></div>
         {route === "/mercaderia" ? <PreparedDocuments documents={documents} /> : null}
       </CardContent>
     </Card>
@@ -187,6 +283,8 @@ export function OfflineScreen() {
   const route = routeFromSearch(useSyncExternalStore(subscribeToRouteChange, currentSearch, serverSearch));
   const [preparation, setPreparation] = useState<OfflinePreparation | null>(null);
   const [documents, setDocuments] = useState<OfflinePreparedDocument[]>([]);
+  const [operations, setOperations] = useState<OfflineOperation[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
@@ -196,11 +294,12 @@ export function OfflineScreen() {
       if (!userId) {
         return null;
       }
-      return readOfflinePreparedWorkspace(userId);
+      return Promise.all([readOfflinePreparedWorkspace(userId), listOfflineOperations(userId)]);
     }).then((savedPreparation) => {
       if (isMounted) {
-        setPreparation(savedPreparation?.preparation ?? null);
-        setDocuments(savedPreparation?.documents ?? []);
+        setPreparation(savedPreparation?.[0].preparation ?? null);
+        setDocuments(savedPreparation?.[0].documents ?? []);
+        setOperations(savedPreparation?.[1] ?? []);
       }
     }).catch((error: unknown) => {
       if (isMounted) {
@@ -268,7 +367,7 @@ export function OfflineScreen() {
         </Alert>
       ) : null}
 
-      {preparation && !isLoading ? <PreparedRoute route={route} preparation={preparation} documents={documents} /> : null}
+      {preparation && !isLoading ? <PreparedRoute route={route} preparation={preparation} documents={documents} operations={operations} searchTerm={searchTerm} setSearchTerm={setSearchTerm} /> : null}
 
       <Card variant="muted" className="mt-auto">
         <CardContent className="flex flex-col items-start gap-4 pt-5 sm:flex-row sm:items-center sm:justify-between">
