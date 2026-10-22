@@ -1,9 +1,5 @@
 import { toast } from "sonner";
-
-interface ToastOptions {
-  description?: string;
-  duration?: number;
-}
+import type { ToastOptions } from "@/types/toast";
 
 export function toastSuccess(message: string, options?: ToastOptions) {
   toast.success(message, {

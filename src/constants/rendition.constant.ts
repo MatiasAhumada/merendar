@@ -1,0 +1,18 @@
+export const RENDITION_LIMITS = {
+  MAX_DOCUMENT_BYTES: 512 * 1024,
+  MAX_DOCUMENTS_PER_UPLOAD: 5,
+  MAX_DOCUMENTS_PER_RENDITION: 20,
+  MAX_UPLOAD_BYTES: 700_000,
+} as const;
+
+export const RENDITION_DOCUMENT_TYPES = {
+  SIGNED_SHEET: "PLANILLA_FIRMADA",
+  REMITTANCE: "REMITO",
+  SUPPORTING: "RESPALDO",
+} as const;
+
+export const RENDITION_DOCUMENT_LABELS = {
+  PLANILLA_FIRMADA: "Planilla firmada a mano",
+  REMITO: "Remito",
+  RESPALDO: "Documentación de respaldo",
+} as const;

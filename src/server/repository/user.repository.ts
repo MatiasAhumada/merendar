@@ -3,9 +3,11 @@ import { prisma } from "@/lib/prisma";
 interface CreateUserDto {
   name: string;
   email: string;
+  role: import("@prisma/client").UserRole;
+  passwordHash: string;
 }
 
-interface UpdateUserDto extends Partial<CreateUserDto> {}
+type UpdateUserDto = { isActive?: boolean };
 
 export const userRepository = {
   async create(dto: CreateUserDto) {
@@ -49,6 +51,18 @@ export const userRepository = {
     return prisma.user.findMany({
       where,
       orderBy: { createdAt: "desc" },
+      select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true },
     });
+  },
+
+  async deactivate(id: string) {
+    return prisma.$transaction(async (transaction) => {
+      await transaction.user.update({ where: { id }, data: { isActive: false } });
+      await transaction.authSession.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+    });
+  },
+
+  async countActivePresidents() {
+    return prisma.user.count({ where: { role: "PRESIDENTE", isActive: true } });
   },
 };

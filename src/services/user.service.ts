@@ -6,7 +6,7 @@ export interface CreateUserDto {
   email: string;
 }
 
-export interface UpdateUserDto extends Partial<CreateUserDto> {}
+export type UpdateUserDto = Partial<CreateUserDto>;
 
 export const userService = {
   async create(dto: CreateUserDto) {
