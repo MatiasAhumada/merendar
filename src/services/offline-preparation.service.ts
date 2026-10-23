@@ -2,6 +2,7 @@ import { z } from "zod";
 import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import type { JsonValue } from "@/types/json-value";
+import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
 
 const offlineSnapshotSchema = z.object({
   schemaVersion: z.literal(OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION),
@@ -28,6 +29,22 @@ const legacyOfflinePreparationSchema = z.object({
   expiresAt: z.iso.datetime(),
   preparedAt: z.iso.datetime(),
   snapshots: z.record(z.string(), z.json()),
+});
+const previousOfflineSnapshotSchema = z.object({
+  schemaVersion: z.literal(3),
+  capturedAt: z.iso.datetime(),
+  data: z.json(),
+});
+const previousOfflinePreparationSchema = z.object({
+  schemaVersion: z.literal(3),
+  userId: z.string().min(1),
+  userName: z.string().min(1),
+  roleLabel: z.string().min(1),
+  capabilities: z.array(z.string()),
+  sessionExpiresAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime(),
+  preparedAt: z.iso.datetime(),
+  snapshots: z.record(z.string(), previousOfflineSnapshotSchema),
 });
 const offlinePreparedDocumentSchema = z.object({
   id: z.string().min(1),
@@ -65,6 +82,25 @@ export function normalizeStoredOfflinePreparation(value: unknown) {
   const currentPreparation = offlinePreparationSchema.safeParse(value);
   if (currentPreparation.success) {
     return { preparation: currentPreparation.data, needsMigration: false };
+  }
+
+  const previousPreparation = previousOfflinePreparationSchema.safeParse(value);
+  if (previousPreparation.success) {
+    const migratedSnapshots = Object.fromEntries(
+      Object.entries(previousPreparation.data.snapshots).map(([route, snapshot]) => [route, {
+        ...snapshot,
+        schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
+      }]),
+    );
+
+    return {
+      preparation: {
+        ...previousPreparation.data,
+        schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
+        snapshots: migratedSnapshots,
+      },
+      needsMigration: true,
+    };
   }
 
   const legacyPreparation = legacyOfflinePreparationSchema.safeParse(value);
@@ -542,19 +578,34 @@ export async function prepareOfflineWorkspace(
     "/": {
       schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
       capturedAt,
-      data: { status: "prepared" },
+      data: { authorized: false },
     },
   };
-  const routeRequests: Array<{ route: string; endpoint: string; capabilities: string[] }> = [
-    { route: "/familias", endpoint: "/api/families", capabilities: ["families.read"] },
-    { route: "/mercaderia", endpoint: "/api/merchandise", capabilities: ["merchandise.read", "renditions.read"] },
-    { route: "/entrega", endpoint: "/api/records?includePeriodDetails=true", capabilities: ["delivery.read"] },
-    { route: "/usuarios", endpoint: "/api/users", capabilities: ["users.manage"] },
-    { route: "/permisos", endpoint: "/api/access-policy", capabilities: ["access-policy.manage"] },
+  if (capabilities.includes("dashboard.metrics.read")) {
+    const dashboardResponse = await clientAxios.get<unknown>("/api/dashboard", { headers: { "Cache-Control": "no-store" } });
+    const parsedDashboard = dashboardSummaryResponseSchema.safeParse(dashboardResponse.data);
+
+    if (!parsedDashboard.success || !parsedDashboard.data.authorized) {
+      throw new OfflinePreparationError("No se pudieron validar las métricas autorizadas para el inicio.");
+    }
+
+    snapshots["/"] = {
+      schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
+      capturedAt,
+      data: parsedDashboard.data,
+    };
+  }
+  const routeRequests: Array<{ route: keyof typeof OFFLINE_PREPARATION.ROUTE_CAPABILITIES; endpoint: string }> = [
+    { route: "/familias", endpoint: "/api/families" },
+    { route: "/mercaderia", endpoint: "/api/merchandise" },
+    { route: "/entrega", endpoint: "/api/records?includePeriodDetails=true" },
+    { route: "/usuarios", endpoint: "/api/users" },
+    { route: "/permisos", endpoint: "/api/access-policy" },
   ];
 
   for (const request of routeRequests) {
-    if (request.capabilities.some((capability) => capabilities.includes(capability))) {
+    const requiredCapabilities = OFFLINE_PREPARATION.ROUTE_CAPABILITIES[request.route];
+    if (requiredCapabilities.some((capability) => capabilities.includes(capability))) {
       const response = await clientAxios.get<unknown>(request.endpoint, { headers: { "Cache-Control": "no-store" } });
       const parsedSnapshot = z.json().safeParse(response.data);
 

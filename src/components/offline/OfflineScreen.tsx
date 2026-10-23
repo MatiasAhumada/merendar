@@ -28,6 +28,8 @@ import { DeliveryWorkbench } from "@/components/delivery/DeliveryWorkbench";
 import { recordsCollectionSchema } from "@/validations/record.validation";
 import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace";
 import { merchandiseResponseSchema } from "@/components/merchandise/MerchandiseWorkspace";
+import { DASHBOARD_METRICS } from "@/constants/dashboard.constant";
+import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
 
 const ROUTE_LABELS: Record<OfflinePreparedRoute, string> = {
   "/": "Inicio",
@@ -166,6 +168,18 @@ function pendingOperationStatus(status: OfflineOperation["status"]) {
     return "Sincronizando";
   }
   return "Pendiente";
+}
+
+function pendingChangesDescription(pendingCount: number) {
+  if (pendingCount === 1) {
+    return "1 cambio local pendiente de autorización y sincronización.";
+  }
+
+  if (pendingCount > 1) {
+    return `${pendingCount} cambios locales pendientes de autorización y sincronización.`;
+  }
+
+  return "No hay cambios locales pendientes.";
 }
 
 function SnapshotSummary({ snapshot, searchTerm }: { snapshot: JsonValue; searchTerm: string }) {
@@ -310,6 +324,94 @@ function PreparedRoute({ route, preparation, preparationIsValid, documents, oper
         <AlertTitle>Esta vista no está preparada</AlertTitle>
         <AlertDescription>{OFFLINE_PREPARATION.MESSAGES.NOT_PREPARED} Conectate, abrí la app y usá “Preparar offline”.</AlertDescription>
       </Alert>
+    );
+  }
+
+  if (route === "/") {
+    const dashboardSnapshot = dashboardSummaryResponseSchema.safeParse(snapshot);
+
+    if (!dashboardSnapshot.success || !dashboardSnapshot.data.authorized) {
+      return (
+        <div className="space-y-4">
+          <Alert variant="info">
+            <AlertTitle>Inicio preparado sin métricas para este rol</AlertTitle>
+            <AlertDescription>La política vigente al preparar el dispositivo no autorizaba el resumen operativo. Los accesos que aparecen arriba corresponden a las vistas preparadas para esta cuenta.</AlertDescription>
+          </Alert>
+          <PendingOperations operations={operations} />
+        </div>
+      );
+    }
+
+    const summary = dashboardSnapshot.data.summary;
+    const pendingCount = operations.filter((operation) => operation.status !== "synced").length;
+    const metrics = DASHBOARD_METRICS.map((metric) => {
+      let metricValue = "—";
+      let metricDescription = "No disponible en esta captura";
+
+      if (metric.label === "Familias") {
+        metricValue = String(summary.familyCount);
+        if (summary.familyCount > 0) {
+          metricDescription = metric.description;
+        } else {
+          metricDescription = "Todavía no hay familias";
+        }
+      }
+
+      if (metric.label === "Personas") {
+        metricValue = String(summary.personCount);
+        if (summary.personCount > 0) {
+          metricDescription = metric.description;
+        } else {
+          metricDescription = "Todavía no hay personas";
+        }
+      }
+
+      if (metric.label === "Cupos aprobados") {
+        if (summary.activePeriodLabel) {
+          metricValue = String(summary.approvedQuotaCount ?? 0);
+          if (summary.approvedQuotaCount) {
+            metricDescription = metric.description;
+          } else {
+            metricDescription = "Sin cupos aprobados en el período";
+          }
+        } else {
+          metricDescription = "No hay un período vigente";
+        }
+      }
+
+      return { ...metric, metricValue, metricDescription };
+    });
+
+    return (
+      <div className="space-y-4">
+        <Alert variant="info">
+          <HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} />
+          <AlertTitle>Resumen del servidor guardado para consulta</AlertTitle>
+          <AlertDescription>Captura del {formatDate(preparation.snapshots[route].capturedAt)}. Estas cifras son una lectura confirmada en ese momento, pueden estar desactualizadas y no incluyen cambios pendientes.</AlertDescription>
+        </Alert>
+        <section aria-label="Métricas preparadas" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {metrics.map((metric) => (
+            <Card key={metric.label} size="sm">
+              <CardContent className="flex flex-col gap-2">
+                <span className="text-xs font-medium">{metric.label}</span>
+                <p className="font-display text-3xl font-bold tabular-nums">{metric.metricValue}</p>
+                <p className="text-xs text-muted-foreground">{metric.metricDescription}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Sincronización</CardTitle>
+            <CardDescription>Los datos preparados y los cambios locales se muestran por separado.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            <p>Último cambio confirmado: {summary.lastUpdatedAt ? formatDate(summary.lastUpdatedAt) : "sin actividad registrada"}.</p>
+            <p>{pendingChangesDescription(pendingCount)}</p>
+            <p className="text-muted-foreground">Al recuperar conexión, el inicio volverá a consultar el servidor. Los cambios pendientes no se suman a estas métricas.</p>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
@@ -519,7 +621,7 @@ export function OfflineScreen() {
       {queueError ? <Alert variant="info"><AlertTitle>La preparación está disponible; la cola requiere atención</AlertTitle><AlertDescription>{queueError} Los documentos preparados se conservan y se pueden leer mientras resolvés los cambios pendientes.</AlertDescription></Alert> : null}
 
       {preparation ? (
-        <nav aria-label="Vistas preparadas" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <nav aria-label="Vistas preparadas" className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
           {availableRoutes.map((availableRoute) => (
             <Button asChild key={availableRoute} variant={route === availableRoute ? "soft" : "outline"} className="min-h-11 justify-start">
               <a href={`/offline?route=${encodeURIComponent(availableRoute)}`}>{ROUTE_LABELS[availableRoute]}</a>

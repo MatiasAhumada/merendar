@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { CloudOffIcon, Logout01Icon, Menu01Icon } from "@hugeicons/core-free-icons";
+import { Logout01Icon, Menu01Icon } from "@hugeicons/core-free-icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,7 @@ import { clientErrorHandler } from "@/utils/handlers/clientHandler";
 import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
 import { OfflineAccessNotice } from "@/components/shared/OfflineAccessNotice";
 import { OfflineSyncStatus } from "@/components/shared/OfflineSyncStatus";
+import { OfflineScreen } from "@/components/offline/OfflineScreen";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { clearOfflineQueue } from "@/services/offline-queue.service";
 import {
@@ -107,15 +108,7 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
 
   if (!isOnline && !canCaptureOffline) {
     if (pathname === ROUTES.HOME) {
-      pageContent = (
-        <Alert variant="info">
-          <HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} />
-          <AlertTitle>Inicio disponible al recuperar conexión</AlertTitle>
-          <AlertDescription>
-            Las métricas se consultan en el servidor y no están guardadas en caché. Los cambios locales pendientes aparecen arriba con su fecha de guardado y se sincronizan al volver a conectarte.
-          </AlertDescription>
-        </Alert>
-      );
+      pageContent = <OfflineScreen />;
     } else {
       pageContent = <OfflineAccessNotice />;
     }
