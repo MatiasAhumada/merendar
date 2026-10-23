@@ -114,6 +114,44 @@ function toFamilyJsonPayload(family: FamilyPayload): JsonObject {
   return payload;
 }
 
+function toFamilyMemberChangeJson(change: FamilyMemberChangeInput): JsonObject {
+  const member: JsonObject = {
+    firstName: change.member.firstName,
+    lastName: change.member.lastName,
+    relationship: change.member.relationship,
+    missingDocuments: [...change.member.missingDocuments],
+  };
+
+  if (change.member.dni) {
+    member.dni = change.member.dni;
+  }
+
+  if (change.member.email) {
+    member.email = change.member.email;
+  }
+
+  if (change.member.phone) {
+    member.phone = change.member.phone;
+  }
+
+  const payload: JsonObject = {
+    action: change.action,
+    memberId: change.memberId,
+    member,
+    referencePersonId: change.referencePersonId,
+  };
+
+  if (change.action === "add-member") {
+    if (!change.personId) {
+      throw new Error("La operación para agregar un integrante requiere un personId.");
+    }
+
+    payload.personId = change.personId;
+  }
+
+  return payload;
+}
+
 function familyFromOfflineOperation(operation: OfflineOperation): FamilyRecord | null {
   const parsedFamily = familyPayloadSchema.safeParse(operation.payload);
 
@@ -671,17 +709,23 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     }
 
     try {
-      await enqueueOfflineOperation(userId, sessionExpiresAt, {
+      const queuedOperation = await enqueueOfflineOperation(userId, sessionExpiresAt, {
         resource: "families",
         resourceId: selectedFamilyView.id,
         operation: "update",
         baseVersion: selectedFamilyView.version,
         dependencies,
-        payload: parsedChange.data,
+        payload: toFamilyMemberChangeJson(parsedChange.data),
       });
 
       const currentOperations = await refreshOfflineFamilies();
-      setSelectedFamily(applyPendingMemberChanges(selectedFamilyView, currentOperations));
+      const operationsWithChange = currentOperations.some((operation) => operation.operationId === queuedOperation.operationId)
+        ? currentOperations
+        : [...currentOperations, queuedOperation];
+      setOfflineOperations(operationsWithChange);
+      setSelectedFamily((currentFamily) => currentFamily && currentFamily.id === selectedFamilyView.id
+        ? applyPendingMemberChanges(currentFamily, operationsWithChange)
+        : currentFamily);
 
       if (navigator.onLine) {
         await synchronizeOfflineQueue(userId);
