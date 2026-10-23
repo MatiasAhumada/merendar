@@ -13,11 +13,17 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RENDITION_DOCUMENT_LABELS, RENDITION_DOCUMENT_TYPES, RENDITION_LIMITS } from "@/constants/rendition.constant";
-import { synchronizeOfflineQueue, enqueueOfflineOperation, listOfflineOperations, retryOfflineOperation } from "@/services/offline-queue.service";
+import { synchronizeOfflineQueue, enqueueOfflineOperation, listOfflineOperations, retryOfflineOperation, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import type { MerchandisePeriodRecord } from "@/interfaces/merchandise.interface";
+import type { OfflinePreparedDocument } from "@/services/offline-preparation.service";
 import type { OfflineOperation } from "@/types/offline-operation";
-import { renditionDocumentPayloadSchema, renditionReviewPayloadSchema, type RenditionDocumentPayload } from "@/validations/rendition.validation";
+import {
+  renditionDocumentPayloadSchema,
+  renditionReviewOperationPayloadSchema,
+  renditionReviewPayloadSchema,
+  type RenditionDocumentPayload,
+} from "@/validations/rendition.validation";
 import { z } from "zod";
 
 interface RenditionWorkspaceProps {
@@ -29,6 +35,8 @@ interface RenditionWorkspaceProps {
   canReview: boolean;
   canCreatePeriods: boolean;
   periodStatus: "loading" | "error" | "offline-unprepared" | "empty" | "ready";
+  offlineMode?: boolean;
+  preparedDocuments?: OfflinePreparedDocument[];
 }
 
 const documentTypeSchema = z.enum([
@@ -98,6 +106,23 @@ function renditionOperations(operations: OfflineOperation[]) {
   return parsedOperations;
 }
 
+function pendingReviewOperations(operations: OfflineOperation[]) {
+  const pendingReviews: Array<{ operation: OfflineOperation; payload: z.infer<typeof renditionReviewOperationPayloadSchema> }> = [];
+
+  for (const operation of operations) {
+    if (operation.resource !== "renditions" || operation.status === "synced") {
+      continue;
+    }
+
+    const parsedPayload = renditionReviewOperationPayloadSchema.safeParse(operation.payload);
+    if (parsedPayload.success) {
+      pendingReviews.push({ operation, payload: parsedPayload.data });
+    }
+  }
+
+  return pendingReviews;
+}
+
 function operationLabel(status: OfflineOperation["status"]) {
   if (status === "error" || status === "conflict") {
     return "Error de carga";
@@ -108,6 +133,37 @@ function operationLabel(status: OfflineOperation["status"]) {
   }
 
   return "Pendiente offline";
+}
+
+function PreparedRenditionDocumentLink({ document, label, download = false }: { document: OfflinePreparedDocument; label: string; download?: boolean }) {
+  const [documentUrl] = useState(() => URL.createObjectURL(document.content));
+
+  useEffect(() => () => URL.revokeObjectURL(documentUrl), [documentUrl]);
+
+  return <Button asChild size="sm" variant={download ? "secondary" : "outline"}><a href={documentUrl} target={download ? undefined : "_blank"} rel={download ? undefined : "noreferrer"} download={document.originalName}>{label}</a></Button>;
+}
+
+function SheetDocumentLink({ sheetId, offlineMode, preparedDocuments }: { sheetId: string; offlineMode: boolean; preparedDocuments: OfflinePreparedDocument[] }) {
+  if (offlineMode) {
+    const preparedDocument = preparedDocuments.find((document) => document.id === sheetId);
+    if (!preparedDocument) {
+      return <p className="text-xs text-muted-foreground">La planilla no está guardada en esta preparación offline.</p>;
+    }
+    return <PreparedRenditionDocumentLink document={preparedDocument} label="Abrir planilla preparada" download />;
+  }
+
+  return <Button asChild size="sm" variant="outline"><a href={`/api/records/sheets/${encodeURIComponent(sheetId)}`}><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} data-icon="inline-start" /> Descargar para imprimir</a></Button>;
+}
+
+function RenditionDocumentActions({ documentId, preparedDocument, offlineMode }: { documentId: string; preparedDocument: OfflinePreparedDocument | undefined; offlineMode: boolean }) {
+  if (offlineMode) {
+    if (!preparedDocument) {
+      return <Badge variant="warning">PDF no preparado</Badge>;
+    }
+    return <><PreparedRenditionDocumentLink document={preparedDocument} label="Previsualizar" /><PreparedRenditionDocumentLink document={preparedDocument} label="Descargar" download /></>;
+  }
+
+  return <><Button asChild size="sm" variant="outline"><a href={`/api/renditions/documents/${encodeURIComponent(documentId)}?inline=1`} target="_blank" rel="noreferrer">Previsualizar</a></Button><Button asChild size="sm" variant="secondary"><a href={`/api/renditions/documents/${encodeURIComponent(documentId)}`}>Descargar</a></Button></>;
 }
 
 function reviewLabel(status: "PENDIENTE" | "REVISADA" | "OBSERVADA") {
@@ -130,7 +186,7 @@ function createReviewPayload(status: "REVISADA" | "OBSERVADA", notes: string) {
   return { status };
 }
 
-export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefresh, canWrite, canReview, canCreatePeriods, periodStatus }: RenditionWorkspaceProps) {
+export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefresh, canWrite, canReview, canCreatePeriods, periodStatus, offlineMode = false, preparedDocuments = [] }: RenditionWorkspaceProps) {
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
   const [selectedPeriodId, setSelectedPeriodId] = useState("");
   const [selectedSheetId, setSelectedSheetId] = useState("");
@@ -171,10 +227,12 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
   const selectedSheet = selectedPeriod?.beneficiarySheets.find((sheet) => sheet.id === selectedSheetId) ?? selectedPeriod?.beneficiarySheets[0];
   const selectedRendition = selectedPeriod?.renditions.find((rendition) => rendition.beneficiarySheetId === selectedSheet?.id);
   const visibleOperations = useMemo(() => renditionOperations(operations), [operations]);
+  const visibleReviewOperations = useMemo(() => pendingReviewOperations(operations), [operations]);
   const visibleDocuments = selectedRendition?.documents ?? [];
   const currentDocuments = visibleDocuments.filter((document) => !visibleDocuments.some((candidate) => candidate.supersedesId === document.id));
   const queuedUploads = visibleOperations.filter(({ payload }) => payload.beneficiarySheetId === selectedSheet?.id);
   const pendingDocumentCount = queuedUploads.reduce((count, upload) => count + upload.payload.documents.length, 0);
+  const queuedReview = visibleReviewOperations.find(({ payload }) => payload.id === selectedRendition?.id);
   const hasSignedSheet = currentDocuments.some((document) => document.documentType === RENDITION_DOCUMENT_TYPES.SIGNED_SHEET) ||
     queuedUploads.some(({ payload }) => payload.documents.some((document) => document.type === RENDITION_DOCUMENT_TYPES.SIGNED_SHEET));
   let periodAvailabilityMessage = "";
@@ -283,8 +341,8 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
   async function saveReview(event: FormEvent<HTMLFormElement>, renditionId: string) {
     event.preventDefault();
     setReviewMessage("");
-    const payload = createReviewPayload(reviewStatus, reviewNotes);
-    const parsedReview = renditionReviewPayloadSchema.safeParse(payload);
+    const review = createReviewPayload(reviewStatus, reviewNotes);
+    const parsedReview = renditionReviewPayloadSchema.safeParse(review);
 
     if (!parsedReview.success) {
       setReviewMessage(parsedReview.error.issues[0]?.message ?? "Revisá los datos de revisión.");
@@ -292,31 +350,33 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
     }
 
     try {
-      const response = await fetch(`/api/renditions/${encodeURIComponent(renditionId)}/review`, {
-        method: "PATCH",
-        credentials: "same-origin",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsedReview.data),
+      const payload = renditionReviewOperationPayloadSchema.parse({
+        kind: "rendition_review",
+        id: renditionId,
+        ...parsedReview.data,
       });
-      const responseBody: unknown = await response.json();
-      const responseSchema = z.object({ error: z.object({ message: z.string() }).optional() });
-      const parsedResponse = responseSchema.safeParse(responseBody);
-
-      if (!response.ok) {
-        throw new Error(parsedResponse.success ? parsedResponse.data.error?.message ?? "No se pudo registrar la revisión." : "No se pudo registrar la revisión.");
-      }
-
+      await enqueueOfflineOperation(userId, sessionExpiresAt, {
+        resource: "renditions",
+        resourceId: renditionId,
+        operation: "create",
+        baseVersion: null,
+        dependencies: [],
+        payload: z.json().parse(JSON.parse(JSON.stringify(payload))),
+      });
       setReviewNotes("");
-      await onRefresh();
+      let savedReviewMessage = "Revisión pendiente en este dispositivo; se confirmará cuando el servidor valide la sesión y los permisos.";
+      if (isOnline) {
+        savedReviewMessage = "Revisión guardada y enviada para validación del servidor.";
+      }
+      setReviewMessage(savedReviewMessage);
+      await refreshQueue();
+      if (isOnline) {
+        await synchronizeOfflineQueue(userId);
+        await Promise.all([refreshQueue(), onRefresh()]);
+      }
     } catch (error) {
       setReviewMessage(errorMessage(error));
     }
-  }
-
-  function documentLink(documentId: string, inline = false) {
-    const basePath = `/api/renditions/documents/${encodeURIComponent(documentId)}`;
-    return inline ? `${basePath}?inline=1` : basePath;
   }
 
   return <Card id="rendiciones" aria-labelledby="renditions-title" className="scroll-mt-28">
@@ -352,7 +412,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
 
       {selectedSheet ? <div className="flex flex-col justify-between gap-3 rounded-xl border bg-muted/40 p-3 sm:flex-row sm:items-center">
         <p className="text-sm"><strong>Referencia vinculada:</strong> planilla versión {selectedSheet.version} · {selectedSheet.beneficiaryCount} beneficiarios · emitida el {formatDate(selectedSheet.createdAt)}.</p>
-        <Button asChild size="sm" variant="outline"><a href={`/api/records/sheets/${encodeURIComponent(selectedSheet.id)}`}><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} data-icon="inline-start" /> Descargar para imprimir</a></Button>
+        <SheetDocumentLink sheetId={selectedSheet.id} offlineMode={offlineMode} preparedDocuments={preparedDocuments} />
       </div> : null}
 
       {canWrite && selectedSheet ? <form className="space-y-4 rounded-2xl border p-4" onSubmit={(event) => void submitDocuments(event)}>
@@ -406,11 +466,11 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         <ul className="space-y-2">
           {visibleDocuments.map((document) => {
             const replaced = visibleDocuments.some((candidate) => candidate.supersedesId === document.id);
+            const preparedDocument = preparedDocuments.find((candidate) => candidate.id === document.id);
             return <li key={document.id} className="flex flex-col gap-2 rounded-xl border p-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-start gap-3"><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-primary" /><div className="min-w-0"><p className="break-words text-sm font-medium">{RENDITION_DOCUMENT_LABELS[document.documentType]} · {document.originalName}</p><p className="text-xs text-muted-foreground">Versión {document.version} · {formatFileSize(document.byteSize)} · {formatDate(document.createdAt)}{replaced ? " · Reemplazada, historial conservado" : " · Guardado en servidor"}</p></div></div>
               <div className="flex flex-wrap gap-2">
-                <Button asChild size="sm" variant="outline"><a href={documentLink(document.id, true)} target="_blank" rel="noreferrer">Previsualizar</a></Button>
-                <Button asChild size="sm" variant="secondary"><a href={documentLink(document.id)}>Descargar</a></Button>
+                <RenditionDocumentActions documentId={document.id} preparedDocument={preparedDocument} offlineMode={offlineMode} />
               </div>
             </li>;
           })}
@@ -435,10 +495,24 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
             </Select>
           </Field>
           {reviewStatus === "OBSERVADA" ? <Field><FieldLabel htmlFor="rendition-review-notes">Qué debe corregirse *</FieldLabel><Textarea id="rendition-review-notes" value={reviewNotes} onChange={(event) => setReviewNotes(event.currentTarget.value)} maxLength={1000} rows={3} required /></Field> : null}
-          {reviewMessage ? <p role="alert" className="text-sm text-destructive">{reviewMessage}</p> : null}
-          <Button type="submit" size="sm" variant="outline" disabled={!isOnline || !hasSignedSheet || pendingDocumentCount > 0}>Registrar revisión manual</Button>
+          {reviewMessage ? <p role={reviewMessage.includes("pendiente") ? "status" : "alert"} className="text-sm text-muted-foreground">{reviewMessage}</p> : null}
+          {queuedReview ? <Alert variant={queuedReview.operation.status === "error" || queuedReview.operation.status === "conflict" ? "destructive" : "info"}><AlertTitle>{queuedReview.operation.status === "error" || queuedReview.operation.status === "conflict" ? "La revisión necesita atención" : "Revisión pendiente de validación"}</AlertTitle><AlertDescription>{queuedReview.operation.message ?? "El servidor confirmará la revisión cuando valide la sesión, el permiso y la planilla firmada."}</AlertDescription></Alert> : null}
+          {queuedReview && (queuedReview.operation.status === "error" || queuedReview.operation.status === "conflict") ? <Button type="button" size="sm" variant="outline" onClick={() => {
+            let retry: Promise<void>;
+            if (queuedReview.operation.status === "error") {
+              retry = retryOfflineOperation(userId, queuedReview.operation.operationId);
+            } else {
+              retry = updateOfflineOperationPayload(userId, queuedReview.operation.operationId, queuedReview.operation.payload)
+                .then(() => synchronizeOfflineQueue(userId));
+            }
+            void retry.then(async () => {
+              await Promise.all([refreshQueue(), onRefresh()]);
+            }).catch((error: unknown) => setReviewMessage(errorMessage(error)));
+          }}>Reintentar validación</Button> : null}
+          <Button type="submit" size="sm" variant="outline" disabled={!hasSignedSheet || pendingDocumentCount > 0 || Boolean(queuedReview)}>{queuedReview ? "Revisión pendiente" : "Registrar revisión manual"}</Button>
           {!hasSignedSheet ? <p className="text-xs text-muted-foreground">La revisión se habilita después de guardar una planilla firmada en el servidor.</p> : null}
           {pendingDocumentCount > 0 ? <p className="text-xs text-muted-foreground">Sincronizá primero los documentos que todavía están en este dispositivo.</p> : null}
+          {!isOnline && hasSignedSheet && pendingDocumentCount === 0 ? <p className="text-xs text-muted-foreground">La intención queda en esta cuenta y no se confirma oficialmente hasta que el servidor vuelva a validar el acceso.</p> : null}
         </form>
       </div> : null}
     </CardContent>

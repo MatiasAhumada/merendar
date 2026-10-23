@@ -26,6 +26,8 @@ import { FamilyRegistry } from "@/components/families/FamilyRegistry";
 import { familyCollectionSchema } from "@/validations/family.validation";
 import { DeliveryWorkbench } from "@/components/delivery/DeliveryWorkbench";
 import { recordsCollectionSchema } from "@/validations/record.validation";
+import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace";
+import { merchandiseResponseSchema } from "@/components/merchandise/MerchandiseWorkspace";
 
 const ROUTE_LABELS: Record<OfflinePreparedRoute, string> = {
   "/": "Inicio",
@@ -128,11 +130,16 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
-function operationLabel(operation: OfflineOperation["operation"]) {
-  if (operation === "create") {
+function operationLabel(operation: OfflineOperation) {
+  const renditionReview = z.object({ kind: z.literal("rendition_review") }).safeParse(operation.payload);
+  if (operation.resource === "renditions" && renditionReview.success) {
+    return "Revisión manual pendiente";
+  }
+
+  if (operation.operation === "create") {
     return "Alta";
   }
-  if (operation === "update") {
+  if (operation.operation === "update") {
     return "Modificación";
   }
   return "Baja";
@@ -241,7 +248,7 @@ function PendingOperations({ operations }: { operations: OfflineOperation[] }) {
           {pendingOperations.map((operation) => (
             <li key={operation.operationId} className="flex flex-wrap items-center justify-between gap-3 px-3 py-3">
               <div>
-                <p className="text-sm font-medium">{operationLabel(operation.operation)} · {operation.resourceId}</p>
+                <p className="text-sm font-medium">{operationLabel(operation)} · {operation.resourceId}</p>
                 <p className="text-xs text-muted-foreground">{new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(operation.createdAt))}</p>
               </div>
               <Badge variant={pendingOperationVariant(operation.status)}>{pendingOperationStatus(operation.status)}</Badge>
@@ -251,6 +258,47 @@ function PendingOperations({ operations }: { operations: OfflineOperation[] }) {
       ) : <p className="text-sm text-muted-foreground">No hay cambios pendientes en esta cuenta.</p>}
     </section>
   );
+}
+
+function PreparedRenditionWorkspace({
+  initialPeriods,
+  preparation,
+  preparationIsValid,
+  documents,
+}: {
+  initialPeriods: z.infer<typeof merchandiseResponseSchema>['periods'];
+  preparation: OfflinePreparation;
+  preparationIsValid: boolean;
+  documents: OfflinePreparedDocument[];
+}) {
+  const [periods, setPeriods] = useState(initialPeriods);
+
+  async function refreshPeriods() {
+    const response = await fetch("/api/merchandise", { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) {
+      throw new Error("No se pudieron actualizar las rendiciones al recuperar conexión.");
+    }
+
+    const parsedResponse = merchandiseResponseSchema.safeParse(await response.json());
+    if (!parsedResponse.success) {
+      throw new Error("La respuesta actualizada de rendiciones no tiene un formato válido.");
+    }
+
+    setPeriods(parsedResponse.data.periods);
+  }
+
+  return <RenditionWorkspace
+    periods={periods}
+    userId={preparation.userId}
+    sessionExpiresAt={preparation.sessionExpiresAt}
+    onRefresh={refreshPeriods}
+    canWrite={preparationIsValid && preparation.capabilities.includes("renditions.write")}
+    canReview={preparationIsValid && preparation.capabilities.includes("renditions.review")}
+    canCreatePeriods={false}
+    periodStatus="ready"
+    offlineMode
+    preparedDocuments={documents}
+  />;
 }
 
 function PreparedRoute({ route, preparation, preparationIsValid, documents, operations, searchTerm, setSearchTerm }: { route: OfflinePreparedRoute; preparation: OfflinePreparation; preparationIsValid: boolean; documents: OfflinePreparedDocument[]; operations: OfflineOperation[]; searchTerm: string; setSearchTerm: (value: string) => void }) {
@@ -310,6 +358,26 @@ function PreparedRoute({ route, preparation, preparationIsValid, documents, oper
     }
   }
 
+  if (route === "/mercaderia") {
+    const merchandiseSnapshot = merchandiseResponseSchema.safeParse(snapshot);
+    if (merchandiseSnapshot.success) {
+      return (
+        <div className="space-y-4">
+          <Alert variant="info">
+            <AlertTitle>Rendiciones preparadas</AlertTitle>
+            <AlertDescription>Períodos, planillas y documentos disponibles al {formatDate(preparation.snapshots[route].capturedAt)}. Las cargas y revisiones pendientes se sincronizan con validación del servidor.</AlertDescription>
+          </Alert>
+          <PreparedRenditionWorkspace
+            initialPeriods={merchandiseSnapshot.data.periods}
+            preparation={preparation}
+            preparationIsValid={preparationIsValid}
+            documents={documents}
+          />
+        </div>
+      );
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -333,6 +401,7 @@ export function OfflineScreen() {
   const [preparation, setPreparation] = useState<OfflinePreparation | null>(null);
   const [documents, setDocuments] = useState<OfflinePreparedDocument[]>([]);
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
+  const [queueError, setQueueError] = useState("");
   const [preparationIsValid, setPreparationIsValid] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -340,22 +409,37 @@ export function OfflineScreen() {
 
   useEffect(() => {
     let isMounted = true;
-    void readActiveOfflineAccount().then((userId) => {
+    void readActiveOfflineAccount().then(async (userId) => {
       if (!userId) {
         return null;
       }
-      return Promise.all([readOfflinePreparedWorkspace(userId), listOfflineOperations(userId)]);
+
+      const workspace = await readOfflinePreparedWorkspace(userId);
+      let queuedOperations: OfflineOperation[] = [];
+      try {
+        queuedOperations = await listOfflineOperations(userId);
+      } catch (error: unknown) {
+        let message = "La cola offline tiene un formato que esta versión no reconoce.";
+        if (error instanceof Error) {
+          message = error.message;
+        }
+        if (isMounted) {
+          setQueueError(message);
+        }
+      }
+
+      return { workspace, queuedOperations };
     }).then((savedPreparation) => {
       if (isMounted) {
-        const savedPreparationValue = savedPreparation?.[0].preparation ?? null;
+        const savedPreparationValue = savedPreparation?.workspace.preparation ?? null;
         setPreparation(savedPreparationValue);
         let preparationIsValid = false;
         if (savedPreparationValue) {
           preparationIsValid = Date.now() < Date.parse(savedPreparationValue.sessionExpiresAt) && Date.now() < Date.parse(savedPreparationValue.expiresAt);
         }
         setPreparationIsValid(preparationIsValid);
-        setDocuments(savedPreparation?.[0].documents ?? []);
-        setOperations(savedPreparation?.[1] ?? []);
+        setDocuments(savedPreparation?.workspace.documents ?? []);
+        setOperations(savedPreparation?.queuedOperations ?? []);
       }
     }).catch((error: unknown) => {
       if (isMounted) {
@@ -377,6 +461,29 @@ export function OfflineScreen() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    const activeUserId = preparation?.userId;
+    if (!activeUserId) {
+      return;
+    }
+
+    const refreshQueue = () => {
+      void listOfflineOperations(activeUserId).then((queuedOperations) => {
+        setOperations(queuedOperations);
+        setQueueError("");
+      }).catch((error: unknown) => {
+        let message = "La cola offline tiene un formato que esta versión no reconoce.";
+        if (error instanceof Error) {
+          message = error.message;
+        }
+        setQueueError(message);
+      });
+    };
+
+    window.addEventListener("offline-queue-change", refreshQueue);
+    return () => window.removeEventListener("offline-queue-change", refreshQueue);
+  }, [preparation]);
 
   function retryConnection() {
     window.location.assign(route);
@@ -409,6 +516,7 @@ export function OfflineScreen() {
       ) : null}
 
       {loadError ? <Alert variant="destructive"><AlertTitle>No se pudo abrir la preparación</AlertTitle><AlertDescription>{loadError}</AlertDescription></Alert> : null}
+      {queueError ? <Alert variant="info"><AlertTitle>La preparación está disponible; la cola requiere atención</AlertTitle><AlertDescription>{queueError} Los documentos preparados se conservan y se pueden leer mientras resolvés los cambios pendientes.</AlertDescription></Alert> : null}
 
       {preparation ? (
         <nav aria-label="Vistas preparadas" className="grid grid-cols-2 gap-2 sm:grid-cols-3">

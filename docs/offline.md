@@ -28,6 +28,8 @@ Registro prepara también sus datos y las planillas oficiales autorizadas. Tras 
 
 La rendición usa operaciones `renditions` separadas por usuario. Conserva los PDF pendientes y su referencia de planilla emitida en IndexedDB; un documento pendiente no aparece como guardado en servidor ni habilita revisión. La sincronización verifica la sesión, permisos actuales, período y versión de planilla, valida el PDF y confirma archivos y recibo idempotente en una transacción. Si la carga falla, el usuario puede reintentar sin volver a seleccionar el archivo.
 
+La revisión manual también puede iniciarse sin conexión para una rendición con planilla firmada confirmada. Se conserva como intención pendiente por cuenta; no cambia el estado oficial de la rendición localmente. Al sincronizar, el servidor vuelve a comprobar sesión, `renditions.review` y la planilla firmada vigente antes de registrar el resultado. Una respuesta rechazada o una falla de conexión conserva la intención para corregir o reintentar.
+
 Los cambios pendientes se conservan tras cerrar o recargar la aplicación. Cerrar sesión muestra cuántos borradores se eliminarán y requiere confirmación; luego se limpia únicamente la cola, la preparación y el índice local de esa cuenta. Un cambio con sesión vencida o permiso revocado no se envía ni se reasigna a otra cuenta. Si la sesión fue revocada, el borrador permanece aislado por su usuario; la misma persona puede recuperarlo al volver a autenticarse con una cuenta activa y preparar una nueva vista. Los recursos privados, formularios y respuestas de API siguen excluidos de Cache Storage.
 
 ## Recuperación y actualización

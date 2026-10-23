@@ -59,7 +59,7 @@ interface PendingRecord {
   payload: MerchandiseOperationPayload;
 }
 
-const merchandiseResponseSchema = z.object({
+export const merchandiseResponseSchema = z.object({
   periods: z.array(z.object({
     id: z.string(),
     version: z.number().int().positive(),

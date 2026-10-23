@@ -18,6 +18,8 @@ Una corrección selecciona el documento anterior explícitamente; ambas versione
 
 Las cargas offline se guardan en IndexedDB separado por usuario y versión, junto con el PDF y la referencia de planilla. No se anuncian como guardadas en el servidor hasta que la sincronización responda correctamente. No existe acción de cierre o presentación oficial: la revisión es manual y no confirma firmas ni validez ante el organismo.
 
+La vista offline de Módulos y rendiciones lee períodos, planillas y PDF preparados desde IndexedDB, sin pedir esos documentos al servidor al abrirlos. Una revisión iniciada sin red queda pendiente en la cola de la cuenta y se confirma únicamente después de validar la sesión, el permiso actual y la planilla firmada vigente en el servidor.
+
 El esquema de rendiciones se genera con `pnpm prisma migrate dev --name rendition_documents`; no editar el SQL de migración manualmente.
 
 Los cambios de esquema se generan y aplican únicamente con `pnpm prisma migrate dev --name nombre_descriptivo`; no se edita manualmente el SQL de migración.

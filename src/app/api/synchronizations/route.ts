@@ -21,7 +21,7 @@ import {
 } from "@/validations/merchandise.validation";
 import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
 import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/validations/record.validation";
-import { renditionDocumentPayloadSchema } from "@/validations/rendition.validation";
+import { renditionSynchronizationPayloadSchema } from "@/validations/rendition.validation";
 import { RenditionDocumentError } from "@/server/services/rendition-synchronization.service";
 import { RecordSynchronizationError } from "@/server/services/record-synchronization.service";
 import { hasEffectiveCapability } from "@/server/services/access-policy.service";
@@ -193,15 +193,15 @@ export async function POST(request: NextRequest) {
   }
 
   if (parsedOperation.data.resource === "renditions") {
-    const parsedPayload = renditionDocumentPayloadSchema.safeParse(parsedOperation.data.payload);
+    const parsedPayload = renditionSynchronizationPayloadSchema.safeParse(parsedOperation.data.payload);
     const validBaseVersion = z.null().safeParse(parsedOperation.data.baseVersion);
 
     if (!parsedPayload.success || parsedPayload.data.id !== parsedOperation.data.resourceId) {
-      return errorResponse(400, "invalid_rendition_operation", "Revisá los archivos y la referencia de planilla antes de sincronizar.");
+      return errorResponse(400, "invalid_rendition_operation", "Revisá los archivos o la revisión pendiente antes de sincronizar.");
     }
 
     if (parsedOperation.data.operation !== "create" || !validBaseVersion.success) {
-      return errorResponse(400, "invalid_rendition_operation", "Los documentos de rendición solo admiten cargas nuevas.");
+      return errorResponse(400, "invalid_rendition_operation", "Los cambios de rendición solo admiten nuevas cargas o revisiones.");
     }
 
     parsedOperation.data.payload = parsedPayload.data;
@@ -215,7 +215,14 @@ export async function POST(request: NextRequest) {
     return errorResponse(501, "resource_adapter_unavailable", "La vista todavía no habilitó la sincronización de este tipo de cambio.");
   }
 
-  const capabilityAllowed = await hasEffectiveCapability(session.user.role, capabilityByResource[resource]);
+  let requiredCapability = capabilityByResource[resource];
+  if (resource === "RENDITIONS") {
+    const parsedPayload = renditionSynchronizationPayloadSchema.safeParse(parsedOperation.data.payload);
+    if (parsedPayload.success && parsedPayload.data.kind === "rendition_review") {
+      requiredCapability = "renditions.review";
+    }
+  }
+  const capabilityAllowed = await hasEffectiveCapability(session.user.role, requiredCapability);
 
   if (!capabilityAllowed) {
     return errorResponse(403, "permission_revoked", "La cuenta ya no tiene permiso para sincronizar este cambio.");
@@ -245,7 +252,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (error instanceof RenditionDocumentError) {
-      return errorResponse(400, "invalid_rendition_operation", error.message);
+      return errorResponse(error.status, "invalid_rendition_operation", error.message);
     }
 
     if (error instanceof SynchronizationConflictError) {

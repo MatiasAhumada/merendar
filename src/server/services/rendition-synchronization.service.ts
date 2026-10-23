@@ -2,13 +2,63 @@ import type { Prisma } from "@prisma/client";
 import type { SynchronizationHandler, SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
 import { RENDITION_LIMITS } from "@/constants/rendition.constant";
-import { renditionDocumentPayloadSchema, type RenditionDocumentPayload } from "@/validations/rendition.validation";
+import {
+  renditionDocumentPayloadSchema,
+  renditionReviewOperationPayloadSchema,
+  type RenditionDocumentPayload,
+} from "@/validations/rendition.validation";
 
 export class RenditionDocumentError extends Error {
-  constructor(message: string) {
+  constructor(message: string, readonly status = 400) {
     super(message);
     this.name = "RenditionDocumentError";
   }
+}
+
+async function applyReview(
+  transaction: Prisma.TransactionClient,
+  operation: SubmittedSyncOperation,
+  status: "REVISADA" | "OBSERVADA",
+  notes?: string,
+) {
+  const rendition = await transaction.rendition.findUnique({
+    where: { id: operation.resourceId },
+    select: { id: true },
+  });
+
+  if (!rendition) {
+    throw new RenditionDocumentError("No encontramos la rendición seleccionada.", 404);
+  }
+
+  const signedSheetCount = await transaction.renditionDocument.count({
+    where: {
+      renditionId: rendition.id,
+      documentType: "PLANILLA_FIRMADA",
+      supersededBy: { none: {} },
+    },
+  });
+
+  if (!signedSheetCount) {
+    throw new RenditionDocumentError("Adjuntá una planilla firmada vigente antes de revisar la rendición.", 409);
+  }
+
+  const updatedRendition = await transaction.rendition.update({
+    where: { id: rendition.id },
+    data: {
+      reviewStatus: status,
+      reviewNotes: notes ?? null,
+      reviewedAt: new Date(),
+      reviewedById: operation.userId,
+    },
+    select: { id: true, reviewStatus: true, reviewNotes: true, reviewedAt: true },
+  });
+
+  return {
+    id: updatedRendition.id,
+    reviewStatus: updatedRendition.reviewStatus,
+    reviewNotes: updatedRendition.reviewNotes,
+    reviewedAt: updatedRendition.reviewedAt?.toISOString() ?? null,
+  };
 }
 
 function decodePdfDocument(originalName: string, contentBase64: string) {
@@ -120,6 +170,26 @@ function resultPayload(result: Awaited<ReturnType<typeof applyDocuments>>): Json
 
 export const renditionSynchronizationHandler: SynchronizationHandler = {
   async apply(transaction, operation) {
+    const parsedReview = renditionReviewOperationPayloadSchema.safeParse(operation.payload);
+
+    if (parsedReview.success) {
+      if (parsedReview.data.id !== operation.resourceId) {
+        throw new RenditionDocumentError("La revisión no coincide con la rendición seleccionada.");
+      }
+
+      const result = await applyReview(transaction, operation, parsedReview.data.status, parsedReview.data.notes);
+      return {
+        type: "synchronized",
+        resourceVersion: 1,
+        result: {
+          renditionId: result.id,
+          reviewStatus: result.reviewStatus,
+          reviewNotes: result.reviewNotes,
+          reviewedAt: result.reviewedAt,
+        },
+      };
+    }
+
     const parsedPayload = renditionDocumentPayloadSchema.safeParse(operation.payload);
 
     if (!parsedPayload.success || parsedPayload.data.id !== operation.resourceId) {
