@@ -9,6 +9,7 @@
     "start": "next start -p 3022 -H 0.0.0.0",
     "lint": "eslint",
     "test:integration": "tsx --test tests/*.integration.test.ts",
+    "test:e2e": "playwright test",
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css}\" --ignore-path .prettierignore",
     "postinstall": "prisma generate",
     "reset": "prisma migrate reset --force && prisma db seed",
@@ -43,6 +44,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",
