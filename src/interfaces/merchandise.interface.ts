@@ -10,6 +10,7 @@ export interface MerchandiseDocumentSummary {
 
 export interface MerchandiseRemittanceRecord {
   id: string;
+  version: number;
   requestId: string;
   quotaId: string;
   remittanceNumber: string;
@@ -17,6 +18,7 @@ export interface MerchandiseRemittanceRecord {
   receivedQuantity: number;
   responsibleName: string;
   notes: string | null;
+  status: "VIGENTE" | "ANULADO";
   createdBy: { id: string; name: string };
   documents: MerchandiseDocumentSummary[];
   createdAt: string;
@@ -25,6 +27,7 @@ export interface MerchandiseRemittanceRecord {
 
 export interface MerchandiseQuotaRecord {
   id: string;
+  version: number;
   requestId: string;
   approvedQuantity: number;
   approvedAt: string;
@@ -36,11 +39,12 @@ export interface MerchandiseQuotaRecord {
 
 export interface MerchandiseRequestRecord {
   id: string;
+  version: number;
   periodId: string;
   requestNumber: string;
   requestedAt: string;
   requestedQuantity: number;
-  status: "PENDIENTE" | "APROBADA" | "RECHAZADA";
+  status: "PENDIENTE" | "APROBADA" | "RECHAZADA" | "CANCELADA";
   notes: string | null;
   createdBy: { id: string; name: string };
   quota: MerchandiseQuotaRecord | null;
@@ -52,8 +56,10 @@ export interface MerchandiseRequestRecord {
 
 export interface MerchandisePeriodRecord {
   id: string;
+  version: number;
   label: string;
   agency: string;
+  status: "VIGENTE" | "ANULADO";
   startsAt: string;
   endsAt: string;
   requests: MerchandiseRequestRecord[];

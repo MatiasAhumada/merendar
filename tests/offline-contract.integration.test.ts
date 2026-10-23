@@ -4,13 +4,13 @@ import { isOfflineOperationEnabled } from "@/constants/offline-contract.constant
 import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
 import { normalizeStoredOfflinePreparation } from "@/services/offline-preparation.service";
 
-test("offline write contract enables family updates while other modules remain create-only", () => {
+test("offline write contract enables family and merchandise maintenance operations", () => {
   const resources = ["families", "remittances", "records", "renditions"] as const;
 
   for (const resource of resources) {
     assert.equal(isOfflineOperationEnabled(resource, "create"), true);
-    assert.equal(isOfflineOperationEnabled(resource, "update"), resource === "families");
-    assert.equal(isOfflineOperationEnabled(resource, "delete"), false);
+    assert.equal(isOfflineOperationEnabled(resource, "update"), resource === "families" || resource === "remittances");
+    assert.equal(isOfflineOperationEnabled(resource, "delete"), resource === "remittances");
   }
 });
 

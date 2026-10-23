@@ -30,7 +30,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
+import { enqueueOfflineOperation, listOfflineOperations, resolveOfflineConflict, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import type { OfflineOperation } from "@/types/offline-operation";
 import type {
   MerchandisePeriodRecord,
@@ -39,8 +39,10 @@ import type {
   MerchandiseRequestRecord,
 } from "@/interfaces/merchandise.interface";
 import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace";
-import { merchandisePayloadSchema, type MerchandisePayload } from "@/validations/merchandise.validation";
+import { merchandiseCancellationPayloadSchema, merchandiseOperationPayloadSchema, merchandisePayloadSchema, merchandiseUpdatePayloadSchema, type MerchandiseCancellationPayload, type MerchandiseOperationPayload, type MerchandisePayload, type MerchandiseUpdatePayload } from "@/validations/merchandise.validation";
 import { z } from "zod";
+import { RENDITION_LIMITS } from "@/constants/rendition.constant";
+import clientAxios from "@/utils/clientAxios.util";
 
 interface MerchandiseWorkspaceProps {
   userId: string;
@@ -54,14 +56,16 @@ interface MerchandiseWorkspaceProps {
 
 interface PendingRecord {
   operation: OfflineOperation;
-  payload: MerchandisePayload;
+  payload: MerchandiseOperationPayload;
 }
 
 const merchandiseResponseSchema = z.object({
   periods: z.array(z.object({
     id: z.string(),
+    version: z.number().int().positive(),
     label: z.string(),
     agency: z.string(),
+    status: z.enum(["VIGENTE", "ANULADO"]),
     startsAt: z.iso.datetime(),
     endsAt: z.iso.datetime(),
     beneficiarySheets: z.array(z.object({
@@ -92,15 +96,17 @@ const merchandiseResponseSchema = z.object({
     })),
     requests: z.array(z.object({
       id: z.string(),
+      version: z.number().int().positive(),
       periodId: z.string(),
       requestNumber: z.string(),
       requestedAt: z.iso.datetime(),
       requestedQuantity: z.number(),
-      status: z.enum(["PENDIENTE", "APROBADA", "RECHAZADA"]),
+      status: z.enum(["PENDIENTE", "APROBADA", "RECHAZADA", "CANCELADA"]),
       notes: z.string().nullable(),
       createdBy: z.object({ id: z.string(), name: z.string() }),
       quota: z.object({
         id: z.string(),
+        version: z.number().int().positive(),
         requestId: z.string(),
         approvedQuantity: z.number(),
         approvedAt: z.iso.datetime(),
@@ -111,12 +117,14 @@ const merchandiseResponseSchema = z.object({
       }).nullable(),
       remittances: z.array(z.object({
         id: z.string(),
+        version: z.number().int().positive(),
         requestId: z.string(),
         quotaId: z.string(),
         remittanceNumber: z.string(),
         receivedAt: z.iso.datetime(),
         receivedQuantity: z.number(),
         responsibleName: z.string(),
+        status: z.enum(["VIGENTE", "ANULADO"]),
         notes: z.string().nullable(),
         createdBy: z.object({ id: z.string(), name: z.string() }),
         documents: z.array(z.object({
@@ -177,23 +185,21 @@ async function encodeDocument(file: File | undefined) {
     return undefined;
   }
 
-  let contentType: "application/pdf" | "image/jpeg" | "image/png";
-
-  if (file.type === "application/pdf") {
-    contentType = "application/pdf";
-  } else if (file.type === "image/jpeg") {
-    contentType = "image/jpeg";
-  } else if (file.type === "image/png") {
-    contentType = "image/png";
-  } else {
-    throw new Error("Adjuntá un comprobante PDF, JPEG o PNG.");
+  if (file.type !== "application/pdf" || !file.name.toLowerCase().endsWith(".pdf")) {
+    throw new Error("Adjuntá un comprobante en formato PDF.");
   }
 
-  if (!file.size || file.size > 512 * 1024) {
+  if (!file.size || file.size > RENDITION_LIMITS.MAX_DOCUMENT_BYTES) {
     throw new Error("El comprobante debe pesar hasta 512 KiB.");
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
+  const header = new TextDecoder().decode(bytes.subarray(0, 5));
+  const footer = new TextDecoder().decode(bytes.subarray(Math.max(0, bytes.length - 1024)));
+
+  if (header !== "%PDF-" || !footer.includes("%%EOF")) {
+    throw new Error("El archivo no parece un PDF válido. El formulario sigue abierto para corregirlo.");
+  }
   let binary = "";
   const chunkSize = 0x8000;
 
@@ -201,7 +207,7 @@ async function encodeDocument(file: File | undefined) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
   }
 
-  return { originalName: file.name, contentType, contentBase64: btoa(binary) };
+  return { originalName: file.name, contentType: "application/pdf" as const, contentBase64: btoa(binary) };
 }
 
 function optionalText(formData: FormData, key: string) {
@@ -228,7 +234,7 @@ function pendingRecords(operations: OfflineOperation[]): PendingRecord[] {
       continue;
     }
 
-    const payload = merchandisePayloadSchema.safeParse(operation.payload);
+    const payload = merchandiseOperationPayloadSchema.safeParse(operation.payload);
 
     if (payload.success) {
       records.push({ operation, payload: payload.data });
@@ -260,10 +266,12 @@ function queuedPeriod(payload: Extract<MerchandisePayload, { kind: "period" }>, 
   const timestamp = new Date(operation.createdAt).toISOString();
   return {
     id: payload.id,
+    version: 1,
     label: payload.label,
     agency: payload.agency,
     startsAt: new Date(`${payload.startsAt}T00:00:00.000Z`).toISOString(),
     endsAt: new Date(`${payload.endsAt}T00:00:00.000Z`).toISOString(),
+    status: "VIGENTE",
     requests: [],
     beneficiarySheets: [],
     renditions: [],
@@ -279,6 +287,7 @@ function queuedRequest(
   const timestamp = new Date(operation.createdAt).toISOString();
   return {
     id: payload.id,
+    version: 1,
     periodId: payload.periodId,
     requestNumber: payload.requestNumber,
     requestedAt: new Date(`${payload.requestedAt}T00:00:00.000Z`).toISOString(),
@@ -301,6 +310,7 @@ function queuedQuota(
   const timestamp = new Date(operation.createdAt).toISOString();
   return {
     id: payload.id,
+    version: 1,
     requestId: payload.requestId,
     approvedQuantity: payload.approvedQuantity,
     approvedAt: new Date(`${payload.approvedAt}T00:00:00.000Z`).toISOString(),
@@ -318,6 +328,7 @@ function queuedRemittance(
   const timestamp = new Date(operation.createdAt).toISOString();
   return {
     id: payload.id,
+    version: 1,
     requestId: payload.requestId,
     quotaId: payload.quotaId,
     remittanceNumber: payload.remittanceNumber,
@@ -325,6 +336,7 @@ function queuedRemittance(
     receivedQuantity: payload.receivedQuantity,
     responsibleName: payload.responsibleName,
     notes: payload.notes ?? null,
+    status: "VIGENTE",
     createdBy: { id: operation.userId, name: "En este dispositivo" },
     documents: [],
     createdAt: timestamp,
@@ -333,11 +345,16 @@ function queuedRemittance(
 }
 
 function addQueuedRecords(periods: MerchandisePeriodRecord[], records: PendingRecord[]) {
-  const displayedPeriods = periods.map((period) => ({ ...period, requests: [...period.requests] }));
+  const displayedPeriods = periods.map((period) => ({
+    ...period,
+    requests: period.requests.map((request) => ({ ...request, quota: request.quota ? { ...request.quota } : null, remittances: request.remittances.map((remittance) => ({ ...remittance })) })),
+  }));
 
   for (const record of records) {
-    if (record.payload.kind === "period") {
-      const payload = record.payload;
+    const createPayload = merchandisePayloadSchema.safeParse(record.payload);
+
+    if (record.operation.operation === "create" && createPayload.success && createPayload.data.kind === "period") {
+      const payload = createPayload.data;
 
       if (!displayedPeriods.some((period) => period.id === payload.id)) {
         displayedPeriods.push(queuedPeriod(payload, record.operation));
@@ -346,8 +363,10 @@ function addQueuedRecords(periods: MerchandisePeriodRecord[], records: PendingRe
   }
 
   for (const record of records) {
-    if (record.payload.kind === "request") {
-      const payload = record.payload;
+    const createPayload = merchandisePayloadSchema.safeParse(record.payload);
+
+    if (record.operation.operation === "create" && createPayload.success && createPayload.data.kind === "request") {
+      const payload = createPayload.data;
       const period = displayedPeriods.find((candidate) => candidate.id === payload.periodId);
 
       if (period && !period.requests.some((request) => request.id === payload.id)) {
@@ -357,8 +376,10 @@ function addQueuedRecords(periods: MerchandisePeriodRecord[], records: PendingRe
   }
 
   for (const record of records) {
-    if (record.payload.kind === "quota") {
-      const payload = record.payload;
+    const createPayload = merchandisePayloadSchema.safeParse(record.payload);
+
+    if (record.operation.operation === "create" && createPayload.success && createPayload.data.kind === "quota") {
+      const payload = createPayload.data;
       const request = displayedPeriods.flatMap((period) => period.requests).find((candidate) => candidate.id === payload.requestId);
 
       if (request && !request.quota) {
@@ -369,12 +390,91 @@ function addQueuedRecords(periods: MerchandisePeriodRecord[], records: PendingRe
   }
 
   for (const record of records) {
-    if (record.payload.kind === "remittance") {
-      const payload = record.payload;
+    const createPayload = merchandisePayloadSchema.safeParse(record.payload);
+
+    if (record.operation.operation === "create" && createPayload.success && createPayload.data.kind === "remittance") {
+      const payload = createPayload.data;
       const request = displayedPeriods.flatMap((period) => period.requests).find((candidate) => candidate.id === payload.requestId);
 
       if (request && !request.remittances.some((remittance) => remittance.id === payload.id)) {
         request.remittances.push(queuedRemittance(payload, record.operation));
+      }
+    }
+  }
+
+  for (const record of records) {
+    if (record.operation.operation === "update") {
+      const parsedPayload = merchandiseUpdatePayloadSchema.safeParse(record.payload);
+
+      if (!parsedPayload.success) {
+        continue;
+      }
+
+      const payload = parsedPayload.data;
+
+      if (payload.kind === "period") {
+        const period = displayedPeriods.find((candidate) => candidate.id === payload.id);
+
+        if (period) {
+          period.label = payload.label;
+          period.agency = payload.agency;
+          period.startsAt = new Date(`${payload.startsAt}T00:00:00.000Z`).toISOString();
+          period.endsAt = new Date(`${payload.endsAt}T00:00:00.000Z`).toISOString();
+        }
+      } else if (payload.kind === "request") {
+        const request = displayedPeriods.flatMap((period) => period.requests).find((candidate) => candidate.id === payload.id);
+
+        if (request) {
+          request.requestNumber = payload.requestNumber;
+          request.requestedAt = new Date(`${payload.requestedAt}T00:00:00.000Z`).toISOString();
+          request.requestedQuantity = payload.requestedQuantity;
+          request.notes = payload.notes ?? null;
+        }
+      } else if (payload.kind === "quota") {
+        const request = displayedPeriods.flatMap((period) => period.requests).find((candidate) => candidate.quota?.id === payload.id);
+
+        if (request?.quota) {
+          request.quota.approvedQuantity = payload.approvedQuantity;
+          request.quota.approvedAt = new Date(`${payload.approvedAt}T00:00:00.000Z`).toISOString();
+          request.quota.notes = payload.notes ?? null;
+        }
+      } else if (payload.kind === "remittance") {
+        const remittance = displayedPeriods.flatMap((period) => period.requests).flatMap((request) => request.remittances).find((candidate) => candidate.id === payload.id);
+
+        if (remittance) {
+          remittance.remittanceNumber = payload.remittanceNumber;
+          remittance.receivedAt = new Date(`${payload.receivedAt}T00:00:00.000Z`).toISOString();
+          remittance.receivedQuantity = payload.receivedQuantity;
+          remittance.responsibleName = payload.responsibleName;
+          remittance.notes = payload.notes ?? null;
+        }
+      }
+    } else if (record.operation.operation === "delete") {
+      const parsedPayload = merchandiseCancellationPayloadSchema.safeParse(record.payload);
+
+      if (!parsedPayload.success) {
+        continue;
+      }
+
+      const payload = parsedPayload.data;
+      if (payload.kind === "period") {
+        const period = displayedPeriods.find((candidate) => candidate.id === payload.id);
+
+        if (period) {
+          period.status = "ANULADO";
+        }
+      } else if (payload.kind === "request") {
+        const request = displayedPeriods.flatMap((period) => period.requests).find((candidate) => candidate.id === payload.id);
+
+        if (request) {
+          request.status = "CANCELADA";
+        }
+      } else if (payload.kind === "remittance") {
+        const remittance = displayedPeriods.flatMap((period) => period.requests).flatMap((request) => request.remittances).find((candidate) => candidate.id === payload.id);
+
+        if (remittance) {
+          remittance.status = "ANULADO";
+        }
       }
     }
   }
@@ -389,7 +489,7 @@ interface SaveSheetProps {
   children: ReactNode;
   onSave: (formData: FormData) => Promise<void>;
   submitLabel: string;
-  triggerVariant?: "default" | "secondary" | "outline";
+  triggerVariant?: "default" | "secondary" | "outline" | "destructive";
 }
 
 function SaveSheet({
@@ -460,13 +560,8 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
 
   const loadMerchandise = useCallback(async () => {
     try {
-      const response = await fetch("/api/merchandise", { credentials: "same-origin", cache: "no-store" });
-
-      if (!response.ok) {
-        throw new Error("No se pudo actualizar la recepción de mercadería.");
-      }
-
-      const body: unknown = await response.json();
+      const response = await clientAxios.get<unknown>("/api/merchandise", { headers: { "Cache-Control": "no-cache" } });
+      const body: unknown = response.data;
       const parsed = merchandiseResponseSchema.safeParse(body);
 
       if (!parsed.success) {
@@ -537,28 +632,36 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
     }
   }, [isOnline, synchronize]);
 
-  async function savePayload(payload: MerchandisePayload, dependencyRecordIds: string[]) {
-    const parsedPayload = merchandisePayloadSchema.safeParse(payload);
+  async function savePayload(payload: MerchandiseOperationPayload, dependencyRecordIds: string[], operation: "create" | "update" | "delete" = "create", baseVersion: number | null = null) {
+    const parsedPayload = merchandiseOperationPayloadSchema.safeParse(payload);
 
     if (!parsedPayload.success) {
       throw new Error(parsedPayload.error.issues[0]?.message ?? "Revisá los datos del formulario.");
     }
 
     const currentOperations = await listOfflineOperations(userId);
-    const operation = await enqueueOfflineOperation(userId, sessionExpiresAt, {
+    const queuedOperation = await enqueueOfflineOperation(userId, sessionExpiresAt, {
       resource: "remittances",
       resourceId: parsedPayload.data.id,
-      operation: "create",
-      baseVersion: null,
+      operation,
+      baseVersion,
       dependencies: queuedDependencies(currentOperations, dependencyRecordIds),
       payload: z.json().parse(JSON.parse(JSON.stringify(parsedPayload.data))),
     });
-    setOperations((existingOperations) => [...existingOperations, operation]);
+    setOperations((existingOperations) => [...existingOperations, queuedOperation]);
 
     if (isOnline) {
       await synchronizeOfflineQueue(userId);
       await Promise.all([loadMerchandise(), refreshQueue()]);
     }
+  }
+
+  async function correctRecord(payload: MerchandiseUpdatePayload, baseVersion: number, dependencyRecordIds: string[] = []) {
+    await savePayload(payload, dependencyRecordIds, "update", baseVersion);
+  }
+
+  async function cancelRecord(payload: MerchandiseCancellationPayload, baseVersion: number, dependencyRecordIds: string[] = []) {
+    await savePayload(payload, dependencyRecordIds, "delete", baseVersion);
   }
 
   async function correctRemittanceConflict(operation: OfflineOperation, payload: MerchandisePayload, formData: FormData) {
@@ -707,21 +810,36 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
               const record = localRecords.find((candidate) => candidate.operation.operationId === operation.operationId);
               let label = "Cambio de mercadería";
 
-              if (record?.payload.kind === "period") {
-                label = `Período ${record.payload.label}`;
-              } else if (record?.payload.kind === "request") {
-                label = `Solicitud ${record.payload.requestNumber}`;
-              } else if (record?.payload.kind === "quota") {
-                label = "Cupo aprobado";
-              } else if (record?.payload.kind === "remittance") {
-                label = `Remito ${record.payload.remittanceNumber}`;
+              if (record && operation.operation === "create") {
+                const payload = merchandisePayloadSchema.safeParse(record.payload);
+
+                if (payload.success && payload.data.kind === "period") {
+                  label = `Período ${payload.data.label}`;
+                } else if (payload.success && payload.data.kind === "request") {
+                  label = `Solicitud ${payload.data.requestNumber}`;
+                } else if (payload.success && payload.data.kind === "quota") {
+                  label = "Cupo aprobado";
+                } else if (payload.success && payload.data.kind === "remittance") {
+                  label = `Remito ${payload.data.remittanceNumber}`;
+                }
+              } else if (record && operation.operation === "update") {
+                const payload = merchandiseUpdatePayloadSchema.safeParse(record.payload);
+                if (payload.success) {
+                  label = `Corrección de ${payload.data.kind}`;
+                }
+              } else if (record && operation.operation === "delete") {
+                const payload = merchandiseCancellationPayloadSchema.safeParse(record.payload);
+                if (payload.success) {
+                  label = `Anulación de ${payload.data.kind}`;
+                }
               }
 
               return <div key={operation.operationId} className="rounded-lg border border-border bg-card p-3 text-card-foreground">
                 <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{label}</strong><Badge variant={state.variant}>{state.label}</Badge></div>
-                {record && record.payload.kind !== "period" && record.payload.document ? <p className="mt-1 text-xs text-muted-foreground">Comprobante {record.payload.document.originalName} guardado con el borrador.</p> : null}
+                {record && operation.operation === "create" ? <PendingDocumentSummary payload={record.payload} /> : null}
                 {operation.message ? <p role="alert" className="mt-2 text-sm text-destructive">{operation.message}</p> : null}
-                {operation.status === "conflict" && record?.payload.kind === "remittance" ? <RemittanceConflictCorrection operation={operation} payload={record.payload} onCorrect={correctRemittanceConflict} /> : null}
+                {operation.status === "conflict" && record && operation.operation === "create" ? <CreateConflictCorrection operation={operation} payload={record.payload} userId={userId} onCorrect={correctRemittanceConflict} onResolved={refreshQueue} /> : null}
+                {operation.status === "conflict" && operation.operation !== "create" ? <ConflictResolutionActions operation={operation} userId={userId} onResolved={refreshQueue} /> : null}
               </div>;
             })}
             <Button size="sm" variant="outline" onClick={() => void synchronize()} disabled={!isOnline || isSyncing}><HugeiconsIcon icon={RefreshIcon} strokeWidth={1.8} data-icon="inline-start" />{isSyncing ? "Sincronizando…" : "Sincronizar ahora"}</Button>
@@ -748,7 +866,16 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
             return <Card key={period.id} className="overflow-hidden">
               <CardHeader className="gap-4 border-b bg-muted/40 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex gap-3"><span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="size-6" /></span><div className="min-w-0"><CardTitle><h3 className="font-display text-lg font-semibold">{period.label}</h3></CardTitle><p className="text-sm text-muted-foreground">{period.agency} · {formatDate(period.startsAt)} – {formatDate(period.endsAt)}</p></div></div>
-                <div className="flex flex-col items-start gap-2 sm:items-end"><Badge variant={periodIsLocal ? "warning" : "success"}>{periodIsLocal ? "Solo en este dispositivo" : "Confirmado en servidor"}</Badge>{canWriteMerchandise ? <SaveSheet title="Nueva solicitud de módulos" description={`La solicitud quedará asociada a ${period.label}.`} triggerLabel="Registrar solicitud" onSave={(formData) => createRequest(period.id, formData)} submitLabel="Guardar solicitud">
+                <div className="flex flex-col items-start gap-2 sm:items-end"><Badge variant={period.status === "ANULADO" ? "destructive" : periodIsLocal ? "warning" : "success"}>{period.status === "ANULADO" ? "Período anulado" : periodIsLocal ? "Solo en este dispositivo" : "Confirmado en servidor"}</Badge>{canWriteMerchandise && period.status === "VIGENTE" && !periodIsLocal ? <div className="flex flex-col gap-2 sm:flex-row">
+                  <SaveSheet title="Corregir período" description="Los cambios se aplicarán al recuperar conexión y se validará que no haya otra edición concurrente." triggerLabel="Corregir período" triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "period", id: period.id, label: String(formData.get("label") ?? ""), agency: String(formData.get("agency") ?? ""), startsAt: String(formData.get("startsAt") ?? ""), endsAt: String(formData.get("endsAt") ?? "") }, period.version)} submitLabel="Guardar corrección">
+                    <Field><FieldLabel htmlFor={`period-edit-label-${period.id}`}>Nombre del período *</FieldLabel><Input id={`period-edit-label-${period.id}`} name="label" defaultValue={period.label} maxLength={80} required /></Field>
+                    <Field><FieldLabel htmlFor={`period-edit-agency-${period.id}`}>Organismo *</FieldLabel><Input id={`period-edit-agency-${period.id}`} name="agency" defaultValue={period.agency} maxLength={120} required /></Field>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`period-edit-start-${period.id}`}>Desde *</FieldLabel><Input id={`period-edit-start-${period.id}`} name="startsAt" type="date" defaultValue={period.startsAt.slice(0, 10)} required /></Field><Field><FieldLabel htmlFor={`period-edit-end-${period.id}`}>Hasta *</FieldLabel><Input id={`period-edit-end-${period.id}`} name="endsAt" type="date" defaultValue={period.endsAt.slice(0, 10)} required /></Field></div>
+                  </SaveSheet>
+                  {period.requests.length === 0 && !period.beneficiarySheets.length && !period.renditions.length ? <SaveSheet title="Anular período" description="El período quedará conservado para auditoría; la anulación no borra datos." triggerLabel="Anular" triggerVariant="destructive" onSave={(formData) => cancelRecord({ kind: "period", id: period.id, action: "cancel", reason: String(formData.get("reason") ?? "") }, period.version)} submitLabel="Anular período">
+                    <CancellationReasonField id={`period-cancel-reason-${period.id}`} />
+                  </SaveSheet> : <p className="text-xs text-muted-foreground">No se puede anular un período con operaciones o documentos vinculados.</p>}
+                </div> : null}{canWriteMerchandise && period.status === "VIGENTE" ? <SaveSheet title="Nueva solicitud de módulos" description={`La solicitud quedará asociada a ${period.label}.`} triggerLabel="Registrar solicitud" onSave={(formData) => createRequest(period.id, formData)} submitLabel="Guardar solicitud">
                   <Field><FieldLabel htmlFor={`request-number-${period.id}`}>Número de solicitud *</FieldLabel><Input id={`request-number-${period.id}`} name="requestNumber" maxLength={80} required /></Field>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`request-date-${period.id}`}>Fecha de presentación *</FieldLabel><Input id={`request-date-${period.id}`} name="requestedAt" type="date" required /></Field><Field><FieldLabel htmlFor={`request-quantity-${period.id}`}>Módulos solicitados *</FieldLabel><Input id={`request-quantity-${period.id}`} name="requestedQuantity" type="number" min="1" max="100000" required /></Field></div>
                   <Field><FieldLabel htmlFor={`request-notes-${period.id}`}>Observaciones</FieldLabel><Textarea id={`request-notes-${period.id}`} name="notes" maxLength={1000} rows={3} /></Field>
@@ -757,7 +884,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
               </CardHeader>
               <CardContent className="space-y-4 pt-5">
                 {!period.requests.length ? <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">No hay solicitudes para este período todavía.</p> : null}
-                {period.requests.map((request) => <RequestCard key={request.id} period={period} request={request} operations={operations} createQuota={approveQuota} receiveRemittance={receiveRemittance} canWrite={canWriteMerchandise} />)}
+                {period.requests.map((request) => <RequestCard key={request.id} period={period} request={request} operations={operations} createQuota={approveQuota} receiveRemittance={receiveRemittance} correctRecord={correctRecord} cancelRecord={cancelRecord} canWrite={canWriteMerchandise} />)}
               </CardContent>
               {queuedPeriodOperation?.message ? <div className="border-t px-5 py-3 text-sm text-destructive">{queuedPeriodOperation.message}</div> : null}
             </Card>;
@@ -825,36 +952,61 @@ function RemittanceConflictCorrection({ operation, payload, onCorrect }: Remitta
   </div>;
 }
 
+function PendingDocumentSummary({ payload }: { payload: MerchandiseOperationPayload }) {
+  const parsedPayload = merchandisePayloadSchema.safeParse(payload);
+
+  if (!parsedPayload.success || parsedPayload.data.kind === "period" || !parsedPayload.data.document) {
+    return null;
+  }
+
+  return <p className="mt-1 text-xs text-muted-foreground">Comprobante {parsedPayload.data.document.originalName} guardado con el borrador.</p>;
+}
+
+function CreateConflictCorrection({ operation, payload, userId, onCorrect, onResolved }: { operation: OfflineOperation; payload: MerchandiseOperationPayload; userId: string; onCorrect: (operation: OfflineOperation, payload: MerchandisePayload, formData: FormData) => Promise<void>; onResolved: () => Promise<void> }) {
+  const parsedPayload = merchandisePayloadSchema.safeParse(payload);
+
+  if (parsedPayload.success && parsedPayload.data.kind === "remittance") {
+    return <RemittanceConflictCorrection operation={operation} payload={parsedPayload.data} onCorrect={onCorrect} />;
+  }
+
+  return <ConflictResolutionActions operation={operation} userId={userId} onResolved={onResolved} />;
+}
+
 interface RequestCardProps {
   period: MerchandisePeriodRecord;
   request: MerchandiseRequestRecord;
   operations: OfflineOperation[];
   createQuota: (request: MerchandiseRequestRecord, formData: FormData) => Promise<void>;
   receiveRemittance: (request: MerchandiseRequestRecord, quota: MerchandiseQuotaRecord, formData: FormData) => Promise<void>;
+  correctRecord: (payload: MerchandiseUpdatePayload, baseVersion: number, dependencyRecordIds?: string[]) => Promise<void>;
+  cancelRecord: (payload: MerchandiseCancellationPayload, baseVersion: number, dependencyRecordIds?: string[]) => Promise<void>;
   canWrite: boolean;
 }
 
-function RequestCard({ period, request, operations, createQuota, receiveRemittance, canWrite }: RequestCardProps) {
+function RequestCard({ period, request, operations, createQuota, receiveRemittance, correctRecord, cancelRecord, canWrite }: RequestCardProps) {
   const queuedRequestOperation = operations.find((operation) => operation.resourceId === request.id && operation.status !== "synced");
   const pendingQuotaOperation = operations.find((operation) => {
-    const payload = merchandisePayloadSchema.safeParse(operation.payload);
-    return operation.resource === "remittances" && operation.status !== "synced" && payload.success && payload.data.kind === "quota" && payload.data.requestId === request.id;
+    const createPayload = merchandisePayloadSchema.safeParse(operation.payload);
+    const updatePayload = merchandiseUpdatePayloadSchema.safeParse(operation.payload);
+    const pendingQuotaCreate = operation.operation === "create" && createPayload.success && createPayload.data.kind === "quota" && createPayload.data.requestId === request.id;
+    const pendingQuotaUpdate = operation.operation === "update" && updatePayload.success && updatePayload.data.kind === "quota" && updatePayload.data.id === request.quota?.id;
+    return operation.resource === "remittances" && operation.status !== "synced" && (pendingQuotaCreate || pendingQuotaUpdate);
   });
-  const pendingCount = request.remittances.reduce((total, remittance) => total + remittance.receivedQuantity, 0);
+  const pendingCount = request.remittances.reduce((total, remittance) => remittance.status === "VIGENTE" ? total + remittance.receivedQuantity : total, 0);
   const quota = request.quota;
   const availableQuantity = quota ? quota.approvedQuantity - pendingCount : 0;
 
   return <article className="rounded-2xl border p-4 sm:p-5">
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} /></span><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold">Solicitud {request.requestNumber}</h4><Badge variant={request.status === "APROBADA" ? "success" : request.status === "RECHAZADA" ? "destructive" : "secondary"}>{request.status === "APROBADA" ? "Cupo aprobado" : request.status === "RECHAZADA" ? "Rechazada" : "Pendiente de cupo"}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{formatDate(request.requestedAt)} · {request.requestedQuantity} módulos · Registró {request.createdBy.name}</p><p className="mt-1 text-xs text-muted-foreground">Período: {period.label}</p></div></div>
+      <div className="flex gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} /></span><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold">Solicitud {request.requestNumber}</h4><Badge variant={request.status === "APROBADA" ? "success" : request.status === "RECHAZADA" || request.status === "CANCELADA" ? "destructive" : "secondary"}>{request.status === "APROBADA" ? "Cupo aprobado" : request.status === "RECHAZADA" ? "Rechazada" : request.status === "CANCELADA" ? "Anulada" : "Pendiente de cupo"}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{formatDate(request.requestedAt)} · {request.requestedQuantity} módulos · Registró {request.createdBy.name}</p><p className="mt-1 text-xs text-muted-foreground">Período: {period.label}</p></div></div>
       <div className="flex flex-wrap gap-2">
-        {canWrite && !quota && request.status !== "RECHAZADA" ? <SaveSheet title="Registrar cupo aprobado" description={`Solicitud ${request.requestNumber}: se solicitaron ${request.requestedQuantity} módulos.`} triggerLabel="Registrar cupo" triggerVariant="outline" onSave={(formData) => createQuota(request, formData)} submitLabel="Guardar cupo">
+        {canWrite && !quota && request.status !== "RECHAZADA" && request.status !== "CANCELADA" ? <SaveSheet title="Registrar cupo aprobado" description={`Solicitud ${request.requestNumber}: se solicitaron ${request.requestedQuantity} módulos.`} triggerLabel="Registrar cupo" triggerVariant="outline" onSave={(formData) => createQuota(request, formData)} submitLabel="Guardar cupo">
           <Field><FieldLabel htmlFor={`quota-quantity-${request.id}`}>Cantidad aprobada *</FieldLabel><Input id={`quota-quantity-${request.id}`} name="approvedQuantity" type="number" min="1" max={request.requestedQuantity} required /><FieldDescription>El cupo no puede superar los {request.requestedQuantity} módulos solicitados.</FieldDescription></Field>
           <Field><FieldLabel htmlFor={`quota-date-${request.id}`}>Fecha de aprobación *</FieldLabel><Input id={`quota-date-${request.id}`} name="approvedAt" type="date" required /></Field>
           <Field><FieldLabel htmlFor={`quota-notes-${request.id}`}>Observaciones</FieldLabel><Textarea id={`quota-notes-${request.id}`} name="notes" maxLength={1000} rows={3} /></Field>
           <DocumentField id={`quota-document-${request.id}`} />
         </SaveSheet> : null}
-        {canWrite && quota && availableQuantity > 0 ? <SaveSheet title="Registrar recepción / remito" description={`Quedan ${availableQuantity} módulos disponibles del cupo aprobado.`} triggerLabel="Registrar remito" triggerVariant="default" onSave={(formData) => receiveRemittance(request, quota, formData)} submitLabel="Guardar remito">
+        {canWrite && quota && availableQuantity > 0 && request.status !== "CANCELADA" ? <SaveSheet title="Registrar recepción / remito" description={`Quedan ${availableQuantity} módulos disponibles del cupo aprobado.`} triggerLabel="Registrar remito" triggerVariant="default" onSave={(formData) => receiveRemittance(request, quota, formData)} submitLabel="Guardar remito">
           <Field><FieldLabel htmlFor={`remittance-number-${request.id}`}>Número de remito *</FieldLabel><Input id={`remittance-number-${request.id}`} name="remittanceNumber" maxLength={80} required /></Field>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`remittance-date-${request.id}`}>Fecha de recepción *</FieldLabel><Input id={`remittance-date-${request.id}`} name="receivedAt" type="date" required /></Field><Field><FieldLabel htmlFor={`remittance-quantity-${request.id}`}>Módulos recibidos *</FieldLabel><Input id={`remittance-quantity-${request.id}`} name="receivedQuantity" type="number" min="1" max={availableQuantity} required /><FieldDescription>Disponibles: {availableQuantity}</FieldDescription></Field></div>
           <Field><FieldLabel htmlFor={`remittance-manager-${request.id}`}>Responsable de recepción *</FieldLabel><Input id={`remittance-manager-${request.id}`} name="responsibleName" maxLength={120} required /></Field>
@@ -862,29 +1014,76 @@ function RequestCard({ period, request, operations, createQuota, receiveRemittan
           <DocumentField id={`remittance-document-${request.id}`} />
         </SaveSheet> : null}
         {quota && availableQuantity <= 0 ? <Badge variant="success">Cupo recibido completo</Badge> : null}
+        {canWrite && !queuedRequestOperation && request.status !== "CANCELADA" && request.status !== "RECHAZADA" ? <SaveSheet title="Corregir solicitud" description="El cambio se valida contra la versión vigente y conserva los comprobantes cargados." triggerLabel="Corregir solicitud" triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "request", id: request.id, requestNumber: String(formData.get("requestNumber") ?? ""), requestedAt: String(formData.get("requestedAt") ?? ""), requestedQuantity: Number(formData.get("requestedQuantity")), notes: optionalText(formData, "notes") }, request.version, [request.id])} submitLabel="Guardar corrección">
+          <Field><FieldLabel htmlFor={`request-edit-number-${request.id}`}>Número de solicitud *</FieldLabel><Input id={`request-edit-number-${request.id}`} name="requestNumber" defaultValue={request.requestNumber} maxLength={80} required /></Field>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`request-edit-date-${request.id}`}>Fecha *</FieldLabel><Input id={`request-edit-date-${request.id}`} name="requestedAt" type="date" defaultValue={request.requestedAt.slice(0, 10)} required /></Field><Field><FieldLabel htmlFor={`request-edit-quantity-${request.id}`}>Cantidad solicitada *</FieldLabel><Input id={`request-edit-quantity-${request.id}`} name="requestedQuantity" type="number" min={quota?.approvedQuantity ?? 1} max="100000" defaultValue={request.requestedQuantity} required /></Field></div>
+          <Field><FieldLabel htmlFor={`request-edit-notes-${request.id}`}>Observaciones</FieldLabel><Textarea id={`request-edit-notes-${request.id}`} name="notes" maxLength={1000} rows={3} defaultValue={request.notes ?? ""} /></Field>
+        </SaveSheet> : null}
+        {canWrite && !queuedRequestOperation && !quota && !request.remittances.length && request.status !== "CANCELADA" ? <SaveSheet title="Anular solicitud" description="La solicitud se conservará junto con sus documentos. Ingresá el motivo para dejar trazabilidad." triggerLabel="Anular solicitud" triggerVariant="destructive" onSave={(formData) => cancelRecord({ kind: "request", id: request.id, action: "cancel", reason: String(formData.get("reason") ?? "") }, request.version, [request.id])} submitLabel="Anular solicitud">
+          <CancellationReasonField id={`request-cancel-reason-${request.id}`} />
+        </SaveSheet> : null}
+        {request.status === "CANCELADA" ? <Badge variant="destructive">Solicitud anulada</Badge> : null}
       </div>
     </div>
     {queuedRequestOperation?.message ? <p role="alert" className="mt-3 text-sm text-destructive">{queuedRequestOperation.message}</p> : null}
     {pendingQuotaOperation?.message ? <p role="alert" className="mt-3 text-sm text-destructive">{pendingQuotaOperation.message}</p> : null}
-    {quota ? <div className="mt-4 grid grid-cols-1 gap-2 rounded-xl bg-muted p-3 text-sm sm:grid-cols-3"><div><p className="text-xs text-muted-foreground">Cupo aprobado</p><strong>{quota.approvedQuantity} módulos</strong></div><div><p className="text-xs text-muted-foreground">Aprobado por</p><strong>{quota.approvedBy.name}</strong></div><div><p className="text-xs text-muted-foreground">Fecha de aprobación</p><strong>{formatDate(quota.approvedAt)}</strong></div></div> : null}
+    {quota ? <div className="mt-4 space-y-3"><div className="grid grid-cols-1 gap-2 rounded-xl bg-muted p-3 text-sm sm:grid-cols-3"><div><p className="text-xs text-muted-foreground">Cupo aprobado</p><strong>{quota.approvedQuantity} módulos</strong></div><div><p className="text-xs text-muted-foreground">Aprobado por</p><strong>{quota.approvedBy.name}</strong></div><div><p className="text-xs text-muted-foreground">Fecha de aprobación</p><strong>{formatDate(quota.approvedAt)}</strong></div></div>{canWrite && !pendingQuotaOperation ? <SaveSheet title="Corregir cupo" description="El cupo corregido no puede quedar por debajo de las recepciones vigentes ni superar lo solicitado." triggerLabel="Corregir cupo" triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "quota", id: quota.id, approvedQuantity: Number(formData.get("approvedQuantity")), approvedAt: String(formData.get("approvedAt") ?? ""), notes: optionalText(formData, "notes") }, quota.version, [request.id])} submitLabel="Guardar corrección">
+      <Field><FieldLabel htmlFor={`quota-edit-quantity-${quota.id}`}>Cantidad aprobada *</FieldLabel><Input id={`quota-edit-quantity-${quota.id}`} name="approvedQuantity" type="number" min={pendingCount || 1} max={request.requestedQuantity} defaultValue={quota.approvedQuantity} required /></Field>
+      <Field><FieldLabel htmlFor={`quota-edit-date-${quota.id}`}>Fecha de aprobación *</FieldLabel><Input id={`quota-edit-date-${quota.id}`} name="approvedAt" type="date" defaultValue={quota.approvedAt.slice(0, 10)} required /></Field>
+      <Field><FieldLabel htmlFor={`quota-edit-notes-${quota.id}`}>Observaciones</FieldLabel><Textarea id={`quota-edit-notes-${quota.id}`} name="notes" maxLength={1000} rows={3} defaultValue={quota.notes ?? ""} /></Field>
+    </SaveSheet> : null}<p className="text-xs text-muted-foreground">El cupo no se anula porque la solicitud conserva un único cupo y sus documentos vinculados.</p></div> : null}
     {request.notes ? <p className="mt-3 text-sm text-muted-foreground">{request.notes}</p> : null}
     {request.documents.map((document) => <DocumentLink key={document.id} document={document} />)}
-    {request.remittances.length ? <div className="mt-4 space-y-3">{request.remittances.map((remittance) => <RemittanceCard key={remittance.id} remittance={remittance} />)}</div> : null}
+    {request.remittances.length ? <div className="mt-4 space-y-3">{request.remittances.map((remittance) => <RemittanceCard key={remittance.id} remittance={remittance} operations={operations} canWrite={canWrite} correctRecord={correctRecord} cancelRecord={cancelRecord} />)}</div> : null}
   </article>;
 }
 
 function DocumentField({ id }: { id: string }) {
-  return <Field><FieldLabel htmlFor={id}>Comprobante</FieldLabel><Input id={id} name="document" type="file" accept="application/pdf,image/jpeg,image/png" /><FieldDescription>PDF, JPEG o PNG · hasta 512 KiB · acceso privado.</FieldDescription></Field>;
+  return <Field><FieldLabel htmlFor={id}>Comprobante PDF</FieldLabel><Input id={id} name="document" type="file" accept="application/pdf,.pdf" /><FieldDescription>Solo PDF válido · hasta 512 KiB · acceso privado.</FieldDescription></Field>;
 }
 
 function DocumentLink({ document }: { document: MerchandiseRequestRecord["documents"][number] }) {
   return <a className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline" href={`/api/merchandise/documents/${encodeURIComponent(document.id)}`}><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} />{document.originalName} <span className="text-xs text-muted-foreground">({formatFileSize(document.byteSize)})</span></a>;
 }
 
-function RemittanceCard({ remittance }: { remittance: MerchandiseRemittanceRecord }) {
+function RemittanceCard({ remittance, operations, canWrite, correctRecord, cancelRecord }: { remittance: MerchandiseRemittanceRecord; operations: OfflineOperation[]; canWrite: boolean; correctRecord: RequestCardProps["correctRecord"]; cancelRecord: RequestCardProps["cancelRecord"] }) {
+  const hasPendingChange = operations.some((operation) => operation.resourceId === remittance.id && operation.status !== "synced");
+
   return <div className="rounded-xl border bg-background p-3">
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><HugeiconsIcon icon={TruckIcon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-primary" /><div><div className="flex flex-wrap items-center gap-2"><h5 className="font-semibold">Remito N° {remittance.remittanceNumber}</h5><Badge variant="secondary">{remittance.receivedQuantity} módulos</Badge></div><p className="mt-1 text-xs text-muted-foreground">{formatDate(remittance.receivedAt)} · Recibió {remittance.responsibleName} · Registró {remittance.createdBy.name}</p></div></div><Badge variant="success">Confirmado en servidor</Badge></div>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><HugeiconsIcon icon={TruckIcon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-primary" /><div><div className="flex flex-wrap items-center gap-2"><h5 className="font-semibold">Remito N° {remittance.remittanceNumber}</h5><Badge variant="secondary">{remittance.receivedQuantity} módulos</Badge>{remittance.status === "ANULADO" ? <Badge variant="destructive">Anulado</Badge> : null}</div><p className="mt-1 text-xs text-muted-foreground">{formatDate(remittance.receivedAt)} · Recibió {remittance.responsibleName} · Registró {remittance.createdBy.name}</p></div></div><div className="flex flex-wrap items-center gap-2"><Badge variant={hasPendingChange ? "warning" : "success"}>{hasPendingChange ? "Cambio pendiente" : "Confirmado en servidor"}</Badge>{canWrite && !hasPendingChange && remittance.status === "VIGENTE" ? <>
+      <SaveSheet title="Corregir remito" description="Los comprobantes existentes se conservarán y se verificará el saldo del cupo." triggerLabel="Corregir" triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "remittance", id: remittance.id, remittanceNumber: String(formData.get("remittanceNumber") ?? ""), receivedAt: String(formData.get("receivedAt") ?? ""), receivedQuantity: Number(formData.get("receivedQuantity")), responsibleName: String(formData.get("responsibleName") ?? ""), notes: optionalText(formData, "notes") }, remittance.version, [remittance.requestId, remittance.quotaId])} submitLabel="Guardar corrección">
+        <Field><FieldLabel htmlFor={`remittance-edit-number-${remittance.id}`}>Número de remito *</FieldLabel><Input id={`remittance-edit-number-${remittance.id}`} name="remittanceNumber" defaultValue={remittance.remittanceNumber} maxLength={80} required /></Field>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`remittance-edit-date-${remittance.id}`}>Fecha *</FieldLabel><Input id={`remittance-edit-date-${remittance.id}`} name="receivedAt" type="date" defaultValue={remittance.receivedAt.slice(0, 10)} required /></Field><Field><FieldLabel htmlFor={`remittance-edit-quantity-${remittance.id}`}>Cantidad recibida *</FieldLabel><Input id={`remittance-edit-quantity-${remittance.id}`} name="receivedQuantity" type="number" min="1" defaultValue={remittance.receivedQuantity} required /></Field></div>
+        <Field><FieldLabel htmlFor={`remittance-edit-responsible-${remittance.id}`}>Responsable *</FieldLabel><Input id={`remittance-edit-responsible-${remittance.id}`} name="responsibleName" defaultValue={remittance.responsibleName} maxLength={120} required /></Field>
+        <Field><FieldLabel htmlFor={`remittance-edit-notes-${remittance.id}`}>Observaciones</FieldLabel><Textarea id={`remittance-edit-notes-${remittance.id}`} name="notes" maxLength={1000} rows={3} defaultValue={remittance.notes ?? ""} /></Field>
+      </SaveSheet>
+      <SaveSheet title="Anular remito" description="El remito y sus comprobantes quedarán en el historial. La cantidad se libera del cupo." triggerLabel="Anular" triggerVariant="destructive" onSave={(formData) => cancelRecord({ kind: "remittance", id: remittance.id, action: "cancel", reason: String(formData.get("reason") ?? "") }, remittance.version, [remittance.requestId, remittance.quotaId])} submitLabel="Anular remito"><CancellationReasonField id={`remittance-cancel-reason-${remittance.id}`} /></SaveSheet>
+    </> : null}</div></div>
     {remittance.notes ? <p className="mt-3 text-sm text-muted-foreground">{remittance.notes}</p> : null}
     {remittance.documents.map((document) => <DocumentLink key={document.id} document={document} />)}
+  </div>;
+}
+
+function CancellationReasonField({ id }: { id: string }) {
+  return <Field><FieldLabel htmlFor={id}>Motivo de anulación *</FieldLabel><Textarea id={id} name="reason" minLength={3} maxLength={500} rows={3} required /></Field>;
+}
+
+function ConflictResolutionActions({ operation, userId, onResolved }: { operation: OfflineOperation; userId: string; onResolved: () => Promise<void> }) {
+  const [message, setMessage] = useState("");
+
+  async function resolve(resolution: "local" | "server") {
+    try {
+      await resolveOfflineConflict(userId, operation.operationId, resolution);
+      await onResolved();
+      setMessage("");
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
+  }
+
+  return <div className="mt-3 space-y-2 rounded-lg border border-warning/40 bg-warning/5 p-3">
+    <p className="text-sm">Este registro cambió en otro dispositivo. Revisá la versión actual antes de decidir qué conservar.</p>
+    <div className="flex flex-wrap gap-2">{operation.operation !== "create" ? <Button type="button" size="sm" variant="outline" onClick={() => void resolve("local")}>Reaplicar mi cambio</Button> : null}<Button type="button" size="sm" variant="secondary" onClick={() => void resolve("server")}>Descartar mi cambio</Button></div>
+    {message ? <p role="alert" className="text-sm text-destructive">{message}</p> : null}
   </div>;
 }

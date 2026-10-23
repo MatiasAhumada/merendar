@@ -4,7 +4,7 @@ export type OfflineOperationKind = "create" | "update" | "delete";
 
 export const OFFLINE_ENABLED_OPERATIONS = {
   families: ["create", "update"],
-  remittances: ["create"],
+  remittances: ["create", "update", "delete"],
   records: ["create"],
   renditions: ["create"],
 } as const satisfies Record<SyncResource, readonly OfflineOperationKind[]>;

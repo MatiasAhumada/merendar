@@ -13,7 +13,12 @@ import {
 } from "@/server/repository/synchronization.repository";
 import type { SyncResource } from "@/types/offline-operation";
 import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
-import { merchandisePayloadSchema } from "@/validations/merchandise.validation";
+import type { JsonValue } from "@/types/json-value";
+import {
+  merchandiseCancellationPayloadSchema,
+  merchandisePayloadSchema,
+  merchandiseUpdatePayloadSchema,
+} from "@/validations/merchandise.validation";
 import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
 import { distributionRecordPayloadSchema } from "@/validations/record.validation";
 import { renditionDocumentPayloadSchema } from "@/validations/rendition.validation";
@@ -127,18 +132,45 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const parsedPayload = merchandisePayloadSchema.safeParse(rawPayload);
+    let normalizedPayload: JsonValue;
+    let merchandiseId: string;
 
-    if (!parsedPayload.success) {
-      const details = parsedPayload.error.issues.map((issue) => `${issue.path.join(".") || "datos"}: ${issue.message}`).join("; ");
-      return errorResponse(400, "invalid_merchandise_operation", `Revisá los datos de la recepción pendiente. ${details}`);
+    if (parsedOperation.data.operation === "create" && z.null().safeParse(parsedOperation.data.baseVersion).success) {
+      const parsedPayload = merchandisePayloadSchema.safeParse(rawPayload);
+
+      if (!parsedPayload.success) {
+        return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la recepción pendiente.");
+      }
+
+      normalizedPayload = parsedPayload.data;
+      merchandiseId = parsedPayload.data.id;
+    } else if (parsedOperation.data.operation === "update" && z.number().int().nonnegative().safeParse(parsedOperation.data.baseVersion).success) {
+      const parsedPayload = merchandiseUpdatePayloadSchema.safeParse(rawPayload);
+
+      if (!parsedPayload.success) {
+        return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la corrección pendiente.");
+      }
+
+      normalizedPayload = parsedPayload.data;
+      merchandiseId = parsedPayload.data.id;
+    } else if (parsedOperation.data.operation === "delete" && z.number().int().nonnegative().safeParse(parsedOperation.data.baseVersion).success) {
+      const parsedPayload = merchandiseCancellationPayloadSchema.safeParse(rawPayload);
+
+      if (!parsedPayload.success) {
+        return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la anulación pendiente.");
+      }
+
+      normalizedPayload = parsedPayload.data;
+      merchandiseId = parsedPayload.data.id;
+    } else {
+      return errorResponse(400, "invalid_merchandise_operation", "El cambio de mercadería no tiene una operación o versión base válida.");
     }
 
-    if (parsedPayload.data.id !== parsedOperation.data.resourceId) {
+    if (merchandiseId !== parsedOperation.data.resourceId) {
       return errorResponse(400, "invalid_merchandise_operation", "El identificador del borrador no coincide con los datos guardados.");
     }
 
-    parsedOperation.data.payload = parsedPayload.data;
+    parsedOperation.data.payload = normalizedPayload;
   }
 
   if (parsedOperation.data.resource === "records") {
