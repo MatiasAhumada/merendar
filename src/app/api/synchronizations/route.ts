@@ -20,9 +20,10 @@ import {
   merchandiseUpdatePayloadSchema,
 } from "@/validations/merchandise.validation";
 import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
-import { distributionRecordPayloadSchema } from "@/validations/record.validation";
+import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/validations/record.validation";
 import { renditionDocumentPayloadSchema } from "@/validations/rendition.validation";
 import { RenditionDocumentError } from "@/server/services/rendition-synchronization.service";
+import { RecordSynchronizationError } from "@/server/services/record-synchronization.service";
 import { hasEffectiveCapability } from "@/server/services/access-policy.service";
 
 const synchronizationSchema = z.object({
@@ -174,18 +175,21 @@ export async function POST(request: NextRequest) {
   }
 
   if (parsedOperation.data.resource === "records") {
-    const parsedPayload = distributionRecordPayloadSchema.safeParse(parsedOperation.data.payload);
     const validBaseVersion = z.null().safeParse(parsedOperation.data.baseVersion);
+    const parsedRecordPayload = distributionRecordPayloadSchema.safeParse(parsedOperation.data.payload);
+    const parsedSheetDraft = beneficiarySheetDraftSchema.safeParse(parsedOperation.data.payload);
 
-    if (!parsedPayload.success || parsedPayload.data.id !== parsedOperation.data.resourceId) {
-      return errorResponse(400, "invalid_record_operation", "Revisá los datos del registro antes de sincronizar.");
+    if (parsedRecordPayload.success && parsedRecordPayload.data.id === parsedOperation.data.resourceId) {
+      parsedOperation.data.payload = parsedRecordPayload.data;
+    } else if (parsedSheetDraft.success && parsedSheetDraft.data.id === parsedOperation.data.resourceId) {
+      parsedOperation.data.payload = parsedSheetDraft.data;
+    } else {
+      return errorResponse(400, "invalid_record_operation", "Revisá el registro o la planilla local antes de sincronizar.");
     }
 
     if (parsedOperation.data.operation !== "create" || !validBaseVersion.success) {
-      return errorResponse(400, "invalid_record_operation", "El registro solo admite altas nuevas.");
+      return errorResponse(400, "invalid_record_operation", "Los registros y las planillas locales solo admiten altas nuevas.");
     }
-
-    parsedOperation.data.payload = parsedPayload.data;
   }
 
   if (parsedOperation.data.resource === "renditions") {
@@ -232,6 +236,10 @@ export async function POST(request: NextRequest) {
     const result = await synchronizationService.apply(operation, resource, handler);
     return NextResponse.json(result, { status: 200, headers: privateHeaders });
   } catch (error) {
+    if (error instanceof RecordSynchronizationError) {
+      return errorResponse(error.status, error.code, error.message);
+    }
+
     if (error instanceof MerchandiseDocumentError) {
       return errorResponse(400, "invalid_merchandise_operation", error.message);
     }

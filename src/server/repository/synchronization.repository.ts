@@ -110,7 +110,12 @@ export const synchronizationRepository = {
           const applied = await handler.apply(transaction, operation);
 
           if (applied.type === "conflict") {
-            throw new SynchronizationConflictError("El registro cambió en otro dispositivo.", applied.resourceVersion, applied.current);
+            let message = "El registro cambió en otro dispositivo.";
+            const currentRecord = z.record(z.string(), z.json()).safeParse(applied.current);
+            if (currentRecord.success && currentRecord.data.kind === "already-recorded") {
+              message = "Este beneficiario ya tiene un registro confirmado en el período. Revisá los registros antes de volver a intentar.";
+            }
+            throw new SynchronizationConflictError(message, applied.resourceVersion, applied.current);
           }
 
           const result: Prisma.InputJsonValue = applied.result;

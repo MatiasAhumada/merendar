@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { AUTH } from "@/constants/auth.constant";
 import { prisma } from "@/lib/prisma";
 import { familyRepository } from "@/server/repository/family.repository";
@@ -12,21 +13,35 @@ export async function GET(request: NextRequest) {
   try {
     await requireRecordReadAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
     const periodId = request.nextUrl.searchParams.get("periodId");
+    const includePeriodDetails = request.nextUrl.searchParams.get("includePeriodDetails") === "true";
+
+    if (periodId && periodId.length > 80) {
+      throw new ApiError({ status: 400, message: "El período seleccionado no es válido." });
+    }
+
+    const recordWhere: Prisma.DistributionRecordWhereInput = {};
+    const sheetWhere: Prisma.BeneficiarySheetWhereInput = {};
+
+    if (periodId) {
+      recordWhere.periodId = periodId;
+      sheetWhere.periodId = periodId;
+    }
+
     const [periods, families, records, sheets] = await Promise.all([
       prisma.merchandisePeriod.findMany({
         select: { id: true, label: true, agency: true, startsAt: true, endsAt: true },
         orderBy: { startsAt: "desc" },
       }),
       familyRepository.findAll({}),
-      periodId && periodId.length <= 80
+      periodId || includePeriodDetails
         ? prisma.distributionRecord.findMany({
-          where: { periodId },
+          where: recordWhere,
           include: { familyMember: { include: { person: { select: { id: true, firstName: true, lastName: true, dni: true } }, family: { select: { id: true, name: true } } } } },
           orderBy: { createdAt: "desc" },
         })
         : Promise.resolve([]),
-      periodId
-        ? prisma.beneficiarySheet.findMany({ where: { periodId }, select: { id: true, version: true, createdAt: true }, orderBy: { version: "desc" }, take: 20 })
+      periodId || includePeriodDetails
+        ? prisma.beneficiarySheet.findMany({ where: sheetWhere, select: { id: true, periodId: true, version: true, createdAt: true }, orderBy: { version: "desc" } })
         : Promise.resolve([]),
     ]);
 

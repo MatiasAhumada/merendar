@@ -4,6 +4,8 @@
 
 El formulario guarda cada alta en la cola offline por UUID. En línea, el adaptador guarda el registro y el recibo de sincronización en una transacción; repetir la misma operación devuelve el resultado idempotente. Registrar nuevamente a la misma persona en el mismo período produce un conflicto, incluso si se envía con otro UUID.
 
+La vista Registro preparada mantiene períodos, padrón, entregas y referencias de planillas en IndexedDB por cuenta. Puede guardar una entrega para sincronizarla después y generar un PDF local de beneficiarios para imprimir. El documento local se identifica como borrador sin versión oficial y conserva el UUID y los beneficiarios usados para imprimir; la sincronización valida permisos, período, pertenencia y DNI antes de crear la versión oficial, sin sustituir el archivo local. Las planillas oficiales ya preparadas también se descargan sin conexión. Un DNI faltante bloquea solo la generación de la planilla y dirige a corregir el padrón; no impide leer o registrar a la persona.
+
 La planilla se genera con un conjunto seleccionado del padrón, sin requerir una entrega confirmada ni una rendición. Cada emisión conserva una versión y una instantánea de los datos identificatorios en `BeneficiarySheet`; emitir una versión nueva no modifica las anteriores. El endpoint de descarga vuelve a generar el PDF desde esa instantánea, usa fuentes DejaVu con licencia incluida, conserva acentos, no se cachea y exige autorización del servidor. El documento se identifica como planilla propia de Merendar, no como formulario oficial ministerial.
 
 Las firmas son manuscritas en el papel. La app no captura, valida ni guarda trazos biométricos. COD-1429 puede asociar la evidencia escaneada a la referencia de la planilla emitida.

@@ -24,6 +24,8 @@ import { listOfflineOperations } from "@/services/offline-queue.service";
 import type { OfflineOperation } from "@/types/offline-operation";
 import { FamilyRegistry } from "@/components/families/FamilyRegistry";
 import { familyCollectionSchema } from "@/validations/family.validation";
+import { DeliveryWorkbench } from "@/components/delivery/DeliveryWorkbench";
+import { recordsCollectionSchema } from "@/validations/record.validation";
 
 const ROUTE_LABELS: Record<OfflinePreparedRoute, string> = {
   "/": "Inicio",
@@ -278,6 +280,31 @@ function PreparedRoute({ route, preparation, preparationIsValid, documents, oper
             sessionExpiresAt={preparation.sessionExpiresAt}
             canWrite={preparationIsValid && preparation.capabilities.includes("families.write")}
           />
+        </div>
+      );
+    }
+  }
+
+  if (route === "/entrega") {
+    const recordsSnapshot = recordsCollectionSchema.safeParse(snapshot);
+    if (recordsSnapshot.success) {
+      return (
+        <div className="space-y-4">
+          <Alert variant="info">
+            <AlertTitle>Registro preparado</AlertTitle>
+            <AlertDescription>Captura de {formatDate(preparation.snapshots[route].capturedAt)}. Los registros y borradores PDF quedan pendientes hasta validarse con el servidor.</AlertDescription>
+          </Alert>
+          <DeliveryWorkbench
+            userId={preparation.userId}
+            sessionExpiresAt={preparation.sessionExpiresAt}
+            canWrite={preparationIsValid && preparation.capabilities.includes("delivery.write")}
+            canCreateFamilies={preparationIsValid && preparation.capabilities.includes("families.write")}
+            canCreatePeriods={preparationIsValid && preparation.capabilities.includes("merchandise.write")}
+            offlineMode
+            initialOfflineData={recordsSnapshot.data}
+            preparedDocuments={documents}
+          />
+          <div className="mt-4"><PendingOperations operations={operations} /></div>
         </div>
       );
     }

@@ -35,6 +35,7 @@ const offlinePreparedDocumentSchema = z.object({
   contentType: z.string().min(1),
   byteSize: z.number().int().nonnegative(),
   content: z.instanceof(Blob),
+  documentType: z.enum(["merchandise", "rendition", "beneficiary-sheet", "beneficiary-sheet-local"]).optional(),
 });
 const merchandiseDocumentUrl = (documentId: string) => `/api/merchandise/documents/${encodeURIComponent(documentId)}`;
 const renditionDocumentUrl = (documentId: string) => `/api/renditions/documents/${encodeURIComponent(documentId)}`;
@@ -50,6 +51,7 @@ interface OfflineDocumentReference {
   id: string;
   originalName: string;
   url: string;
+  documentType: NonNullable<OfflinePreparedDocument["documentType"]>;
 }
 
 export class OfflinePreparationError extends Error {
@@ -237,11 +239,11 @@ function collectDocumentReferences(value: JsonValue, references: OfflineDocument
   const documentType = z.enum(["PLANILLA_FIRMADA", "REMITO", "RESPALDO"]).safeParse(parsedObject.data.documentType);
 
   if (documentId.success && originalName.success && contentType.success) {
-    references.push({ id: documentId.data, originalName: originalName.data, url: merchandiseDocumentUrl(documentId.data) });
+    references.push({ id: documentId.data, originalName: originalName.data, url: merchandiseDocumentUrl(documentId.data), documentType: "merchandise" });
   }
 
   if (documentId.success && originalName.success && documentType.success) {
-    references.push({ id: documentId.data, originalName: originalName.data, url: renditionDocumentUrl(documentId.data) });
+    references.push({ id: documentId.data, originalName: originalName.data, url: renditionDocumentUrl(documentId.data), documentType: "rendition" });
   }
 
   for (const nestedValue of Object.values(parsedObject.data)) {
@@ -249,12 +251,50 @@ function collectDocumentReferences(value: JsonValue, references: OfflineDocument
   }
 }
 
-async function downloadPreparedDocuments(snapshots: OfflinePreparation["snapshots"]) {
-  const documentReferences: OfflineDocumentReference[] = [];
-  for (const snapshot of Object.values(snapshots)) {
-    collectDocumentReferences(snapshot.data, documentReferences);
+function collectBeneficiarySheetReferences(value: JsonValue, references: OfflineDocumentReference[]) {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      collectBeneficiarySheetReferences(entry, references);
+    }
+    return;
   }
 
+  const parsedObject = z.record(z.string(), z.json()).safeParse(value);
+  if (!parsedObject.success) {
+    return;
+  }
+
+  const sheetId = z.string().min(1).safeParse(parsedObject.data.id);
+  const periodId = z.string().min(1).safeParse(parsedObject.data.periodId);
+  const version = z.number().int().positive().safeParse(parsedObject.data.version);
+
+  if (sheetId.success && periodId.success && version.success) {
+    references.push({
+      id: sheetId.data,
+      originalName: `planilla-${periodId.data}-v${version.data}.pdf`,
+      url: `/api/records/sheets/${encodeURIComponent(sheetId.data)}`,
+      documentType: "beneficiary-sheet",
+    });
+  }
+
+  for (const nestedValue of Object.values(parsedObject.data)) {
+    collectBeneficiarySheetReferences(nestedValue, references);
+  }
+}
+
+function collectPreparedDocumentReferences(snapshots: OfflinePreparation["snapshots"]) {
+  const documentReferences: OfflineDocumentReference[] = [];
+
+  for (const snapshot of Object.values(snapshots)) {
+    collectDocumentReferences(snapshot.data, documentReferences);
+    collectBeneficiarySheetReferences(snapshot.data, documentReferences);
+  }
+
+  return documentReferences;
+}
+
+async function downloadPreparedDocuments(snapshots: OfflinePreparation["snapshots"]) {
+  const documentReferences = collectPreparedDocumentReferences(snapshots);
   const uniqueReferences = [...new Map(documentReferences.map((reference) => [`${reference.url}:${reference.id}`, reference])).values()];
   const documents: OfflinePreparedDocument[] = [];
   let totalByteSize = 0;
@@ -279,6 +319,7 @@ async function downloadPreparedDocuments(snapshots: OfflinePreparation["snapshot
       contentType: z.string().min(1).parse(contentType),
       byteSize: content.size,
       content,
+      documentType: reference.documentType,
     });
   }
 
@@ -304,13 +345,78 @@ async function savePreparation(preparation: OfflinePreparation, documents: Offli
       const transaction = database.transaction([OFFLINE_PREPARATION.STORE, OFFLINE_PREPARATION.DOCUMENTS_STORE], "readwrite");
       transaction.objectStore(OFFLINE_PREPARATION.STORE).put({ key: OFFLINE_PREPARATION.KEY, ...preparation });
       const documentStore = transaction.objectStore(OFFLINE_PREPARATION.DOCUMENTS_STORE);
-      documentStore.clear();
-      for (const document of documents) {
-        documentStore.put(document);
-      }
+      const existingDocumentsRequest = documentStore.getAll();
+      existingDocumentsRequest.onsuccess = () => {
+        const existingDocuments = z.array(offlinePreparedDocumentSchema).safeParse(existingDocumentsRequest.result);
+        documentStore.clear();
+        const localSheetDocuments = existingDocuments.success
+          ? existingDocuments.data
+            .filter((document) => document.documentType === "beneficiary-sheet-local")
+            .map((document) => document.id.startsWith("local:") ? document : { ...document, id: `local:${document.id}` })
+          : [];
+        for (const document of [...documents, ...localSheetDocuments]) {
+          documentStore.put(document);
+        }
+      };
+      existingDocumentsRequest.onerror = () => {
+        reject(new OfflinePreparationError("No se pudieron conservar las planillas locales pendientes."));
+        transaction.abort();
+      };
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(new OfflinePreparationError("No se pudo guardar la preparación offline."));
       transaction.onabort = () => reject(new OfflinePreparationError("No se pudo guardar la preparación offline."));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function saveOfflinePreparedDocument(userId: string, document: OfflinePreparedDocument) {
+  const parsedDocument = offlinePreparedDocumentSchema.safeParse(document);
+  if (!parsedDocument.success || parsedDocument.data.byteSize > OFFLINE_PREPARATION.MAX_DOCUMENT_BYTES) {
+    throw new OfflinePreparationError("La planilla local no tiene un formato o tamaño permitido.");
+  }
+
+  const preparation = await readOfflinePreparation(userId);
+  if (!preparation) {
+    throw new OfflinePreparationError(OFFLINE_PREPARATION.MESSAGES.NOT_PREPARED);
+  }
+
+  const existingDocuments = await readOfflinePreparedDocuments(userId);
+  const totalBytes = existingDocuments
+    .filter((existingDocument) => existingDocument.id !== parsedDocument.data.id)
+    .reduce((total, existingDocument) => total + existingDocument.byteSize, parsedDocument.data.byteSize);
+  if (totalBytes > OFFLINE_PREPARATION.MAX_DOCUMENTS_TOTAL_BYTES) {
+    throw new OfflinePreparationError("No hay espacio suficiente para guardar el PDF en este dispositivo.");
+  }
+  const storageEstimate = await navigator.storage?.estimate();
+  if (storageEstimate?.quota && storageEstimate.quota - (storageEstimate.usage ?? 0) < parsedDocument.data.byteSize + OFFLINE_PREPARATION.STORAGE_RESERVE_BYTES) {
+    throw new OfflinePreparationError("No hay espacio suficiente para guardar el PDF en este dispositivo.");
+  }
+
+  const database = await openDatabase(userId);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(OFFLINE_PREPARATION.DOCUMENTS_STORE, "readwrite");
+      transaction.objectStore(OFFLINE_PREPARATION.DOCUMENTS_STORE).put(parsedDocument.data);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo guardar la planilla local."));
+      transaction.onabort = () => reject(new OfflinePreparationError("No se pudo guardar la planilla local."));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function removeOfflinePreparedDocument(userId: string, documentId: string) {
+  const database = await openDatabase(userId);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(OFFLINE_PREPARATION.DOCUMENTS_STORE, "readwrite");
+      transaction.objectStore(OFFLINE_PREPARATION.DOCUMENTS_STORE).delete(documentId);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo retirar el borrador local incompleto."));
+      transaction.onabort = () => reject(new OfflinePreparationError("No se pudo retirar el borrador local incompleto."));
     });
   } finally {
     database.close();
@@ -442,7 +548,7 @@ export async function prepareOfflineWorkspace(
   const routeRequests: Array<{ route: string; endpoint: string; capabilities: string[] }> = [
     { route: "/familias", endpoint: "/api/families", capabilities: ["families.read"] },
     { route: "/mercaderia", endpoint: "/api/merchandise", capabilities: ["merchandise.read", "renditions.read"] },
-    { route: "/entrega", endpoint: "/api/records", capabilities: ["delivery.read"] },
+    { route: "/entrega", endpoint: "/api/records?includePeriodDetails=true", capabilities: ["delivery.read"] },
     { route: "/usuarios", endpoint: "/api/users", capabilities: ["users.manage"] },
     { route: "/permisos", endpoint: "/api/access-policy", capabilities: ["access-policy.manage"] },
   ];

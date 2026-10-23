@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { UserRole } from "@prisma/client";
 import { PDFDocument } from "pdf-lib";
 import { createBeneficiarySheetPdf } from "@/server/services/beneficiary-sheet.service";
+import { createLocalBeneficiarySheetPdf } from "@/services/local-beneficiary-sheet.service";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";
@@ -16,6 +17,7 @@ import { prisma } from "@/lib/prisma";
 import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
 import { synchronizationService } from "@/server/services/synchronization.service";
 import { recordSynchronizationHandler } from "@/server/services/record-synchronization.service";
+import { beneficiarySheetDraftSchema } from "@/validations/record.validation";
 
 function createRequest(url: string, method: string, token: string, body?: unknown) {
   return new NextRequest(url, {
@@ -77,7 +79,7 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     await prisma.merchandisePeriod.create({
       data: { id: periodId, label: `Octubre ${suffix}`, agency: "Desarrollo Social", startsAt: new Date("2026-10-01T00:00:00.000Z"), endsAt: new Date("2026-10-31T00:00:00.000Z") },
     });
-    await prisma.person.create({ data: { id: personId, firstName: "José", lastName: "Pérez", dni: `${suffix.slice(0, 8)}` } });
+    await prisma.person.create({ data: { id: personId, firstName: "José", lastName: "Pérez", dni: "12345678" } });
     await prisma.family.create({
       data: {
         id: familyId,
@@ -117,6 +119,9 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     assert.equal(readResponse.status, 200);
     assert.equal(readResult.records[0]?.personId, personId);
     assert.equal(readResult.records[0]?.family.name, "Familia Pérez");
+    const preparedReadResponse = await getRecords(createRequest("http://localhost:3000/api/records?includePeriodDetails=true", "GET", token));
+    const preparedReadResult = await preparedReadResponse.json() as { records: Array<{ id: string }>; sheets: Array<{ id: string }> };
+    assert.ok(preparedReadResult.records.some((record) => record.id === recordId));
 
     const issueResponse = await issueSheet(createRequest("http://localhost:3000/api/records/sheets", "POST", token, { periodId, personIds: [personId] }));
     assert.equal(issueResponse.status, 201);
@@ -149,6 +154,67 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     }
 
     assert.equal(firstSnapshot.data.beneficiaries[0]?.name, "José Pérez");
+
+    const offlineSheetId = randomUUID();
+    const offlineSheetOperation: SubmittedSyncOperation = {
+      operationId: randomUUID(),
+      userId: user.id,
+      resource: "records",
+      resourceId: offlineSheetId,
+      operation: "create",
+      baseVersion: null,
+      dependencies: [],
+      payload: {
+        kind: "beneficiary-sheet",
+        id: offlineSheetId,
+        periodId,
+        period: { label: `Octubre ${suffix}`, agency: "Desarrollo Social", startsAt: "2026-10-01", endsAt: "2026-10-31" },
+        beneficiaries: [{ personId, name: "José Pérez impreso", dni: "12345678", familyName: "Familia Pérez", address: "Pasaje de la Constitución 123" }],
+      },
+    };
+    const offlineDraft = beneficiarySheetDraftSchema.parse(offlineSheetOperation.payload);
+    const localPdf = await PDFDocument.load(await createLocalBeneficiarySheetPdf(offlineDraft));
+    assert.equal(localPdf.getPageCount(), 1);
+    const offlineSheetResult = await synchronizationService.apply(offlineSheetOperation, "RECORDS", recordSynchronizationHandler);
+    const replayedOfflineSheetResult = await synchronizationService.apply(offlineSheetOperation, "RECORDS", recordSynchronizationHandler);
+    assert.equal(offlineSheetResult.replayed, false);
+    assert.equal(replayedOfflineSheetResult.replayed, true);
+    const offlineSheet = await prisma.beneficiarySheet.findUnique({ where: { id: offlineSheetId } });
+    assert.equal(offlineSheet?.version, 3);
+    const offlineSnapshotSchema = z.object({ beneficiaries: z.array(z.object({ name: z.string(), dni: z.string(), address: z.string() })) });
+    const offlineSnapshot = offlineSnapshotSchema.safeParse(offlineSheet?.snapshot);
+    assert.equal(offlineSnapshot.success, true);
+    if (!offlineSnapshot.success) {
+      assert.fail("La sincronización modificó la instantánea impresa de la planilla local");
+    }
+    assert.deepEqual(offlineSnapshot.data.beneficiaries[0], { name: "José Pérez impreso", dni: "12345678", address: "Pasaje de la Constitución 123" });
+
+    const apiSheetId = randomUUID();
+    const apiSheetResponse = await postSynchronization(createRequest("http://localhost:3000/api/synchronizations", "POST", token, {
+      ...offlineSheetOperation,
+      operationId: randomUUID(),
+      resourceId: apiSheetId,
+      payload: { ...offlineSheetOperation.payload as Record<string, unknown>, id: apiSheetId },
+    }));
+    assert.equal(apiSheetResponse.status, 200);
+
+    await prisma.person.update({ where: { id: personId }, data: { dni: null } });
+    const missingDniId = randomUUID();
+    const missingDniOperation: SubmittedSyncOperation = {
+      ...offlineSheetOperation,
+      operationId: randomUUID(),
+      resourceId: missingDniId,
+      payload: { ...offlineSheetOperation.payload as Record<string, unknown>, id: missingDniId },
+    };
+    await assert.rejects(synchronizationService.apply(missingDniOperation, "RECORDS", recordSynchronizationHandler), /no tiene un DNI válido registrado/);
+    const missingDniResponse = await postSynchronization(createRequest("http://localhost:3000/api/synchronizations", "POST", token, {
+      ...missingDniOperation,
+      userId: user.id,
+    }));
+    const missingDniResult = await missingDniResponse.json() as { error: { code: string; message: string } };
+    assert.equal(missingDniResponse.status, 400);
+    assert.equal(missingDniResult.error.code, "beneficiary_dni_missing");
+    assert.match(missingDniResult.error.message, /DNI válido/);
 
     const paginatedBytes = await createBeneficiarySheetPdf({
       period: { label: "Módulo de prueba", agency: "Desarrollo Social", startsAt: "2026-10-01", endsAt: "2026-10-31" },
