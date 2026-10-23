@@ -45,7 +45,7 @@ La navegación local con fixtures no verifica el despliegue. El smoke publicado 
 - Confirmado: sesión de Presidencia ya autenticada; navegación directa y carga asentada de `/`, `/familias`, `/entrega`, `/mercaderia`, `/usuarios` y `/permisos`; Preparar offline deja visible una preparación vigente. No quedaron rótulos “Cargando” ni errores/advertencias de consola. Solo lectura, sin alterar datos del despliegue.
 - No probado en el despliegue: cortar la red, modificar CRUD, PWA instalada, sesión de otros roles, PDF y expiración/logout. La pestaña integrada no expone control de red por pestaña. No se capturó ni guardó contenido del padrón.
 - Navegador de la pestaña integrada y SHA de la versión desplegada: la interfaz no los expone; no se infieren. En local, Playwright usó Google Chrome 156.0.8078.47.
-- Evidencia local: `pnpm lint`, `pnpm build`, `pnpm test:integration` (20/20) y Playwright (6/6: móvil/escritorio, tres casos por viewport). Los adjuntos de Playwright identifican versión local, viewport y SHA de ejecución.
+- Evidencia local: `pnpm lint`, `pnpm build`, `pnpm test:integration` (20/20) y Playwright (8/8: móvil/escritorio, cuatro casos por viewport). Los adjuntos de Playwright identifican versión local, viewport y SHA de ejecución.
 
 ### Pendientes para declarar completa toda la matriz
 
