@@ -221,6 +221,40 @@ test("prepares private views, keeps them available after network loss, and isola
   }
 });
 
+test("shows an online family immediately and retains one record after refresh", async ({ browser, context, page }, testInfo) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const familyName = `Browser Online ${randomUUID()}`;
+
+  try {
+    await setBrowserIdentity(context, page, president);
+    await page.goto("/familias");
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
+    await page.getByRole("button", { name: "Nueva familia" }).click();
+    await page.locator("#family-name").fill(familyName);
+    await page.locator("#family-neighborhood").click();
+    await page.getByRole("option", { name: "San Cayetano" }).click();
+    await page.locator("#family-address").fill("Domicilio de prueba 1478");
+    await page.locator('input[id^="member-first-"]').fill("Integrante");
+    await page.locator('input[id^="member-last-"]').fill("Online");
+    await page.getByRole("button", { name: "Guardar familia" }).click();
+
+    await expect(page.getByRole("heading", { name: familyName, exact: true })).toHaveCount(1);
+    await expect.poll(async () => prisma.family.count({ where: { name: familyName } }), { timeout: 15_000 }).toBe(1);
+    await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyName);
+    await page.getByRole("region", { name: "Listado de familias" }).getByRole("button", { name: "Ver ficha familiar" }).click();
+    await expect(page.getByText("Integrantes (1)", { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: familyName, exact: true })).toHaveCount(1);
+
+    await captureBrowserEvidence(browser, page, testInfo);
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserFamily(familyName);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
 test("creates a family and adds a member offline, then syncs the dependency chain once", async ({ browser, context, page }, testInfo) => {
   const president = await createBrowserIdentity(UserRole.PRESIDENTE);
   const familyName = `Browser Offline ${randomUUID()}`;
