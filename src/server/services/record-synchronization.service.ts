@@ -1,6 +1,20 @@
-import { distributionRecordPayloadSchema } from "@/validations/record.validation";
+import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/validations/record.validation";
+import type { Prisma } from "@prisma/client";
 import type { SynchronizationHandler } from "@/interfaces/synchronization.interface";
+import type { JsonObject } from "@/types/json-value";
 import { z } from "zod";
+
+export class RecordSynchronizationError extends Error {
+  readonly code: "period_not_found" | "beneficiary_not_in_roster" | "beneficiary_dni_missing";
+  readonly status: 400 | 404;
+
+  constructor(code: RecordSynchronizationError["code"], status: RecordSynchronizationError["status"], message: string) {
+    super(message);
+    this.name = "RecordSynchronizationError";
+    this.code = code;
+    this.status = status;
+  }
+}
 
 export const recordSynchronizationHandler: SynchronizationHandler = {
   async apply(transaction, operation) {
@@ -8,6 +22,53 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
 
     if (operation.operation !== "create" || !validBaseVersion.success) {
       throw new Error("El registro solo permite altas nuevas");
+    }
+
+    const parsedSheetDraft = beneficiarySheetDraftSchema.safeParse(operation.payload);
+    if (parsedSheetDraft.success && parsedSheetDraft.data.id === operation.resourceId) {
+      const draft = parsedSheetDraft.data;
+      const period = await transaction.merchandisePeriod.findUnique({ where: { id: draft.periodId }, select: { id: true } });
+
+      if (!period) {
+        throw new RecordSynchronizationError("period_not_found", 404, "El período ya no está disponible. Conectate y elegí otro período antes de emitir la planilla.");
+      }
+
+      const personIds = draft.beneficiaries.map((beneficiary) => beneficiary.personId);
+      const memberships = await transaction.familyMember.findMany({
+        where: { personId: { in: personIds } },
+        select: { personId: true, person: { select: { dni: true } } },
+      });
+
+      if (personIds.some((personId) => !memberships.some((membership) => membership.personId === personId))) {
+        throw new RecordSynchronizationError("beneficiary_not_in_roster", 400, "Una persona seleccionada ya no pertenece al padrón. Actualizá los datos antes de volver a emitir.");
+      }
+
+      const membershipWithoutDni = memberships.find((membership) => !/^\d{7,8}$/.test(membership.person.dni ?? ""));
+      if (membershipWithoutDni) {
+        const beneficiaryWithoutDni = draft.beneficiaries.find((beneficiary) => beneficiary.personId === membershipWithoutDni.personId);
+        const beneficiaryName = beneficiaryWithoutDni?.name ?? "Una persona seleccionada";
+        throw new RecordSynchronizationError("beneficiary_dni_missing", 400, `${beneficiaryName} no tiene un DNI válido registrado. Corregilo en Familias y volvé a emitir la planilla.`);
+      }
+
+      const version = await transaction.beneficiarySheet.count({ where: { periodId: draft.periodId } }) + 1;
+      const createdAt = new Date().toISOString();
+      const snapshot: Prisma.InputJsonValue = {
+        period: draft.period,
+        version,
+        createdAt,
+        beneficiaries: draft.beneficiaries,
+      };
+      const sheet = await transaction.beneficiarySheet.create({
+        data: { id: draft.id, periodId: draft.periodId, version, snapshot, createdById: operation.userId },
+        select: { id: true, version: true },
+      });
+
+      const result: JsonObject = { resourceId: sheet.id, localId: draft.id, version: sheet.version };
+      return {
+        type: "synchronized",
+        resourceVersion: sheet.version,
+        result,
+      };
     }
 
     const parsedPayload = distributionRecordPayloadSchema.safeParse(operation.payload);
@@ -24,7 +85,7 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
     });
 
     if (!period || !membership) {
-      throw new Error("El período o beneficiario ya no está disponible en el padrón");
+      throw new RecordSynchronizationError("beneficiary_not_in_roster", 400, "El período o beneficiario ya no está disponible en el padrón.");
     }
 
     const duplicate = await transaction.distributionRecord.findUnique({

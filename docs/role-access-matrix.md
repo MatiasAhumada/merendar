@@ -23,8 +23,8 @@ Las cinco fotos y la entrevista son fuentes diferentes. Las cláusulas del estat
 
 ## Recorrido actual por rol
 
-- **Presidencia:** Login → Inicio → Familias, Registro, Módulos o Usuarios. Inicio presenta métricas y acciones operativas. Usuarios es exclusivo de Presidencia. Las acciones privadas se validan nuevamente en el servidor.
-- **Secretaría:** Login → Inicio → Familias, Registro o Módulos. Inicio presenta métricas y accesos operativos. No ve ni opera Usuarios.
+- **Presidencia:** Login → Inicio → Familias, Registro, Módulos o Usuarios. Inicio presenta métricas confirmadas del servidor y acciones operativas. Una preparación vigente conserva una lectura de métricas fechada y la navegación autorizada para consulta offline; Usuarios y Permisos no admiten cambios sin conexión. Las acciones privadas se validan nuevamente en el servidor.
+- **Secretaría:** Login → Inicio → Familias, Registro o Módulos. Inicio presenta métricas confirmadas y accesos operativos. Una preparación vigente conserva las métricas con fecha y las vistas autorizadas para consulta offline. No ve ni opera Usuarios.
 - **Tesorería:** Login → Inicio. Ve su rol y el estado sin métricas ni acciones habilitadas. Los módulos estatutarios de contabilidad/tesorería aún no existen.
 - **Vocalía:** Login → Inicio. Ve el estado sin métricas ni acciones habilitadas. No habilitar una vista operativa hasta revisar sus deberes y atribuciones.
 - **Revisión de cuentas:** Login → Inicio. Ve el estado sin métricas ni acciones habilitadas. No equiparar el título con la revisión de rendiciones ni con autoridad de aprobación.

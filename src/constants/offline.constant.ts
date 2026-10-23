@@ -9,6 +9,36 @@ export const OFFLINE_STORAGE = {
   SYNC_HISTORY_RETENTION_DAYS: 30,
 } as const;
 
+export const OFFLINE_PREPARATION = {
+  DATABASE_PREFIX: "merendar-offline-preparation",
+  DATABASE_VERSION: 3,
+  SNAPSHOT_SCHEMA_VERSION: 4,
+  STORE: "workspace",
+  DOCUMENTS_STORE: "documents",
+  KEY: "latest",
+  MAX_AGE_HOURS: 12,
+  MAX_DOCUMENT_BYTES: 512 * 1024,
+  MAX_DOCUMENTS_TOTAL_BYTES: 20 * 1024 * 1024,
+  STORAGE_RESERVE_BYTES: 2_000_000,
+  ROUTES: ["/", "/familias", "/mercaderia", "/entrega", "/usuarios", "/permisos"] as const,
+  ROUTE_CAPABILITIES: {
+    "/": ["dashboard.metrics.read"],
+    "/familias": ["families.read"],
+    "/mercaderia": ["merchandise.read", "renditions.read"],
+    "/entrega": ["delivery.read"],
+    "/usuarios": ["users.manage"],
+    "/permisos": ["access-policy.manage"],
+  },
+  MESSAGES: {
+    NOT_PREPARED: "Esta vista todavía no está preparada para usarse sin conexión.",
+    EXPIRED: "La preparación venció. Conectate y prepará el acceso de nuevo.",
+    PREPARING: "Guardando los módulos autorizados para este dispositivo…",
+    READY: "Las vistas habilitadas están preparadas para usarse sin conexión durante un máximo de 12 horas.",
+  },
+} as const;
+
+export type OfflinePreparedRoute = "/" | "/familias" | "/mercaderia" | "/entrega" | "/usuarios" | "/permisos";
+
 export const SYNC_ROUTES = {
   OPERATIONS: "/api/synchronizations",
 } as const;

@@ -13,20 +13,50 @@ import { SynchronizationConflictError } from "@/server/repository/synchronizatio
 import { merchandiseSynchronizationHandler } from "@/server/services/merchandise-synchronization.service";
 import { synchronizationService } from "@/server/services/synchronization.service";
 import type { JsonValue } from "@/types/json-value";
+import { merchandisePayloadSchema } from "@/validations/merchandise.validation";
+
+test("merchandise document policy accepts valid PDFs up to 512 KiB and rejects images or larger files", () => {
+  const validPdf = Buffer.alloc(512 * 1024, 32);
+  validPdf.write("%PDF-1.7", 0, "ascii");
+  validPdf.write("%%EOF", validPdf.length - 5, "ascii");
+  const basePayload = {
+    kind: "request" as const,
+    id: randomUUID(),
+    periodId: randomUUID(),
+    requestNumber: "REQ-PDF",
+    requestedAt: "2026-10-02",
+    requestedQuantity: 2,
+  };
+
+  assert.equal(merchandisePayloadSchema.safeParse({
+    ...basePayload,
+    document: { originalName: "proof.pdf", contentType: "application/pdf", contentBase64: validPdf.toString("base64") },
+  }).success, true);
+  assert.equal(merchandisePayloadSchema.safeParse({
+    ...basePayload,
+    document: { originalName: "proof.jpg", contentType: "image/jpeg", contentBase64: Buffer.from("image").toString("base64") },
+  }).success, false);
+  assert.equal(merchandisePayloadSchema.safeParse({
+    ...basePayload,
+    document: { originalName: "proof.pdf", contentType: "application/pdf", contentBase64: Buffer.concat([validPdf, Buffer.from(" ")]).toString("base64") },
+  }).success, false);
+});
 
 function createOperation(
   userId: string,
   resourceId: string,
   payload: Record<string, JsonValue>,
   dependencies: string[] = [],
+  operation: "create" | "update" | "delete" = "create",
+  baseVersion: number | null = null,
 ): SubmittedSyncOperation {
   return {
     operationId: randomUUID(),
     userId,
     resource: "remittances",
     resourceId,
-    operation: "create",
-    baseVersion: null,
+    operation,
+    baseVersion,
     dependencies,
     payload,
   };
@@ -66,7 +96,7 @@ test("merchandise periods, requests, quotas, remittances and private documents p
   const remittanceId = randomUUID();
   let apiPeriodId = "";
   let unauthorizedUserId = "";
-  const pdfContent = Buffer.from("%PDF-1.7 test document").toString("base64");
+  const pdfContent = Buffer.from("%PDF-1.7 test document\n%%EOF").toString("base64");
   const periodOperation = createOperation(user.id, periodId, {
     kind: "period",
     id: periodId,
@@ -123,7 +153,7 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     assert.equal(savedPeriod?.requests[0]?.status, "APROBADA");
     assert.equal(savedPeriod?.requests[0]?.quota?.approvedQuantity, 40);
     assert.equal(savedPeriod?.requests[0]?.remittances[0]?.receivedQuantity, 30);
-    assert.equal(Buffer.from(savedPeriod?.requests[0]?.remittances[0]?.documents[0]?.content ?? new Uint8Array()).toString(), "%PDF-1.7 test document");
+    assert.equal(Buffer.from(savedPeriod?.requests[0]?.remittances[0]?.documents[0]?.content ?? new Uint8Array()).toString(), "%PDF-1.7 test document\n%%EOF");
 
     const overQuotaId = randomUUID();
     const overQuotaOperation = createOperation(user.id, overQuotaId, {
@@ -140,6 +170,46 @@ test("merchandise periods, requests, quotas, remittances and private documents p
       synchronizationService.apply(overQuotaOperation, "REMITTANCES", merchandiseSynchronizationHandler),
       SynchronizationConflictError,
     );
+
+    const originalRemittance = await prisma.merchandiseRemittance.findUniqueOrThrow({ where: { id: remittanceId } });
+    const correctionOperation = createOperation(user.id, remittanceId, {
+      kind: "remittance",
+      id: remittanceId,
+      remittanceNumber: `REM-CORRECTED-${suffix}`,
+      receivedAt: "2026-10-04",
+      receivedQuantity: 35,
+      responsibleName: "Corrected Receiver",
+      notes: "Corrected quantity",
+    }, [], "update", originalRemittance.version);
+    const correctionResponse = await synchronizationService.apply(correctionOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    const correctedRemittance = await prisma.merchandiseRemittance.findUniqueOrThrow({ where: { id: remittanceId }, include: { documents: true } });
+    assert.equal(correctedRemittance.receivedQuantity, 35);
+    assert.equal(correctedRemittance.documents.length, 1);
+
+    const staleCorrection = createOperation(user.id, remittanceId, {
+      kind: "remittance",
+      id: remittanceId,
+      remittanceNumber: `REM-STALE-${suffix}`,
+      receivedAt: "2026-10-04",
+      receivedQuantity: 32,
+      responsibleName: "Stale Receiver",
+    }, [], "update", originalRemittance.version);
+    await assert.rejects(
+      synchronizationService.apply(staleCorrection, "REMITTANCES", merchandiseSynchronizationHandler),
+      SynchronizationConflictError,
+    );
+
+    const cancelOperation = createOperation(user.id, remittanceId, {
+      kind: "remittance",
+      id: remittanceId,
+      action: "cancel",
+      reason: "Se registró una cantidad incorrecta",
+    }, [], "delete", correctionResponse.resourceVersion);
+    await synchronizationService.apply(cancelOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    const cancelledRemittance = await prisma.merchandiseRemittance.findUniqueOrThrow({ where: { id: remittanceId }, include: { documents: true } });
+    assert.equal(cancelledRemittance.status, "ANULADO");
+    assert.equal(cancelledRemittance.cancellationReason, "Se registró una cantidad incorrecta");
+    assert.equal(cancelledRemittance.documents.length, 1);
 
     const token = randomBytes(32).toString("hex");
     const tokenHash = createHash("sha256").update(token).digest("hex");
@@ -165,7 +235,7 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     );
     assert.equal(downloadResponse.status, 200);
     assert.equal(downloadResponse.headers.get("cache-control"), "private, no-store, max-age=0");
-    assert.equal(await downloadResponse.text(), "%PDF-1.7 test document");
+    assert.equal(await downloadResponse.text(), "%PDF-1.7 test document\n%%EOF");
 
     const unauthorizedUser = await prisma.user.create({
       data: { email: `merchandise-reader-${suffix}@example.test`, name: "Unprivileged Test User", role: UserRole.TESORERIA },

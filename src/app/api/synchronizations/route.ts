@@ -5,7 +5,7 @@ import { AUTH } from "@/constants/auth.constant";
 import { authService } from "@/server/services/auth.service";
 import { isSameOriginRequest } from "@/server/services/origin.service";
 import { createSynchronizationHandlers, synchronizationService } from "@/server/services/synchronization.service";
-import { familyPayloadSchema } from "@/validations/family.validation";
+import { familyMemberChangeSchema, familyPayloadSchema } from "@/validations/family.validation";
 import {
   SynchronizationConflictError,
   SynchronizationDependencyError,
@@ -13,11 +13,17 @@ import {
 } from "@/server/repository/synchronization.repository";
 import type { SyncResource } from "@/types/offline-operation";
 import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
-import { merchandisePayloadSchema } from "@/validations/merchandise.validation";
+import type { JsonValue } from "@/types/json-value";
+import {
+  merchandiseCancellationPayloadSchema,
+  merchandisePayloadSchema,
+  merchandiseUpdatePayloadSchema,
+} from "@/validations/merchandise.validation";
 import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
-import { distributionRecordPayloadSchema } from "@/validations/record.validation";
-import { renditionDocumentPayloadSchema } from "@/validations/rendition.validation";
+import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/validations/record.validation";
+import { renditionSynchronizationPayloadSchema } from "@/validations/rendition.validation";
 import { RenditionDocumentError } from "@/server/services/rendition-synchronization.service";
+import { RecordSynchronizationError } from "@/server/services/record-synchronization.service";
 import { hasEffectiveCapability } from "@/server/services/access-policy.service";
 
 const synchronizationSchema = z.object({
@@ -81,18 +87,34 @@ export async function POST(request: NextRequest) {
   }
 
   if (parsedOperation.data.resource === "families") {
-    const baseVersionValidation = z.null().safeParse(parsedOperation.data.baseVersion);
+    if (parsedOperation.data.operation === "create") {
+      const baseVersionValidation = z.null().safeParse(parsedOperation.data.baseVersion);
 
-    if (parsedOperation.data.operation !== "create" || !baseVersionValidation.success) {
-      return errorResponse(400, "invalid_family_operation", "El padrón solo permite sincronizar altas nuevas.");
-    }
+      if (!baseVersionValidation.success) {
+        return errorResponse(400, "invalid_family_operation", "El alta de familia no tiene una versión base válida.");
+      }
 
-    const parsedFamilyPayload = familyPayloadSchema.safeParse(parsedOperation.data.payload);
+      const parsedFamilyPayload = familyPayloadSchema.safeParse(parsedOperation.data.payload);
 
-    if (!parsedFamilyPayload.success) {
-      return errorResponse(400, "invalid_family_payload", "Revisá los datos de la familia antes de sincronizar.", {
-        details: parsedFamilyPayload.error.flatten().fieldErrors,
-      });
+      if (!parsedFamilyPayload.success) {
+        return errorResponse(400, "invalid_family_payload", "Revisá los datos de la familia antes de sincronizar.", {
+          details: parsedFamilyPayload.error.flatten().fieldErrors,
+        });
+      }
+
+      parsedOperation.data.payload = parsedFamilyPayload.data;
+    } else if (parsedOperation.data.operation === "update" && z.number().int().nonnegative().safeParse(parsedOperation.data.baseVersion).success) {
+      const parsedMemberChange = familyMemberChangeSchema.safeParse(parsedOperation.data.payload);
+
+      if (!parsedMemberChange.success) {
+        return errorResponse(400, "invalid_family_member_operation", "Revisá los datos del integrante antes de sincronizar.", {
+          details: parsedMemberChange.error.flatten().fieldErrors,
+        });
+      }
+
+      parsedOperation.data.payload = parsedMemberChange.data;
+    } else {
+      return errorResponse(400, "invalid_family_operation", "El padrón solo permite altas o cambios de integrantes.");
     }
   }
 
@@ -111,45 +133,75 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const parsedPayload = merchandisePayloadSchema.safeParse(rawPayload);
+    let normalizedPayload: JsonValue;
+    let merchandiseId: string;
 
-    if (!parsedPayload.success) {
-      const details = parsedPayload.error.issues.map((issue) => `${issue.path.join(".") || "datos"}: ${issue.message}`).join("; ");
-      return errorResponse(400, "invalid_merchandise_operation", `Revisá los datos de la recepción pendiente. ${details}`);
+    if (parsedOperation.data.operation === "create" && z.null().safeParse(parsedOperation.data.baseVersion).success) {
+      const parsedPayload = merchandisePayloadSchema.safeParse(rawPayload);
+
+      if (!parsedPayload.success) {
+        return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la recepción pendiente.");
+      }
+
+      normalizedPayload = parsedPayload.data;
+      merchandiseId = parsedPayload.data.id;
+    } else if (parsedOperation.data.operation === "update" && z.number().int().nonnegative().safeParse(parsedOperation.data.baseVersion).success) {
+      const parsedPayload = merchandiseUpdatePayloadSchema.safeParse(rawPayload);
+
+      if (!parsedPayload.success) {
+        return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la corrección pendiente.");
+      }
+
+      normalizedPayload = parsedPayload.data;
+      merchandiseId = parsedPayload.data.id;
+    } else if (parsedOperation.data.operation === "delete" && z.number().int().nonnegative().safeParse(parsedOperation.data.baseVersion).success) {
+      const parsedPayload = merchandiseCancellationPayloadSchema.safeParse(rawPayload);
+
+      if (!parsedPayload.success) {
+        return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la anulación pendiente.");
+      }
+
+      normalizedPayload = parsedPayload.data;
+      merchandiseId = parsedPayload.data.id;
+    } else {
+      return errorResponse(400, "invalid_merchandise_operation", "El cambio de mercadería no tiene una operación o versión base válida.");
     }
 
-    if (parsedPayload.data.id !== parsedOperation.data.resourceId) {
+    if (merchandiseId !== parsedOperation.data.resourceId) {
       return errorResponse(400, "invalid_merchandise_operation", "El identificador del borrador no coincide con los datos guardados.");
     }
 
-    parsedOperation.data.payload = parsedPayload.data;
+    parsedOperation.data.payload = normalizedPayload;
   }
 
   if (parsedOperation.data.resource === "records") {
-    const parsedPayload = distributionRecordPayloadSchema.safeParse(parsedOperation.data.payload);
     const validBaseVersion = z.null().safeParse(parsedOperation.data.baseVersion);
+    const parsedRecordPayload = distributionRecordPayloadSchema.safeParse(parsedOperation.data.payload);
+    const parsedSheetDraft = beneficiarySheetDraftSchema.safeParse(parsedOperation.data.payload);
 
-    if (!parsedPayload.success || parsedPayload.data.id !== parsedOperation.data.resourceId) {
-      return errorResponse(400, "invalid_record_operation", "Revisá los datos del registro antes de sincronizar.");
+    if (parsedRecordPayload.success && parsedRecordPayload.data.id === parsedOperation.data.resourceId) {
+      parsedOperation.data.payload = parsedRecordPayload.data;
+    } else if (parsedSheetDraft.success && parsedSheetDraft.data.id === parsedOperation.data.resourceId) {
+      parsedOperation.data.payload = parsedSheetDraft.data;
+    } else {
+      return errorResponse(400, "invalid_record_operation", "Revisá el registro o la planilla local antes de sincronizar.");
     }
 
     if (parsedOperation.data.operation !== "create" || !validBaseVersion.success) {
-      return errorResponse(400, "invalid_record_operation", "El registro solo admite altas nuevas.");
+      return errorResponse(400, "invalid_record_operation", "Los registros y las planillas locales solo admiten altas nuevas.");
     }
-
-    parsedOperation.data.payload = parsedPayload.data;
   }
 
   if (parsedOperation.data.resource === "renditions") {
-    const parsedPayload = renditionDocumentPayloadSchema.safeParse(parsedOperation.data.payload);
+    const parsedPayload = renditionSynchronizationPayloadSchema.safeParse(parsedOperation.data.payload);
     const validBaseVersion = z.null().safeParse(parsedOperation.data.baseVersion);
 
     if (!parsedPayload.success || parsedPayload.data.id !== parsedOperation.data.resourceId) {
-      return errorResponse(400, "invalid_rendition_operation", "Revisá los archivos y la referencia de planilla antes de sincronizar.");
+      return errorResponse(400, "invalid_rendition_operation", "Revisá los archivos o la revisión pendiente antes de sincronizar.");
     }
 
     if (parsedOperation.data.operation !== "create" || !validBaseVersion.success) {
-      return errorResponse(400, "invalid_rendition_operation", "Los documentos de rendición solo admiten cargas nuevas.");
+      return errorResponse(400, "invalid_rendition_operation", "Los cambios de rendición solo admiten nuevas cargas o revisiones.");
     }
 
     parsedOperation.data.payload = parsedPayload.data;
@@ -163,7 +215,14 @@ export async function POST(request: NextRequest) {
     return errorResponse(501, "resource_adapter_unavailable", "La vista todavía no habilitó la sincronización de este tipo de cambio.");
   }
 
-  const capabilityAllowed = await hasEffectiveCapability(session.user.role, capabilityByResource[resource]);
+  let requiredCapability = capabilityByResource[resource];
+  if (resource === "RENDITIONS") {
+    const parsedPayload = renditionSynchronizationPayloadSchema.safeParse(parsedOperation.data.payload);
+    if (parsedPayload.success && parsedPayload.data.kind === "rendition_review") {
+      requiredCapability = "renditions.review";
+    }
+  }
+  const capabilityAllowed = await hasEffectiveCapability(session.user.role, requiredCapability);
 
   if (!capabilityAllowed) {
     return errorResponse(403, "permission_revoked", "La cuenta ya no tiene permiso para sincronizar este cambio.");
@@ -184,12 +243,16 @@ export async function POST(request: NextRequest) {
     const result = await synchronizationService.apply(operation, resource, handler);
     return NextResponse.json(result, { status: 200, headers: privateHeaders });
   } catch (error) {
+    if (error instanceof RecordSynchronizationError) {
+      return errorResponse(error.status, error.code, error.message);
+    }
+
     if (error instanceof MerchandiseDocumentError) {
       return errorResponse(400, "invalid_merchandise_operation", error.message);
     }
 
     if (error instanceof RenditionDocumentError) {
-      return errorResponse(400, "invalid_rendition_operation", error.message);
+      return errorResponse(error.status, "invalid_rendition_operation", error.message);
     }
 
     if (error instanceof SynchronizationConflictError) {

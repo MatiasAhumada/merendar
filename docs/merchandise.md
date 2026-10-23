@@ -9,6 +9,8 @@ El módulo `/mercaderia` persiste los ciclos de solicitudes de módulos alimenta
 - Una solicitud puede tener un único `MerchandiseQuota`. El cupo conserva quién lo aprobó y su fecha; no puede exceder la cantidad solicitada.
 - Un `MerchandiseRemittance` enlaza la solicitud con el cupo correspondiente. Su número es único y la suma de recepciones no puede exceder el cupo aprobado.
 - `MerchandiseDocument` guarda bytes, nombre y tipo permitidos. El comprobante está relacionado con una solicitud o remito y no se sirve desde recursos públicos.
+- Períodos, solicitudes, cupos y remitos admiten correcciones con control de versión optimista. Las anulaciones disponibles son lógicas: no borran períodos, solicitudes, remitos ni documentos. No se anula una solicitud con cupo o remitos, ni un período con movimientos o documentación vinculada; los cupos se corrigen y no se anulan mientras la solicitud conserva una relación única.
+- La cola durable de Mercadería admite altas, correcciones y anulaciones. Cada cambio queda ligado a la cuenta activa y a las operaciones padre; el servidor vuelve a validar permisos, relaciones y límites al sincronizar. Un conflicto concurrente permite reaplicar el cambio sobre la versión actual o descartarlo.
 
 Las operaciones de alta del flujo offline usan identificadores estables. La solicitud depende del período, el cupo depende de la solicitud y el remito depende de ambos. El recibo idempotente de sincronización y la escritura del recurso se confirman en la misma transacción serializable.
 
@@ -16,7 +18,7 @@ Las operaciones de alta del flujo offline usan identificadores estables. La soli
 
 Solo los roles `PRESIDENTE` y `SECRETARIA` pueden consultar o registrar estas entidades. El servidor repite la comprobación de sesión y rol en cada endpoint de lectura, sincronización y descarga.
 
-Los comprobantes aceptados son PDF, JPEG o PNG, con un límite de 512 KiB. El servidor valida el tamaño y la firma de los bytes antes de persistirlos. La descarga usa `/api/merchandise/documents/[id]`, responde con `Cache-Control: private, no-store` y `X-Content-Type-Options: nosniff`.
+Los comprobantes aceptados son archivos PDF aportados desde celular o PC, de hasta 512 KiB por archivo. La interfaz y el servidor validan extensión, MIME, firma `%PDF-` y marcador `%%EOF`; el rechazo mantiene el formulario abierto. La descarga usa `/api/merchandise/documents/[id]`, responde con `Cache-Control: private, no-store` y `X-Content-Type-Options: nosniff`.
 
 Las planillas firmadas, remitos y respaldos de rendición son PDF privados. El flujo se documenta en `docs/delivery.md`; sus límites se centralizan en `src/constants/rendition.constant.ts` y las cargas offline usan operaciones idempotentes de `RENDITIONS`.
 

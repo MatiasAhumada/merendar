@@ -1,4 +1,4 @@
-const CACHE_NAME = "merendar-public-v2";
+const CACHE_NAME = "merendar-public-v3";
 const OFFLINE_URL = "/offline";
 const PUBLIC_ASSETS = [
   OFFLINE_URL,
@@ -36,7 +36,18 @@ self.addEventListener("fetch", (event) => {
   if (event.request.mode === "navigate") {
     event.respondWith(fetch(event.request).catch(async () => {
       const offlinePage = await caches.match(OFFLINE_URL);
-      return offlinePage || Response.error();
+
+      if (!offlinePage) {
+        return Response.error();
+      }
+
+      if (requestUrl.pathname === OFFLINE_URL) {
+        return offlinePage;
+      }
+
+      const offlineUrl = new URL(OFFLINE_URL, self.location.origin);
+      offlineUrl.searchParams.set("route", `${requestUrl.pathname}${requestUrl.search}`);
+      return Response.redirect(offlineUrl, 302);
     }));
     return;
   }

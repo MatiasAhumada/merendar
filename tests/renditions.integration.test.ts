@@ -7,6 +7,7 @@ import { NextRequest } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { GET as getPrivateRenditionDocument } from "@/app/api/renditions/documents/[id]/route";
 import { PATCH as patchRenditionReview } from "@/app/api/renditions/[id]/review/route";
+import { POST as synchronizeOfflineOperation } from "@/app/api/synchronizations/route";
 import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
 import { prisma } from "@/lib/prisma";
 import { RenditionDocumentError, renditionSynchronizationHandler } from "@/server/services/rendition-synchronization.service";
@@ -26,10 +27,10 @@ function createOperation(userId: string, resourceId: string, payload: Record<str
   };
 }
 
-function createRequest(url: string, method: "GET" | "PATCH", token: string, body?: unknown) {
+function createRequest(url: string, method: "GET" | "PATCH" | "POST", token: string, body?: unknown) {
   const headers = new Headers({ host: "localhost:3000", cookie: `${AUTH.SESSION_COOKIE}=${token}` });
 
-  if (method === "PATCH") {
+  if (method !== "GET") {
     headers.set("origin", "http://localhost:3000");
     headers.set("content-type", "application/json");
   }
@@ -137,6 +138,28 @@ test("rendition PDFs persist as private versioned documents and require authoriz
     );
     assert.equal(reviewResponse.status, 200);
     assert.equal(await prisma.rendition.count({ where: { id: savedRendition?.id, reviewStatus: "REVISADA", reviewedById: user.id } }), 1);
+
+    const queuedReviewOperationId = randomUUID();
+    const queuedReview = {
+      operationId: queuedReviewOperationId,
+      userId: user.id,
+      resource: "renditions",
+      resourceId: savedRendition?.id,
+      operation: "create",
+      baseVersion: null,
+      dependencies: [],
+      payload: { kind: "rendition_review", id: savedRendition?.id, status: "OBSERVADA", notes: "Falta corregir el escaneo." },
+    };
+    const queuedReviewResponse = await synchronizeOfflineOperation(
+      createRequest("http://localhost:3000/api/synchronizations", "POST", token, queuedReview),
+    );
+    const replayedReviewResponse = await synchronizeOfflineOperation(
+      createRequest("http://localhost:3000/api/synchronizations", "POST", token, queuedReview),
+    );
+    assert.equal(queuedReviewResponse.status, 200);
+    assert.equal(replayedReviewResponse.status, 200);
+    assert.equal((await replayedReviewResponse.json()).replayed, true);
+    assert.equal(await prisma.rendition.count({ where: { id: savedRendition?.id, reviewStatus: "OBSERVADA", reviewNotes: "Falta corregir el escaneo.", reviewedById: user.id } }), 1);
 
     const invalidOperationId = randomUUID();
     const invalidOperation = createOperation(user.id, invalidOperationId, {

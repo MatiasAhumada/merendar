@@ -34,13 +34,34 @@ export const renditionDocumentPayloadSchema = z.object({
   }
 });
 
-export const renditionReviewPayloadSchema = z.object({
+const renditionReviewFieldsSchema = z.object({
   status: z.enum(["REVISADA", "OBSERVADA"]),
   notes: z.string().trim().max(1000).optional(),
-}).strict().refine((review) => review.status !== "OBSERVADA" || Boolean(review.notes), {
+}).strict();
+
+function hasReviewNotes(review: { status: "REVISADA" | "OBSERVADA"; notes?: string }) {
+  return review.status !== "OBSERVADA" || Boolean(review.notes);
+}
+
+export const renditionReviewPayloadSchema = renditionReviewFieldsSchema.refine(hasReviewNotes, {
   message: "Indicá qué documentación debe corregirse.",
   path: ["notes"],
 });
 
+export const renditionReviewOperationPayloadSchema = z.object({
+  kind: z.literal("rendition_review"),
+  id: z.string().trim().min(1).max(80),
+  ...renditionReviewFieldsSchema.shape,
+}).strict().refine(hasReviewNotes, {
+  message: "Indicá qué documentación debe corregirse.",
+  path: ["notes"],
+});
+
+export const renditionSynchronizationPayloadSchema = z.discriminatedUnion("kind", [
+  renditionDocumentPayloadSchema,
+  renditionReviewOperationPayloadSchema,
+]);
+
 export type RenditionDocumentPayload = z.infer<typeof renditionDocumentPayloadSchema>;
 export type RenditionReviewPayload = z.infer<typeof renditionReviewPayloadSchema>;
+export type RenditionReviewOperationPayload = z.infer<typeof renditionReviewOperationPayloadSchema>;

@@ -1,6 +1,9 @@
 import { OFFLINE_STORAGE, SYNC_MESSAGES, SYNC_ROUTES } from "@/constants/offline.constant";
+import { isOfflineOperationEnabled } from "@/constants/offline-contract.constant";
 import type { JsonValue } from "@/types/json-value";
 import type { OfflineOperation, OfflineOperationInput, SynchronizationResult } from "@/types/offline-operation";
+import axios from "axios";
+import clientAxios from "@/utils/clientAxios.util";
 import { z } from "zod";
 
 const synchronizationResultSchema = z.object({
@@ -103,6 +106,10 @@ export async function enqueueOfflineOperation(
 ): Promise<OfflineOperation> {
   if (!userId || !Number.isFinite(Date.parse(sessionExpiresAt)) || Date.now() >= Date.parse(sessionExpiresAt)) {
     throw new OfflineQueueError(SYNC_MESSAGES.SESSION_EXPIRED);
+  }
+
+  if (!isOfflineOperationEnabled(input.resource, input.operation)) {
+    throw new OfflineQueueError("Esta acción todavía no está habilitada para guardarse offline en este módulo.");
   }
 
   const existingOperations = await listOfflineOperations(userId);
@@ -350,15 +357,11 @@ async function sendOperation(operation: OfflineOperation): Promise<boolean> {
     return false;
   }
 
-  let response: Response;
+  let responseStatus: number;
+  let responseBody: unknown;
 
   try {
-    response = await fetch(SYNC_ROUTES.OPERATIONS, {
-      method: "POST",
-      credentials: "same-origin",
-      cache: "no-store",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const response = await clientAxios.post<unknown>(SYNC_ROUTES.OPERATIONS, {
         operationId: operation.operationId,
         userId: operation.userId,
         resource: operation.resource,
@@ -367,60 +370,62 @@ async function sendOperation(operation: OfflineOperation): Promise<boolean> {
         baseVersion: operation.baseVersion,
         dependencies: operation.dependencies,
         payload: operation.payload,
-      }),
-    });
-  } catch {
-    await markOperationError(operation.userId, operation.operationId, "No se pudo contactar al servidor. El cambio sigue guardado en este dispositivo.");
-    return true;
+      }, {
+        headers: { "Cache-Control": "no-cache" },
+        withCredentials: true,
+        timeout: 30_000,
+        validateStatus: () => true,
+      });
+    responseStatus = response.status;
+    responseBody = response.data;
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response) {
+      responseStatus = error.response.status;
+      responseBody = error.response.data;
+    } else {
+      await markOperationError(operation.userId, operation.operationId, "No se pudo contactar al servidor. El cambio sigue guardado en este dispositivo.");
+      return true;
+    }
   }
 
-  let responseBody: unknown;
+  if (responseStatus < 200 || responseStatus >= 300) {
+    const parsedError = synchronizationErrorSchema.safeParse(responseBody);
 
-  try {
-    responseBody = await response.json();
-  } catch {
-    await markOperationError(operation.userId, operation.operationId, "El servidor devolvió una respuesta que no pudimos interpretar.");
-    return true;
-  }
-
-  if (response.ok) {
-    const parsedResult = synchronizationResultSchema.safeParse(responseBody);
-
-    if (parsedResult.success) {
-      await markOperationSynced(operation.userId, operation.operationId, parsedResult.data);
+    if (responseStatus === 409 && parsedError.success && parsedError.data.error.code === "version_conflict") {
+      const remoteVersion = parsedError.data.error.currentVersion ?? null;
+      const remoteSnapshot = parsedError.data.error.current ?? null;
+      await markOperationConflict(operation.userId, operation.operationId, parsedError.data.error.message, remoteVersion, remoteSnapshot);
       return true;
     }
 
-    await markOperationError(operation.userId, operation.operationId, "El servidor respondió sin confirmar el resultado del cambio.");
+    if (responseStatus === 401) {
+      await markOperationError(operation.userId, operation.operationId, SYNC_MESSAGES.SESSION_EXPIRED);
+      return false;
+    }
+
+    if (responseStatus === 403) {
+      await markOperationError(operation.userId, operation.operationId, SYNC_MESSAGES.PERMISSION_REVOKED);
+      return false;
+    }
+
+    let message = "No se pudo sincronizar este cambio. El borrador permanece guardado.";
+
+    if (parsedError.success) {
+      message = parsedError.data.error.message;
+    }
+
+    await markOperationError(operation.userId, operation.operationId, message);
     return true;
   }
 
-  const parsedError = synchronizationErrorSchema.safeParse(responseBody);
+  const parsedResult = synchronizationResultSchema.safeParse(responseBody);
 
-  if (response.status === 409 && parsedError.success && parsedError.data.error.code === "version_conflict") {
-    const remoteVersion = parsedError.data.error.currentVersion ?? null;
-    const remoteSnapshot = parsedError.data.error.current ?? null;
-    await markOperationConflict(operation.userId, operation.operationId, parsedError.data.error.message, remoteVersion, remoteSnapshot);
+  if (parsedResult.success) {
+    await markOperationSynced(operation.userId, operation.operationId, parsedResult.data);
     return true;
   }
 
-  if (response.status === 401) {
-    await markOperationError(operation.userId, operation.operationId, SYNC_MESSAGES.SESSION_EXPIRED);
-    return false;
-  }
-
-  if (response.status === 403) {
-    await markOperationError(operation.userId, operation.operationId, SYNC_MESSAGES.PERMISSION_REVOKED);
-    return false;
-  }
-
-  let message = "No se pudo sincronizar este cambio. El borrador permanece guardado.";
-
-  if (parsedError.success) {
-    message = parsedError.data.error.message;
-  }
-
-  await markOperationError(operation.userId, operation.operationId, message);
+  await markOperationError(operation.userId, operation.operationId, "El servidor respondió sin confirmar el resultado del cambio.");
   return true;
 }
 
@@ -495,11 +500,7 @@ export async function resolveOfflineConflict(userId: string, operationId: string
   }
 
   if (resolution === "local") {
-    let baseVersion = selectedOperation.remoteVersion;
-
-    if (selectedOperation.resource === "remittances") {
-      baseVersion = null;
-    }
+    const baseVersion = selectedOperation.remoteVersion;
 
     const replacementOperation: OfflineOperation = {
       ...selectedOperation,
