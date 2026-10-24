@@ -20,6 +20,14 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
   Sheet,
   SheetClose,
   SheetContent,
@@ -490,6 +498,7 @@ interface SaveSheetProps {
   onSave: (formData: FormData) => Promise<void>;
   submitLabel: string;
   triggerVariant?: "default" | "secondary" | "outline" | "destructive";
+  presentation?: "dialog" | "sheet";
 }
 
 function SaveSheet({
@@ -500,6 +509,7 @@ function SaveSheet({
   onSave,
   submitLabel,
   triggerVariant = "default",
+  presentation = "sheet",
 }: SaveSheetProps) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -522,14 +532,43 @@ function SaveSheet({
     }
   }
 
+  const trigger = (
+    <Button variant={triggerVariant} className="w-full sm:w-auto">
+      <HugeiconsIcon icon={AddCircleIcon} strokeWidth={1.8} data-icon="inline-start" />
+      {triggerLabel}
+    </Button>
+  );
+  const dialogForm = (
+    <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={(event) => void handleSubmit(event)}>
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 pb-4">
+        <FieldGroup className="gap-4">{children}</FieldGroup>
+        {message ? <Alert variant="destructive"><AlertTitle>No se guardó</AlertTitle><AlertDescription>{message}</AlertDescription></Alert> : null}
+      </div>
+      <div className="flex shrink-0 flex-row justify-end gap-2 border-t px-6 py-4">
+        <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+        <Button type="submit" disabled={saving}>{saving ? "Guardando…" : submitLabel}</Button>
+      </div>
+    </form>
+  );
+
+  if (presentation === "dialog") {
+    return (
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>{trigger}</DialogTrigger>
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-xl flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
+          <DialogHeader className="shrink-0 px-6 pt-6 pb-4 pr-12">
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
+          </DialogHeader>
+          {dialogForm}
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button variant={triggerVariant} className="w-full sm:w-auto">
-          <HugeiconsIcon icon={AddCircleIcon} strokeWidth={1.8} data-icon="inline-start" />
-          {triggerLabel}
-        </Button>
-      </SheetTrigger>
+      <SheetTrigger asChild>{trigger}</SheetTrigger>
       <SheetContent side="bottom" className="mx-auto max-h-[92dvh] max-w-xl overflow-y-auto rounded-t-3xl">
         <SheetHeader className="pr-12">
           <SheetTitle>{title}</SheetTitle>
@@ -783,7 +822,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Badge variant={isOnline ? "success" : "warning"} className="w-fit">{isOnline ? "Conectado" : "Sin conexión"}</Badge>
-          {canWriteMerchandise ? <SaveSheet title="Nuevo período" description="Creá el ciclo del organismo antes de registrar solicitudes." triggerLabel="Nuevo período" onSave={createPeriod} submitLabel="Guardar período">
+          {canWriteMerchandise ? <SaveSheet title="Nuevo período" description="Creá el ciclo del organismo antes de registrar solicitudes." triggerLabel="Nuevo período" onSave={createPeriod} submitLabel="Guardar período" presentation="dialog">
             <Field><FieldLabel htmlFor="period-label">Nombre del período *</FieldLabel><Input id="period-label" name="label" placeholder="Ej. Septiembre 2026" minLength={2} maxLength={80} required /></Field>
             <Field><FieldLabel htmlFor="period-agency">Organismo *</FieldLabel><Input id="period-agency" name="agency" placeholder="Ministerio de Desarrollo Social" minLength={2} maxLength={120} required /></Field>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
