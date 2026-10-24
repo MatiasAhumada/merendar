@@ -199,6 +199,17 @@ export const familyRecordSchema = z.object({
 export const familyCollectionSchema = z.object({ families: z.array(familyRecordSchema) });
 export const familyResponseSchema = z.object({ family: familyRecordSchema });
 
+export const familyDeactivationTargetSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("family") }).strict(),
+  z.object({ kind: z.literal("member"), memberId: z.string().min(1).max(128) }).strict(),
+]);
+
+export const familyDeactivationRequestSchema = z.object({
+  operationId: z.uuid(),
+  baseVersion: z.number().int().nonnegative(),
+  target: familyDeactivationTargetSchema,
+}).strict();
+
 export const createFamilyRequestSchema = z.object({
   ...familyFields,
   contactPhone: newFamilyPhoneField,

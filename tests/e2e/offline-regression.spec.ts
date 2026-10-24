@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from "@playwright/test";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { familyService } from "@/server/services/family.service";
 
 const SESSION_COOKIE = "merendar_session";
 const SESSION_DURATION_MS = 12 * 60 * 60 * 1_000;
@@ -276,6 +277,94 @@ test("recovers a confirmed family after a failed list refresh without duplicatin
   } finally {
     await context.setOffline(false);
     await removeBrowserFamily(familyName);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("confirms family deactivation, preserves sheet history and explains blocked records", async ({ browser, context, page }, testInfo) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const suffix = randomUUID();
+  const familyNames = [`COD1484 con planilla ${suffix}`, `COD1484 sin historial ${suffix}`];
+  const personDni = `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`;
+  let periodId: string | null = null;
+
+  try {
+    const familyWithSheet = await familyService.create({
+      name: familyNames[0] ?? "",
+      neighborhood: "Villa Nueva",
+      address: "Calle de prueba 1484",
+      contactPhone: "381 555 0142",
+      referenceMemberIndex: 0,
+      members: [{ firstName: "Browser", lastName: "Con historial", dni: personDni, relationship: "Referente", missingDocuments: [] }],
+    }, president.userId, randomUUID());
+    const secondFamily = await familyService.create({
+      name: familyNames[1] ?? "",
+      neighborhood: "Villa Nueva",
+      address: "Calle de prueba 1485",
+      contactPhone: "381 555 0142",
+      referenceMemberIndex: 0,
+      members: [{ firstName: "Browser", lastName: "Sin historial", dni: `${Number(personDni) + 1}`, relationship: "Referente", missingDocuments: [] }],
+    }, president.userId, randomUUID());
+    const period = await prisma.merchandisePeriod.create({
+      data: {
+        label: `COD1484 browser ${suffix}`,
+        agency: "Browser test",
+        startsAt: new Date("2026-10-01T00:00:00.000Z"),
+        endsAt: new Date("2026-10-31T00:00:00.000Z"),
+      },
+    });
+    periodId = period.id;
+    const personIdWithSheet = familyWithSheet.members[0]?.id;
+    expect(personIdWithSheet).toBeTruthy();
+    await prisma.beneficiarySheet.create({
+      data: {
+        periodId: period.id,
+        version: 1,
+        createdById: president.userId,
+        snapshot: { beneficiaries: [{ personId: personIdWithSheet }] },
+      },
+    });
+
+    await setBrowserIdentity(context, page, president);
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.goto("/familias");
+    await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyWithSheet.name);
+    await page.getByRole("button", { name: "Ver ficha familiar" }).click();
+    await page.getByRole("button", { name: "Dar de baja familia" }).click();
+    await expect(page.getByRole("heading", { name: "Dar de baja la familia" })).toBeVisible();
+    await expect(page.getByText(/Si hay entregas o planillas históricas/)).toBeVisible();
+    await testInfo.attach("family-deactivation-confirmation.png", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    await page.getByRole("button", { name: "Confirmar baja" }).click();
+    await expect(page.getByText(/aparece en entregas o planillas históricas/).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: familyWithSheet.name })).toBeVisible();
+    expect((await prisma.family.findUniqueOrThrow({ where: { id: familyWithSheet.id }, select: { deactivatedAt: true } })).deactivatedAt).toBeNull();
+    await page.getByRole("button", { name: "Cerrar ficha" }).click();
+
+    await page.getByRole("searchbox", { name: "Buscar familias" }).fill(secondFamily.name);
+    await page.getByRole("button", { name: "Ver ficha familiar" }).click();
+    await page.getByRole("button", { name: "Dar de baja familia" }).click();
+    await page.getByRole("button", { name: "Confirmar baja" }).click();
+    await expect(page.getByText("No hay resultados", { exact: true })).toBeVisible();
+    const deactivatedFamily = await prisma.family.findUniqueOrThrow({ where: { id: secondFamily.id }, select: { deactivatedAt: true, deactivatedById: true } });
+    expect(deactivatedFamily.deactivatedAt).toBeTruthy();
+    expect(deactivatedFamily.deactivatedById).toBe(president.userId);
+    expect(pageErrors).toEqual([]);
+    await testInfo.attach("family-deactivation-complete.png", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    await captureBrowserEvidence(browser, page, testInfo);
+  } finally {
+    await context.setOffline(false);
+    await prisma.distributionRecord.deleteMany({ where: { periodId: periodId ?? "" } });
+    await prisma.beneficiarySheet.deleteMany({ where: { periodId: periodId ?? "" } });
+    await prisma.merchandisePeriod.deleteMany({ where: { id: periodId ?? "" } });
+    await Promise.all(familyNames.map(removeBrowserFamily));
     await removeBrowserIdentity(president);
     await prisma.$disconnect();
   }

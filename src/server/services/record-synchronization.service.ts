@@ -1,5 +1,5 @@
 import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/validations/record.validation";
-import type { Prisma } from "@prisma/client";
+import { Prisma, type Prisma as PrismaTypes } from "@prisma/client";
 import type { SynchronizationHandler } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
 import { z } from "zod";
@@ -14,6 +14,21 @@ export class RecordSynchronizationError extends Error {
     this.code = code;
     this.status = status;
   }
+}
+
+export async function lockFamilyRows(transaction: PrismaTypes.TransactionClient, familyIds: string[]) {
+  const orderedFamilyIds = [...new Set(familyIds)].sort();
+
+  if (!orderedFamilyIds.length) {
+    return;
+  }
+
+  await transaction.$queryRaw(Prisma.sql`
+    SELECT "id" FROM "Family"
+    WHERE "id" IN (${Prisma.join(orderedFamilyIds)})
+    ORDER BY "id"
+    FOR UPDATE
+  `);
 }
 
 export const recordSynchronizationHandler: SynchronizationHandler = {
@@ -34,8 +49,13 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
       }
 
       const personIds = draft.beneficiaries.map((beneficiary) => beneficiary.personId);
-      const memberships = await transaction.familyMember.findMany({
+      const existingMemberships = await transaction.familyMember.findMany({
         where: { personId: { in: personIds } },
+        select: { familyId: true },
+      });
+      await lockFamilyRows(transaction, existingMemberships.map((membership) => membership.familyId));
+      const memberships = await transaction.familyMember.findMany({
+        where: { personId: { in: personIds }, deactivatedAt: null, family: { deactivatedAt: null } },
         select: { personId: true, person: { select: { dni: true } } },
       });
 
@@ -79,8 +99,9 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
 
     const input = parsedPayload.data;
     const period = await transaction.merchandisePeriod.findUnique({ where: { id: input.periodId }, select: { id: true } });
+    await lockFamilyRows(transaction, [input.familyId]);
     const membership = await transaction.familyMember.findFirst({
-      where: { familyId: input.familyId, personId: input.personId },
+      where: { familyId: input.familyId, personId: input.personId, deactivatedAt: null, family: { deactivatedAt: null } },
       include: { person: { select: { firstName: true, lastName: true, dni: true } }, family: { select: { name: true, address: true } } },
     });
 

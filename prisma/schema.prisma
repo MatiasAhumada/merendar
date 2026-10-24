@@ -16,6 +16,8 @@ model User {
   isActive     Boolean       @default(true)
   sessions     AuthSession[]
   createdFamilies Family[]
+  deactivatedFamilies Family[] @relation("FamilyDeactivator")
+  deactivatedFamilyMembers FamilyMember[] @relation("FamilyMemberDeactivator")
   familyOperations FamilyOperation[]
   merchandiseRequests MerchandiseRequest[] @relation("MerchandiseRequestCreator")
   approvedMerchandiseQuotas MerchandiseQuota[] @relation("MerchandiseQuotaApprover")
@@ -47,6 +49,9 @@ model Family {
   operations         FamilyOperation[]
   referencePerson    Person?        @relation("FamilyReference", fields: [referencePersonId], references: [id], onDelete: SetNull)
   createdBy          User           @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  deactivatedBy      User?          @relation("FamilyDeactivator", fields: [deactivatedById], references: [id], onDelete: Restrict)
   version            Int            @default(1)
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
@@ -77,6 +82,9 @@ model FamilyMember {
   relationship       String
   family             Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
   person             Person            @relation(fields: [personId], references: [id], onDelete: Restrict)
+  deactivatedAt      DateTime?
+  deactivatedById    String?
+  deactivatedBy      User?             @relation("FamilyMemberDeactivator", fields: [deactivatedById], references: [id], onDelete: Restrict)
   missingDocuments   MissingDocument[]
   distributionRecords DistributionRecord[]
   createdAt          DateTime          @default(now())
@@ -102,12 +110,19 @@ model FamilyOperation {
   actorId     String
   familyId    String
   requestHash String
+  action      FamilyOperationAction @default(LEGACY)
   actor       User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
   family      Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
 
   @@index([actorId, createdAt])
   @@index([familyId])
+}
+
+enum FamilyOperationAction {
+  LEGACY
+  FAMILY_DEACTIVATED
+  MEMBER_DEACTIVATED
 }
 
 enum FamilyDocumentType {

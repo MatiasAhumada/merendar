@@ -11,7 +11,7 @@ test("offline write contract enables family and merchandise maintenance operatio
   for (const resource of resources) {
     assert.equal(isOfflineOperationEnabled(resource, "create"), true);
     assert.equal(isOfflineOperationEnabled(resource, "update"), resource === "families" || resource === "remittances");
-    assert.equal(isOfflineOperationEnabled(resource, "delete"), resource === "remittances");
+    assert.equal(isOfflineOperationEnabled(resource, "delete"), resource === "families" || resource === "remittances");
   }
 });
 

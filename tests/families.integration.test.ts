@@ -7,9 +7,9 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { GET, POST } from "@/app/api/families/route";
-import { PATCH } from "@/app/api/families/[id]/route";
+import { DELETE as deactivateFamily, PATCH } from "@/app/api/families/[id]/route";
 import { POST as addFamilyMember } from "@/app/api/families/[id]/members/route";
-import { PATCH as updateFamilyMember } from "@/app/api/families/[id]/members/[memberId]/route";
+import { DELETE as deactivateFamilyMember, PATCH as updateFamilyMember } from "@/app/api/families/[id]/members/[memberId]/route";
 import { POST as synchronizeOperation } from "@/app/api/synchronizations/route";
 import { familyCollectionSchema, familyResponseSchema } from "@/validations/family.validation";
 
@@ -41,7 +41,8 @@ test("family registry persists records, rejects duplicate identities and enforce
   const suffix = randomBytes(10).toString("hex");
   const userIds: string[] = [];
   const sessionTokens: string[] = [];
-  const dnis = Array.from({ length: 7 }, () => `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`);
+  const periodIds: string[] = [];
+  const dnis = Array.from({ length: 11 }, () => `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`);
   const users = await Promise.all([
     prisma.user.create({ data: { email: `family-president-${suffix}@example.test`, username: `family-president-${suffix}`, name: "Family Test President", role: UserRole.PRESIDENTE } }),
     prisma.user.create({ data: { email: `family-secretary-${suffix}@example.test`, username: `family-secretary-${suffix}`, name: "Family Test Secretary", role: UserRole.SECRETARIA } }),
@@ -96,6 +97,15 @@ test("family registry persists records, rejects duplicate identities and enforce
     assert.equal(createdFamily.members.some((member) => member.dni === dnis[0]), true);
     assert.equal(createdFamily.members.some((member) => member.relationship === "Referente"), true);
     assert.equal(createdFamily.members.some((member) => member.missingDocuments.some((document) => document.documentType === "DNI")), true);
+
+    const anonymousFamilyDeactivation = await deactivateFamily(createRequest(`http://localhost:3000/api/families/${createdFamily.id}`, "DELETE", "", {
+      operationId: randomUUID(), baseVersion: createdFamily.version, target: { kind: "family" },
+    }), { params: Promise.resolve({ id: createdFamily.id }) });
+    assert.equal(anonymousFamilyDeactivation.status, 401);
+    const unauthorizedMemberDeactivation = await deactivateFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members/${createdFamily.members[1]?.membershipId}`, "DELETE", treasurerToken, {
+      operationId: randomUUID(), baseVersion: createdFamily.version, target: { kind: "member", memberId: createdFamily.members[1]?.membershipId },
+    }), { params: Promise.resolve({ id: createdFamily.id, memberId: createdFamily.members[1]?.membershipId ?? "" }) });
+    assert.equal(unauthorizedMemberDeactivation.status, 403);
 
     const retriedResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, familyInput));
     const parsedRetry = familyResponseSchema.safeParse(await retriedResponse.json());
@@ -280,6 +290,135 @@ test("family registry persists records, rejects duplicate identities and enforce
     assert.equal(parsedUpdatedFamily.data.family.referencePersonId, createdFamily.members[0]?.id);
     assert.equal(parsedUpdatedFamily.data.family.members.find((member) => member.membershipId === addedMemberId)?.firstName, "Sol corregida");
 
+    const referencedMemberDeactivation = await deactivateFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members/${createdFamily.members[0]?.membershipId}`, "DELETE", presidentToken, {
+      operationId: randomUUID(), baseVersion: parsedUpdatedFamily.data.family.version,
+      target: { kind: "member", memberId: createdFamily.members[0]?.membershipId },
+    }), { params: Promise.resolve({ id: createdFamily.id, memberId: createdFamily.members[0]?.membershipId ?? "" }) });
+    assert.equal(referencedMemberDeactivation.status, 409);
+
+    const eligibleMember = createdFamily.members[1];
+    assert.ok(eligibleMember);
+    const deactivationOperationId = randomUUID();
+    const memberDeactivation = await deactivateFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members/${eligibleMember.membershipId}`, "DELETE", presidentToken, {
+      operationId: deactivationOperationId,
+      baseVersion: parsedUpdatedFamily.data.family.version,
+      target: { kind: "member", memberId: eligibleMember.membershipId },
+    }), { params: Promise.resolve({ id: createdFamily.id, memberId: eligibleMember.membershipId }) });
+    assert.equal(memberDeactivation.status, 200);
+    const deactivatedMember = await prisma.familyMember.findUniqueOrThrow({ where: { id: eligibleMember.membershipId }, select: { deactivatedAt: true, deactivatedById: true, personId: true } });
+    assert.ok(deactivatedMember.deactivatedAt);
+    assert.equal(deactivatedMember.deactivatedById, users[0].id);
+    assert.equal(await prisma.person.count({ where: { id: deactivatedMember.personId } }), 1);
+    const replayedMemberDeactivation = await deactivateFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members/${eligibleMember.membershipId}`, "DELETE", presidentToken, {
+      operationId: deactivationOperationId,
+      baseVersion: parsedUpdatedFamily.data.family.version,
+      target: { kind: "member", memberId: eligibleMember.membershipId },
+    }), { params: Promise.resolve({ id: createdFamily.id, memberId: eligibleMember.membershipId }) });
+    assert.equal(replayedMemberDeactivation.status, 200);
+    assert.equal(await prisma.familyOperation.count({ where: { operationId: deactivationOperationId } }), 1);
+
+    const singleMemberFamily = await prisma.family.findFirstOrThrow({
+      where: { name: `Email Contact ${suffix}` },
+      include: { members: true },
+    });
+    const lastMember = singleMemberFamily.members[0];
+    assert.ok(lastMember);
+    const lastMemberDeactivation = await deactivateFamilyMember(createRequest(`http://localhost:3000/api/families/${singleMemberFamily.id}/members/${lastMember.id}`, "DELETE", presidentToken, {
+      operationId: randomUUID(), baseVersion: singleMemberFamily.version, target: { kind: "member", memberId: lastMember.id },
+    }), { params: Promise.resolve({ id: singleMemberFamily.id, memberId: lastMember.id }) });
+    assert.equal(lastMemberDeactivation.status, 409);
+
+    const sheetFamilyInput = {
+      operationId: randomUUID(),
+      name: `Sheet Family ${suffix}`,
+      neighborhood: "Villa Nueva",
+      address: "Calle de planilla 15",
+      contactPhone: "381 555 0142",
+      referenceMemberIndex: 0,
+      members: [
+        { firstName: "Planilla", lastName: "Referente", dni: dnis[5], relationship: "Referente", missingDocuments: [] },
+        { firstName: "Planilla", lastName: "Integrante", dni: dnis[8], relationship: "Hija o hijo", missingDocuments: [] },
+      ],
+    };
+    const sheetFamilyResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, sheetFamilyInput));
+    assert.equal(sheetFamilyResponse.status, 201);
+    const sheetFamilyBody = familyResponseSchema.safeParse(await sheetFamilyResponse.json());
+    assert.equal(sheetFamilyBody.success, true);
+    if (!sheetFamilyBody.success) {
+      assert.fail("No se pudo preparar la familia vinculada a una planilla histórica");
+    }
+
+    const sheetPersonId = sheetFamilyBody.data.family.members[1]?.id;
+    assert.ok(sheetPersonId);
+    const testPeriod = await prisma.merchandisePeriod.create({
+      data: { label: `Family deactivation ${suffix}`, agency: "Test agency", startsAt: new Date("2026-10-01T00:00:00.000Z"), endsAt: new Date("2026-10-31T00:00:00.000Z") },
+    });
+    periodIds.push(testPeriod.id);
+    await prisma.beneficiarySheet.create({
+      data: {
+        periodId: testPeriod.id,
+        version: 1,
+        createdById: users[0].id,
+        snapshot: { beneficiaries: [{ personId: sheetPersonId }] },
+      },
+    });
+    const sheetLinkedMember = sheetFamilyBody.data.family.members[1];
+    assert.ok(sheetLinkedMember);
+    const sheetLinkedMemberDeactivation = await deactivateFamilyMember(createRequest(`http://localhost:3000/api/families/${sheetFamilyBody.data.family.id}/members/${sheetLinkedMember.membershipId}`, "DELETE", presidentToken, {
+      operationId: randomUUID(), baseVersion: sheetFamilyBody.data.family.version,
+      target: { kind: "member", memberId: sheetLinkedMember.membershipId },
+    }), { params: Promise.resolve({ id: sheetFamilyBody.data.family.id, memberId: sheetLinkedMember.membershipId }) });
+    assert.equal(sheetLinkedMemberDeactivation.status, 409);
+    const sheetLinkedFamilyDeactivation = await deactivateFamily(createRequest(`http://localhost:3000/api/families/${sheetFamilyBody.data.family.id}`, "DELETE", presidentToken, {
+      operationId: randomUUID(), baseVersion: sheetFamilyBody.data.family.version, target: { kind: "family" },
+    }), { params: Promise.resolve({ id: sheetFamilyBody.data.family.id }) });
+    assert.equal(sheetLinkedFamilyDeactivation.status, 409);
+
+    const raceFamilyResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, {
+      operationId: randomUUID(), name: `Race Family ${suffix}`, neighborhood: "Villa Nueva", address: "Calle concurrente 7",
+      contactPhone: "381 555 0142", referenceMemberIndex: 0,
+      members: [
+        { firstName: "Concurrente", lastName: "Referente", dni: dnis[9], relationship: "Referente", missingDocuments: [] },
+        { firstName: "Concurrente", lastName: "Integrante", dni: dnis[10], relationship: "Hija o hijo", missingDocuments: [] },
+      ],
+    }));
+    const raceFamilyBody = familyResponseSchema.safeParse(await raceFamilyResponse.json());
+    assert.equal(raceFamilyResponse.status, 201);
+    assert.equal(raceFamilyBody.success, true);
+    if (!raceFamilyBody.success) {
+      assert.fail("No se pudo preparar la familia para la prueba de concurrencia");
+    }
+
+    const racePersonId = raceFamilyBody.data.family.members[1]?.id;
+    assert.ok(racePersonId);
+    const [racingSheetResponse, racingDeactivationResponse] = await Promise.all([
+      POST(createRequest("http://localhost:3000/api/records/sheets", "POST", presidentToken, { periodId: testPeriod.id, personIds: [racePersonId] })),
+      deactivateFamily(createRequest(`http://localhost:3000/api/families/${raceFamilyBody.data.family.id}`, "DELETE", presidentToken, {
+        operationId: randomUUID(), baseVersion: raceFamilyBody.data.family.version, target: { kind: "family" },
+      }), { params: Promise.resolve({ id: raceFamilyBody.data.family.id }) }),
+    ]);
+    assert.ok([201, 400, 409].includes(racingSheetResponse.status));
+    assert.ok([200, 409].includes(racingDeactivationResponse.status));
+    assert.equal(racingSheetResponse.status === 201 && racingDeactivationResponse.status === 200, false);
+
+    const eligibleFamily = await prisma.family.findFirstOrThrow({ where: { name: `Phone Contact ${suffix}` }, include: { members: true } });
+    const eligibleFamilyPersonId = eligibleFamily.members[0]?.personId;
+    assert.ok(eligibleFamilyPersonId);
+    const familyDeactivationOperationId = randomUUID();
+    const familyDeactivation = await deactivateFamily(createRequest(`http://localhost:3000/api/families/${eligibleFamily.id}`, "DELETE", secretaryToken, {
+      operationId: familyDeactivationOperationId, baseVersion: eligibleFamily.version, target: { kind: "family" },
+    }), { params: Promise.resolve({ id: eligibleFamily.id }) });
+    assert.equal(familyDeactivation.status, 200);
+    assert.ok((await prisma.family.findUniqueOrThrow({ where: { id: eligibleFamily.id }, select: { deactivatedAt: true } })).deactivatedAt);
+    assert.ok((await prisma.familyMember.findMany({ where: { familyId: eligibleFamily.id } })).every((member) => member.deactivatedAt));
+    assert.equal(await prisma.person.count({ where: { id: eligibleFamilyPersonId } }), 1);
+    const hiddenFamilyList = await GET(createRequest(`http://localhost:3000/api/families?search=${encodeURIComponent(eligibleFamily.name)}`, "GET", presidentToken));
+    const hiddenFamilyBody = familyCollectionSchema.safeParse(await hiddenFamilyList.json());
+    assert.equal(hiddenFamilyBody.success, true);
+    if (hiddenFamilyBody.success) {
+      assert.equal(hiddenFamilyBody.data.families.length, 0);
+    }
+
     const crossOriginResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, familyInput, "https://untrusted.invalid"));
     assert.equal(crossOriginResponse.status, 403);
 
@@ -361,12 +500,12 @@ test("family registry persists records, rejects duplicate identities and enforce
         action: "add-member",
         memberId: offlineMemberId,
         personId: offlinePersonId,
-        member: { firstName: "Operación", lastName: "Dependiente", dni: dnis[5], relationship: "Hija o hijo", missingDocuments: ["DNI"] },
+        member: { firstName: "Operación", lastName: "Dependiente", dni: dnis[7], relationship: "Hija o hijo", missingDocuments: ["DNI"] },
         referencePersonId: offlinePersonId,
       },
     };
     const offlineMemberResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineMemberOperation));
-    assert.equal(offlineMemberResponse.status, 200);
+    assert.equal(offlineMemberResponse.status, 200, await offlineMemberResponse.clone().text());
     const parsedOfflineMemberResponse = synchronizationResponseSchema.safeParse(await offlineMemberResponse.json());
     assert.equal(parsedOfflineMemberResponse.success, true);
 
@@ -420,7 +559,34 @@ test("family registry persists records, rejects duplicate identities and enforce
       resourceId: randomUUID(),
     }));
     assert.equal(forbiddenSync.status, 403);
+
+    const offlineFamily = await prisma.family.findUniqueOrThrow({ where: { id: offlineFamilyId }, select: { version: true } });
+    const offlineDeactivation = {
+      operationId: randomUUID(),
+      userId: users[0].id,
+      resource: "families",
+      resourceId: offlineFamilyId,
+      operation: "delete",
+      baseVersion: offlineFamily.version,
+      dependencies: [],
+      payload: { kind: "family" },
+    };
+    const offlineDeactivationResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineDeactivation));
+    assert.equal(offlineDeactivationResponse.status, 200);
+    const parsedOfflineDeactivation = synchronizationResponseSchema.safeParse(await offlineDeactivationResponse.json());
+    assert.equal(parsedOfflineDeactivation.success, true);
+    const replayedOfflineDeactivation = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineDeactivation));
+    const parsedOfflineDeactivationReplay = synchronizationResponseSchema.safeParse(await replayedOfflineDeactivation.json());
+    assert.equal(replayedOfflineDeactivation.status, 200);
+    assert.equal(parsedOfflineDeactivationReplay.success, true);
+    if (parsedOfflineDeactivationReplay.success) {
+      assert.equal(parsedOfflineDeactivationReplay.data.replayed, true);
+    }
+    assert.ok((await prisma.family.findUniqueOrThrow({ where: { id: offlineFamilyId }, select: { deactivatedAt: true } })).deactivatedAt);
   } finally {
+    await prisma.distributionRecord.deleteMany({ where: { periodId: { in: periodIds } } });
+    await prisma.beneficiarySheet.deleteMany({ where: { periodId: { in: periodIds } } });
+    await prisma.merchandisePeriod.deleteMany({ where: { id: { in: periodIds } } });
     const familyRecords = await prisma.family.findMany({ where: { createdById: { in: userIds } }, select: { members: { select: { personId: true } } } });
     const personIds = [...new Set(familyRecords.flatMap((family) => family.members.map((member) => member.personId)))];
     await prisma.family.deleteMany({ where: { createdById: { in: userIds } } });
