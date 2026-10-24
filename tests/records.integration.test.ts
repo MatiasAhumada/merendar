@@ -137,8 +137,12 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     assert.equal(downloadResponse.status, 200);
     assert.equal(downloadResponse.headers.get("content-type"), "application/pdf");
     assert.equal(downloadResponse.headers.get("cache-control"), "private, no-store, max-age=0");
-    const pdf = await PDFDocument.load(await downloadResponse.arrayBuffer());
+    const downloadBytes = Buffer.from(await downloadResponse.arrayBuffer());
+    const pdf = await PDFDocument.load(downloadBytes);
     assert.equal(pdf.getPageCount(), 1);
+    const pdfStructure = downloadBytes.toString("latin1");
+    assert.match(pdfStructure, /\/Subtype\s*\/Image/);
+    assert.match(pdfStructure, /\/SMask\s+\d+\s+\d+\s+R/);
 
     const secondIssue = await issueSheet(createRequest("http://localhost:3000/api/records/sheets", "POST", token, { periodId, personIds: [personId] }));
     const secondResult = await secondIssue.json() as { sheet: { id: string; version: number } };

@@ -65,12 +65,15 @@ export async function createBeneficiarySheetPdf(rawSnapshot: unknown) {
   pdf.registerFontkit(fontkit);
   const regularFont = await pdf.embedFont(await readFile(path.join(process.cwd(), "src/server/assets/DejaVuSans.ttf")), { subset: true });
   const boldFont = await pdf.embedFont(await readFile(path.join(process.cwd(), "src/server/assets/DejaVuSans-Bold.ttf")), { subset: true });
+  const institutionLogo = await pdf.embedPng(await readFile(path.join(process.cwd(), "public/brand/ministerio-desarrollo-social-tucuman.png")));
   const ink = rgb(0.22, 0.15, 0.1);
   const muted = rgb(0.42, 0.36, 0.31);
   const accent = rgb(0.79, 0.39, 0.04);
   const pageWidth = 595.28;
   const pageHeight = 841.89;
   const margin = 38;
+  const institutionLogoSize = institutionLogo.scaleToFit(pageWidth - margin * 2, 80);
+  const printablePageHeight = 560;
   const printRows = snapshot.beneficiaries.map((beneficiary, index) => {
     const nameLines = wrapText(beneficiary.name, 30);
     const familyLines = wrapText(beneficiary.familyName, 16);
@@ -83,7 +86,7 @@ export async function createBeneficiarySheetPdf(rawSnapshot: unknown) {
   let pageContentHeight = 0;
 
   for (const row of printRows) {
-    if (pageContentHeight && pageContentHeight + row.height > 650) {
+    if (pageContentHeight && pageContentHeight + row.height > printablePageHeight) {
       printablePages.push([]);
       pageContentHeight = 0;
     }
@@ -97,10 +100,15 @@ export async function createBeneficiarySheetPdf(rawSnapshot: unknown) {
   for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
     const page = pdf.addPage([pageWidth, pageHeight]);
     const { label, agency } = snapshot.period;
-    page.drawText("MERENDAR · PLANILLA DE BENEFICIARIOS", { x: margin, y: pageHeight - 44, size: 13, font: boldFont, color: accent });
-    page.drawText(`${label} · ${agency} · ${snapshot.period.startsAt} al ${snapshot.period.endsAt}`, { x: margin, y: pageHeight - 64, size: 9, font: regularFont, color: ink });
-    page.drawText(`Versión ${snapshot.version} · Hoja ${pageIndex + 1} de ${pageCount}`, { x: margin, y: pageHeight - 80, size: 8, font: regularFont, color: muted });
-    let y = pageHeight - 108;
+    const institutionLogoY = pageHeight - margin - institutionLogoSize.height;
+    page.drawImage(institutionLogo, { x: margin, y: institutionLogoY, width: institutionLogoSize.width, height: institutionLogoSize.height });
+    let y = institutionLogoY - 18;
+    page.drawText("MERENDAR · PLANILLA DE BENEFICIARIOS", { x: margin, y, size: 13, font: boldFont, color: accent });
+    y -= 20;
+    page.drawText(`${label} · ${agency} · ${snapshot.period.startsAt} al ${snapshot.period.endsAt}`, { x: margin, y, size: 9, font: regularFont, color: ink });
+    y -= 16;
+    page.drawText(`Versión ${snapshot.version} · Hoja ${pageIndex + 1} de ${pageCount}`, { x: margin, y, size: 8, font: regularFont, color: muted });
+    y -= 16;
     page.drawLine({ start: { x: margin, y }, end: { x: pageWidth - margin, y }, thickness: 0.8, color: accent });
     y -= 20;
     const columns = [margin, 54, 196, 275, 384];
