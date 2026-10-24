@@ -1,60 +1,10 @@
 import "dotenv/config";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
-import assert from "node:assert/strict";
-import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from "@playwright/test";
+import { randomBytes, randomUUID } from "node:crypto";
+import { expect, test, type Browser, type Page, type TestInfo } from "@playwright/test";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { familyService } from "@/server/services/family.service";
-
-const SESSION_COOKIE = "merendar_session";
-const SESSION_DURATION_MS = 12 * 60 * 60 * 1_000;
-const BASE_URL = process.env.BASE_URL ?? "http://127.0.0.1:3022";
-
-interface BrowserIdentity {
-  userId: string;
-  sessionToken: string;
-}
-
-async function createBrowserIdentity(role: UserRole): Promise<BrowserIdentity> {
-  assert.equal(process.env.ALLOW_BROWSER_TESTS, "true", "Definí ALLOW_BROWSER_TESTS=true para crear usuarios browser descartables.");
-  const configuredDatabaseUrl = process.env.DATABASE_URL;
-  assert.ok(configuredDatabaseUrl, "DATABASE_URL es obligatoria para las pruebas de navegador.");
-  const databaseUrl = new URL(configuredDatabaseUrl);
-  assert.ok(["localhost", "127.0.0.1", "::1"].includes(databaseUrl.hostname), "Las pruebas browser requieren PostgreSQL local.");
-  assert.match(databaseUrl.pathname.toLowerCase(), /(dev|test|local)/, "Las pruebas browser solo usan una base dev, test o local.");
-
-  const suffix = randomUUID();
-  const sessionToken = randomBytes(32).toString("hex");
-  const tokenHash = createHash("sha256").update(sessionToken).digest("hex");
-  const user = await prisma.user.create({
-    data: {
-      email: `browser-${suffix}@example.test`,
-      username: `browser-${suffix}`,
-      name: `Browser ${role}`,
-      role,
-      isActive: true,
-    },
-  });
-
-  try {
-    await prisma.authSession.create({
-      data: {
-        userId: user.id,
-        tokenHash,
-        expiresAt: new Date(Date.now() + SESSION_DURATION_MS),
-      },
-    });
-  } catch (error) {
-    await prisma.user.delete({ where: { id: user.id } });
-    throw error;
-  }
-
-  return { userId: user.id, sessionToken };
-}
-
-async function removeBrowserIdentity(identity: BrowserIdentity) {
-  await prisma.user.deleteMany({ where: { id: identity.userId } });
-}
+import { createBrowserIdentity, removeBrowserIdentity, setBrowserIdentity, type BrowserIdentity } from "./browser-identity";
 
 async function removeBrowserFamily(name: string) {
   const family = await prisma.family.findFirst({ where: { name }, select: { id: true, members: { select: { personId: true } } } });
@@ -70,16 +20,6 @@ async function removeBrowserFamily(name: string) {
       referencedBy: { none: {} },
     },
   });
-}
-
-async function setBrowserIdentity(context: BrowserContext, page: Page, identity: BrowserIdentity) {
-  await context.addCookies([{
-    name: SESSION_COOKIE,
-    value: identity.sessionToken,
-    url: BASE_URL,
-    httpOnly: true,
-    sameSite: "Lax",
-  }]);
 }
 
 async function captureBrowserEvidence(browser: Browser, page: Page, testInfo: TestInfo) {
@@ -111,7 +51,7 @@ test("renders the role access matrix for every account type", async ({ browser, 
     for (const access of roles) {
       const identity = await createBrowserIdentity(access.role);
       identities.push(identity);
-      await setBrowserIdentity(context, page, identity);
+      await setBrowserIdentity(context, identity);
       await page.goto("/");
       await expect(page.getByRole("heading", { name: `Hola, Browser ${access.role}` })).toBeVisible();
 
@@ -140,7 +80,7 @@ test("prepares private views, keeps them available after network loss, and isola
   let secretary: BrowserIdentity | undefined;
 
   try {
-    await setBrowserIdentity(context, page, president);
+    await setBrowserIdentity(context, president);
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
@@ -184,7 +124,7 @@ test("prepares private views, keeps them available after network loss, and isola
 
     secretary = await createBrowserIdentity(UserRole.TESORERIA);
     await context.setOffline(false);
-    await setBrowserIdentity(context, page, secretary);
+    await setBrowserIdentity(context, secretary);
     await page.goto("/");
     await expect(page.getByRole("heading", { name: `Hola, Browser ${UserRole.TESORERIA}` })).toBeVisible();
     await page.waitForFunction(async (expectedUserId) => {
@@ -229,7 +169,7 @@ test("recovers a confirmed family after a failed list refresh without duplicatin
   let failedFamilyRefreshes = 0;
 
   try {
-    await setBrowserIdentity(context, page, president);
+    await setBrowserIdentity(context, president);
     await page.route("**/*", async (route) => {
       const requestUrl = new URL(route.request().url());
 
@@ -326,7 +266,7 @@ test("confirms family deactivation, preserves sheet history and explains blocked
       },
     });
 
-    await setBrowserIdentity(context, page, president);
+    await setBrowserIdentity(context, president);
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.goto("/familias");
@@ -376,7 +316,7 @@ test("reports a family as pending when the server has not confirmed synchronizat
   let failNextSynchronization = false;
 
   try {
-    await setBrowserIdentity(context, page, president);
+    await setBrowserIdentity(context, president);
     await page.route("**/api/synchronizations", async (route) => {
       if (failNextSynchronization && route.request().method() === "POST") {
         failNextSynchronization = false;
@@ -419,7 +359,7 @@ test("creates a family and adds a member offline, then syncs the dependency chai
   const familyName = `Browser Offline ${randomUUID()}`;
 
   try {
-    await setBrowserIdentity(context, page, president);
+    await setBrowserIdentity(context, president);
     await page.goto("/");
     await page.getByRole("button", { name: "Preparar offline" }).click();
     await expect(page.getByText(/Vistas preparadas el/)).toBeVisible({ timeout: 30_000 });
