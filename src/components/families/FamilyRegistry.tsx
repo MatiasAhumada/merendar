@@ -42,7 +42,7 @@ import type { JsonObject } from "@/types/json-value";
 import type { FamilyMemberChangeInput, FamilyPersonInput } from "@/types/family";
 import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import type { OfflineOperation } from "@/types/offline-operation";
-import { familyCollectionSchema, familyMemberChangeSchema, familyMemberInputSchema, familyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
+import { familyCollectionSchema, familyMemberChangeSchema, familyMemberInputSchema, familyPayloadSchema, newFamilyMemberChangeSchema, newFamilyMemberInputSchema, newFamilyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
 import { z } from "zod";
 import clientAxios from "@/utils/clientAxios.util";
 
@@ -295,7 +295,7 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
     event.preventDefault();
     setFieldErrors({});
     setFormMessage("");
-    const parsedMember = familyMemberInputSchema.safeParse({
+    const memberInput = {
       firstName,
       lastName,
       dni: dni || undefined,
@@ -303,7 +303,10 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
       phone: phone || undefined,
       relationship,
       missingDocuments,
-    });
+    };
+    const parsedMember = member
+      ? familyMemberInputSchema.safeParse(memberInput)
+      : newFamilyMemberInputSchema.safeParse(memberInput);
 
     if (!parsedMember.success) {
       const errors: Record<string, string[]> = {};
@@ -343,7 +346,7 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
             <div className="grid gap-3 sm:grid-cols-2">
               <Field><FieldLabel htmlFor="family-member-first-name">Nombre *</FieldLabel><Input id="family-member-first-name" value={firstName} onChange={(event) => setFirstName(event.target.value)} required aria-invalid={Boolean(fieldErrors.firstName?.length)} />{fieldErrors.firstName?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
               <Field><FieldLabel htmlFor="family-member-last-name">Apellido *</FieldLabel><Input id="family-member-last-name" value={lastName} onChange={(event) => setLastName(event.target.value)} required aria-invalid={Boolean(fieldErrors.lastName?.length)} />{fieldErrors.lastName?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-              <Field><FieldLabel htmlFor="family-member-dni">DNI</FieldLabel><Input id="family-member-dni" inputMode="numeric" value={dni} onChange={(event) => setDni(event.target.value.replace(/\D/g, "").slice(0, 8))} aria-invalid={Boolean(fieldErrors.dni?.length)} /><FieldDescription>Ingresá 7 u 8 números. Si no tiene, dejalo vacío.</FieldDescription>{fieldErrors.dni?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+              <Field><FieldLabel htmlFor="family-member-dni">DNI{member ? "" : " *"}</FieldLabel><Input id="family-member-dni" inputMode="numeric" value={dni} onChange={(event) => setDni(event.target.value.replace(/\D/g, "").slice(0, 8))} aria-invalid={Boolean(fieldErrors.dni?.length)} aria-required={!member} /><FieldDescription>{member ? "Los registros existentes sin DNI pueden seguir consultándose; completalo cuando esté disponible." : "Ingresá los 7 u 8 números del DNI."}</FieldDescription>{fieldErrors.dni?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
               <Field><FieldLabel htmlFor="family-member-phone">Teléfono</FieldLabel><Input id="family-member-phone" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} /></Field>
               <Field><FieldLabel htmlFor="family-member-email">Email</FieldLabel><Input id="family-member-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(fieldErrors.email?.length)} />{fieldErrors.email?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
               <Field><FieldLabel htmlFor="family-member-relationship">Vínculo *</FieldLabel><Select value={relationship} onValueChange={setRelationship}><SelectTrigger id="family-member-relationship" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{FAMILY_MEMBER_RELATIONSHIPS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent></Select></Field>
@@ -607,7 +610,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
         membershipId: member.membershipId,
         firstName: member.firstName,
         lastName: member.lastName,
-        dni: member.dni || undefined,
+        dni: member.dni || (editingOperation ? undefined : ""),
         email: member.email || undefined,
         phone: member.phone || undefined,
         relationship: member.relationship,
@@ -615,7 +618,9 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       })),
     };
 
-    const parsedPayload = familyPayloadSchema.safeParse(payload);
+    const parsedPayload = editingOperation
+      ? familyPayloadSchema.safeParse(payload)
+      : newFamilyPayloadSchema.safeParse(payload);
 
     if (!parsedPayload.success) {
       const errors: Record<string, string[]> = {};
@@ -692,7 +697,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       change = { action: "add-member", memberId, personId, member: values, referencePersonId };
     }
 
-    const parsedChange = familyMemberChangeSchema.safeParse(change);
+    const parsedChange = newFamilyMemberChangeSchema.safeParse(change);
 
     if (!parsedChange.success) {
       return "Revisá los datos del integrante antes de guardar.";
@@ -826,8 +831,9 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
                   <Input id="family-address" name="address" defaultValue={editingPayload?.address ?? ""} placeholder="Calle, altura, manzana y lote" required aria-invalid={Boolean(formErrors.address?.length)} />
                   {formErrors.address?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
                 </Field>
+                <div className="space-y-2"><p className="text-sm font-medium">Contacto del grupo *</p><p className="text-sm text-muted-foreground">Completá al menos un teléfono argentino o un email válido.</p></div>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field><FieldLabel htmlFor="family-phone">Teléfono de contacto</FieldLabel><Input id="family-phone" name="contactPhone" type="tel" defaultValue={editingPayload?.contactPhone ?? ""} placeholder="Código de área y número" /></Field>
+                  <Field><FieldLabel htmlFor="family-phone">Teléfono argentino de contacto</FieldLabel><Input id="family-phone" name="contactPhone" type="tel" defaultValue={editingPayload?.contactPhone ?? ""} placeholder="381 555 0142 o +54 9 381 555 0142" aria-invalid={Boolean(formErrors.contactPhone?.length)} /><FieldDescription>Usá característica y abonado (10 dígitos); podés agregar +54 y separadores.</FieldDescription>{formErrors.contactPhone?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                   <Field><FieldLabel htmlFor="family-email">Email de contacto</FieldLabel><Input id="family-email" name="contactEmail" type="email" defaultValue={editingPayload?.contactEmail ?? ""} placeholder="nombre@correo.com" aria-invalid={Boolean(formErrors.contactEmail?.length)} />{formErrors.contactEmail?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
@@ -849,7 +855,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
                       <div className="grid gap-3 sm:grid-cols-2">
                         <Field><FieldLabel htmlFor={`member-first-${member.localId}`}>Nombre *</FieldLabel><Input id={`member-first-${member.localId}`} value={member.firstName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, firstName: event.target.value }))} required aria-invalid={Boolean(formErrors[`members.${index}.firstName`]?.length)} />{formErrors[`members.${index}.firstName`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                         <Field><FieldLabel htmlFor={`member-last-${member.localId}`}>Apellido *</FieldLabel><Input id={`member-last-${member.localId}`} value={member.lastName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, lastName: event.target.value }))} required aria-invalid={Boolean(formErrors[`members.${index}.lastName`]?.length)} />{formErrors[`members.${index}.lastName`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-                        <Field><FieldLabel htmlFor={`member-dni-${member.localId}`}>DNI</FieldLabel><Input id={`member-dni-${member.localId}`} inputMode="numeric" value={member.dni ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, dni: event.target.value.replace(/\D/g, "").slice(0, 8) }))} aria-invalid={Boolean(formErrors[`members.${index}.dni`]?.length)} /><FieldDescription>Ingresá 7 u 8 números. Si no tiene, dejalo vacío.</FieldDescription>{formErrors[`members.${index}.dni`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                        <Field><FieldLabel htmlFor={`member-dni-${member.localId}`}>DNI{editingOperation ? "" : " *"}</FieldLabel><Input id={`member-dni-${member.localId}`} inputMode="numeric" value={member.dni ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, dni: event.target.value.replace(/\D/g, "").slice(0, 8) }))} aria-invalid={Boolean(formErrors[`members.${index}.dni`]?.length)} aria-required={!editingOperation} /><FieldDescription>{editingOperation ? "Este borrador anterior puede conservar integrantes sin DNI." : "Ingresá los 7 u 8 números del DNI."}</FieldDescription>{formErrors[`members.${index}.dni`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                         <Field><FieldLabel htmlFor={`member-phone-${member.localId}`}>Teléfono</FieldLabel><Input id={`member-phone-${member.localId}`} type="tel" value={member.phone ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, phone: event.target.value }))} /></Field>
                         <Field><FieldLabel htmlFor={`member-email-${member.localId}`}>Email</FieldLabel><Input id={`member-email-${member.localId}`} type="email" value={member.email ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, email: event.target.value }))} aria-invalid={Boolean(formErrors[`members.${index}.email`]?.length)} />{formErrors[`members.${index}.email`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                         <Field><FieldLabel htmlFor={`member-relationship-${member.localId}`}>Vínculo *</FieldLabel><Select value={member.relationship} onValueChange={(relationship) => updateMember(member.localId, (currentMember) => ({ ...currentMember, relationship }))}><SelectTrigger id={`member-relationship-${member.localId}`} className="w-full"><SelectValue /></SelectTrigger><SelectContent>{FAMILY_MEMBER_RELATIONSHIPS.map((relationship) => <SelectItem key={relationship} value={relationship}>{relationship}</SelectItem>)}</SelectContent></Select></Field>

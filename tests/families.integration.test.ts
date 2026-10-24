@@ -62,7 +62,7 @@ test("family registry persists records, rejects duplicate identities and enforce
   const suffix = randomBytes(10).toString("hex");
   const userIds: string[] = [];
   const sessionTokens: string[] = [];
-  const dnis = Array.from({ length: 4 }, () => `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`);
+  const dnis = Array.from({ length: 7 }, () => `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`);
   const users = await Promise.all([
     prisma.user.create({ data: { email: `family-president-${suffix}@example.test`, username: `family-president-${suffix}`, name: "Family Test President", role: UserRole.PRESIDENTE } }),
     prisma.user.create({ data: { email: `family-secretary-${suffix}@example.test`, username: `family-secretary-${suffix}`, name: "Family Test Secretary", role: UserRole.SECRETARIA } }),
@@ -156,6 +156,52 @@ test("family registry persists records, rejects duplicate identities and enforce
     const parsedInvalid = errorSchema.safeParse(await invalidResponse.json());
     assert.equal(parsedInvalid.success, true);
 
+    const missingDniResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, {
+      ...familyInput,
+      operationId: randomUUID(),
+      name: `Missing DNI ${suffix}`,
+      members: [{ ...familyInput.members[0], dni: undefined, missingDocuments: [] }],
+    }));
+    assert.equal(missingDniResponse.status, 400);
+
+    const missingContactResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, {
+      ...familyInput,
+      operationId: randomUUID(),
+      name: `Missing Contact ${suffix}`,
+      contactPhone: undefined,
+      contactEmail: undefined,
+    }));
+    assert.equal(missingContactResponse.status, 400);
+
+    const invalidPhoneResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, {
+      ...familyInput,
+      operationId: randomUUID(),
+      name: `Invalid Phone ${suffix}`,
+      contactPhone: "12345",
+      contactEmail: `valid-contact-${suffix}@example.test`,
+    }));
+    assert.equal(invalidPhoneResponse.status, 400);
+
+    const emailOnlyResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, {
+      ...familyInput,
+      operationId: randomUUID(),
+      name: `Email Contact ${suffix}`,
+      contactPhone: undefined,
+      contactEmail: `only-email-${suffix}@example.test`,
+      members: [{ ...familyInput.members[0], dni: dnis[4], missingDocuments: [] }],
+    }));
+    assert.equal(emailOnlyResponse.status, 201);
+
+    const phoneOnlyResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, {
+      ...familyInput,
+      operationId: randomUUID(),
+      name: `Phone Contact ${suffix}`,
+      contactPhone: "381 555 0142",
+      contactEmail: undefined,
+      members: [{ ...familyInput.members[0], dni: dnis[6], missingDocuments: [] }],
+    }));
+    assert.equal(phoneOnlyResponse.status, 201);
+
     const changedResponse = await PATCH(createRequest(`http://localhost:3000/api/families/${createdFamily.id}`, "PATCH", presidentToken, {
       name: createdFamily.name,
       neighborhood: createdFamily.neighborhood,
@@ -224,6 +270,15 @@ test("family registry persists records, rejects duplicate identities and enforce
     assert.equal(duplicateMemberResponse.status, 409);
     assert.equal(await prisma.family.findUniqueOrThrow({ where: { id: createdFamily.id }, select: { version: true } }).then((family) => family.version), familyAfterHeaderUpdate.version + 1);
 
+    const missingDniMemberResponse = await addFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members`, "POST", presidentToken, {
+      ...addMemberBody,
+      operationId: randomUUID(),
+      memberId: randomUUID(),
+      personId: randomUUID(),
+      member: { firstName: "Sin", lastName: "Documento", relationship: "Hija o hijo", missingDocuments: ["DNI"] },
+    }), { params: Promise.resolve({ id: createdFamily.id }) });
+    assert.equal(missingDniMemberResponse.status, 400);
+
     const updateMemberResponse = await updateFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members/${addedMemberId}`, "PATCH", presidentToken, {
       operationId: randomUUID(),
       baseVersion: familyAfterHeaderUpdate.version + 1,
@@ -258,6 +313,7 @@ test("family registry persists records, rejects duplicate identities and enforce
         name: `Offline Family ${suffix}`,
         neighborhood: "Villa Nueva",
         address: "Pasaje de prueba 12",
+        contactPhone: "+54 9 381 555 0142",
         referenceMemberIndex: 0,
         members: [{ firstName: "Offline", lastName: "Prueba", dni: dnis[3], relationship: "Referente", missingDocuments: [] }],
       },
@@ -287,6 +343,27 @@ test("family registry persists records, rejects duplicate identities and enforce
     assert.equal(await prisma.family.count({ where: { id: offlineFamilyId } }), 1);
     assert.equal(await prisma.person.count({ where: { dni: dnis[3] } }), 1);
 
+    const legacyFamilyId = randomUUID();
+    const legacyDraftOperation = {
+      operationId: randomUUID(),
+      userId: users[0].id,
+      resource: "families",
+      resourceId: legacyFamilyId,
+      operation: "create",
+      baseVersion: null,
+      dependencies: [],
+      payload: {
+        name: `Legacy Draft ${suffix}`,
+        neighborhood: "Villa Nueva",
+        address: "Pasaje anterior 8",
+        referenceMemberIndex: 0,
+        members: [{ firstName: "Anterior", lastName: "Pendiente", relationship: "Referente", missingDocuments: [] }],
+      },
+    };
+    const legacyDraftResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, legacyDraftOperation));
+    assert.equal(legacyDraftResponse.status, 200);
+    assert.equal(await prisma.family.count({ where: { id: legacyFamilyId } }), 1);
+
     const offlineMemberId = randomUUID();
     const offlinePersonId = randomUUID();
     const offlineMemberOperation = {
@@ -301,7 +378,7 @@ test("family registry persists records, rejects duplicate identities and enforce
         action: "add-member",
         memberId: offlineMemberId,
         personId: offlinePersonId,
-        member: { firstName: "Operación", lastName: "Dependiente", relationship: "Hija o hijo", missingDocuments: ["DNI"] },
+        member: { firstName: "Operación", lastName: "Dependiente", dni: dnis[5], relationship: "Hija o hijo", missingDocuments: ["DNI"] },
         referencePersonId: offlinePersonId,
       },
     };
