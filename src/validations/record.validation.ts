@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+export const BENEFICIARY_SHEET_COLUMN_HEADERS = {
+  number: "N°",
+  beneficiary: "Apellido y Nombre",
+  dni: "DNI",
+  address: "Dirección",
+  neighborhood: "Barrio",
+  deliveryDate: "Fecha de entrega",
+  signature: "Firma",
+} as const;
+
 export const distributionRecordPayloadSchema = z.object({
   kind: z.literal("distribution-record"),
   id: z.string().trim().min(1).max(80),
@@ -38,7 +48,9 @@ export const beneficiarySheetDraftSchema = z.object({
     dni: z.string().trim().regex(/^\d{7,8}$/),
     familyName: z.string().trim().min(1).max(120),
     address: z.string().trim().min(1).max(180),
+    neighborhood: z.string().trim().max(120).optional(),
   }).strict()).min(1).max(1000),
+  templateVersion: z.literal(2).optional(),
 }).strict().refine((draft) => new Set(draft.beneficiaries.map((beneficiary) => beneficiary.personId)).size === draft.beneficiaries.length, {
   message: "La planilla contiene beneficiarios repetidos",
   path: ["beneficiaries"],
@@ -84,5 +96,6 @@ export interface BeneficiarySheetSnapshot {
   period: { label: string; agency: string; startsAt: string; endsAt: string };
   version: number;
   createdAt: string;
-  beneficiaries: Array<{ personId: string; name: string; dni: string; familyName: string; address: string }>;
+  templateVersion?: 2;
+  beneficiaries: Array<{ personId: string; name: string; dni: string; familyName: string; address: string; neighborhood?: string }>;
 }

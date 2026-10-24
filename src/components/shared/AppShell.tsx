@@ -186,11 +186,11 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
 
   return (
     <div className="min-h-screen lg:flex">
-      <aside className="hidden w-64 shrink-0 border-r border-sidebar-border bg-sidebar lg:flex lg:flex-col">
-        <div className="flex items-center gap-3 border-b border-sidebar-border px-5 py-6">
+      <aside className="hidden w-64 shrink-0 border-r border-sidebar-border bg-sidebar lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col">
+        <div className="flex shrink-0 items-center gap-3 border-b border-sidebar-border px-5 py-6">
           <Image src={BRAND.wordmarkPath} alt={BRAND.name} width={180} height={82} className="h-12 w-auto" priority unoptimized />
         </div>
-        <nav aria-label="Navegación principal" className="flex flex-1 flex-col gap-1 p-3">
+        <nav aria-label="Navegación principal" className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain p-3">
           {navigation.map((item) => (
             <Button
               asChild
@@ -205,7 +205,7 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
             </Button>
           ))}
         </nav>
-        <div className="border-t border-sidebar-border p-5">
+        <div className="shrink-0 border-t border-sidebar-border p-5">
           <div className="flex items-center gap-3">
             <Avatar size="lg">
               <AvatarImage src="/images/profile.jpg" alt="María González" />

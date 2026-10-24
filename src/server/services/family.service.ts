@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
-import { familyRepository } from "@/server/repository/family.repository";
+import { familyRepository, type FamilyDeactivationTarget } from "@/server/repository/family.repository";
 import type { CreateFamilyInput, FamilyMemberChangeInput, FindFamiliesOptions, UpdateFamilyInput } from "@/types/family";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 import { toFamilyRecord } from "@/server/mappers/family.mapper";
@@ -89,6 +89,56 @@ export const familyService = {
     }
 
     return toFamilyRecord(family);
+  },
+
+  async deactivate(
+    familyId: string,
+    target: FamilyDeactivationTarget,
+    actorId: string,
+    operationId: string,
+    baseVersion: number,
+  ) {
+    const requestHash = createHash("sha256").update(JSON.stringify({ familyId, target, baseVersion })).digest("hex");
+
+    try {
+      const result = await familyRepository.deactivate({ familyId, target, actorId, operationId, baseVersion, requestHash });
+
+      if (result.type === "missing") {
+        throw new ApiError({ status: 404, message: "No encontramos esa familia" });
+      }
+
+      if (result.type === "missing-member") {
+        throw new ApiError({ status: 404, message: "No encontramos ese integrante en esta familia" });
+      }
+
+      if (result.type === "last-member") {
+        throw new ApiError({ status: 409, message: "No se puede dar de baja al último integrante. Primero agregá otra persona a la familia." });
+      }
+
+      if (result.type === "reference-member") {
+        throw new ApiError({ status: 409, message: "No se puede dar de baja al referente. Primero elegí otro referente para la familia." });
+      }
+
+      if (result.type === "has-records") {
+        throw new ApiError({ status: 409, message: "No se puede dar de baja porque la familia o el integrante aparece en entregas o planillas históricas." });
+      }
+
+      if (result.type === "conflict") {
+        throw new ApiError({ status: 409, message: "La ficha cambió en otro dispositivo. Actualizá antes de volver a intentar." });
+      }
+
+      return toFamilyRecord(result.family);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+        throw new ApiError({ status: 409, message: "La ficha cambió mientras se procesaba la baja. Actualizá antes de volver a intentar." });
+      }
+
+      throw error;
+    }
   },
 
   async changeMember(

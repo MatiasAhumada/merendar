@@ -20,6 +20,7 @@ import { readOfflinePreparedDocuments, removeOfflinePreparedDocument, saveOfflin
 import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema, recordsCollectionSchema, type RecordsCollection } from "@/validations/record.validation";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import type { JsonValue } from "@/types/json-value";
+import { BRAND } from "@/constants/brand.constant";
 
 type WorkbenchData = RecordsCollection;
 
@@ -314,6 +315,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
           dni: member.person.dni ?? "",
           familyName: family.name,
           address: family.address,
+          neighborhood: family.neighborhood,
         })));
       const missingDni = selectedBeneficiaries.filter((beneficiary) => !/^\d{7,8}$/.test(beneficiary.dni));
       if (missingDni.length) {
@@ -327,12 +329,17 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
           id: crypto.randomUUID(),
           periodId,
           period: { label: selectedPeriod?.label, agency: selectedPeriod?.agency, startsAt: selectedPeriod?.startsAt.slice(0, 10), endsAt: selectedPeriod?.endsAt.slice(0, 10) },
+          templateVersion: 2,
           beneficiaries: selectedBeneficiaries,
         });
         if (!parsedDraft.success) {
           throw new Error("No se pudo preparar una planilla con los datos capturados. Conectate para actualizar el padrón.");
         }
-        const pdfBytes = await createLocalBeneficiarySheetPdf(parsedDraft.data);
+        const logoResponse = await fetch(BRAND.institutionLogoPath);
+        if (!logoResponse.ok) {
+          throw new Error("No se pudo cargar el logo aprobado para preparar la planilla local.");
+        }
+        const pdfBytes = await createLocalBeneficiarySheetPdf(parsedDraft.data, new Uint8Array(await logoResponse.arrayBuffer()));
         const pdfBuffer = new ArrayBuffer(pdfBytes.byteLength);
         new Uint8Array(pdfBuffer).set(pdfBytes);
         const content = new Blob([pdfBuffer], { type: "application/pdf" });
@@ -562,7 +569,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
       <Card>
         <CardHeader>
           <CardTitle>Registros y planillas emitidas</CardTitle>
-          <CardDescription>La versión conserva los nombres, DNI y domicilios exactos incluidos al emitir cada PDF.</CardDescription>
+          <CardDescription>Cada versión conserva los nombres, DNI, domicilios y barrios incluidos al emitir el PDF.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-6 md:grid-cols-2">
           <section aria-labelledby="records-heading">

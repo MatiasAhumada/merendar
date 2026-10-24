@@ -7,6 +7,7 @@ import { ApiError } from "@/utils/handlers/apiError.handler";
 import apiErrorHandler from "@/utils/handlers/apiError.handler";
 import { isSameOriginRequest } from "@/server/services/origin.service";
 import { beneficiarySheetSchema } from "@/validations/record.validation";
+import { lockFamilyRows } from "@/server/services/record-synchronization.service";
 
 const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
 
@@ -32,9 +33,14 @@ export async function POST(request: NextRequest) {
         throw new ApiError({ status: 404, message: "No encontramos ese módulo o período" });
       }
 
-      const memberships = await transaction.familyMember.findMany({
+      const existingMemberships = await transaction.familyMember.findMany({
         where: { personId: { in: personIds } },
-        include: { person: { select: { id: true, firstName: true, lastName: true, dni: true } }, family: { select: { name: true, address: true } } },
+        select: { familyId: true },
+      });
+      await lockFamilyRows(transaction, existingMemberships.map((membership) => membership.familyId));
+      const memberships = await transaction.familyMember.findMany({
+        where: { personId: { in: personIds }, deactivatedAt: null, family: { deactivatedAt: null } },
+        include: { person: { select: { id: true, firstName: true, lastName: true, dni: true } }, family: { select: { name: true, address: true, neighborhood: true } } },
         orderBy: [{ family: { name: "asc" } }, { person: { lastName: "asc" } }, { person: { firstName: "asc" } }],
       });
 
@@ -53,12 +59,14 @@ export async function POST(request: NextRequest) {
         },
         version,
         createdAt,
+        templateVersion: 2,
         beneficiaries: memberships.map(({ person, family }) => ({
           personId: person.id,
           name: `${person.firstName} ${person.lastName}`,
           dni: person.dni ?? "",
           familyName: family.name,
           address: family.address,
+          neighborhood: family.neighborhood,
         })),
       };
 
@@ -70,9 +78,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ sheet }, { status: 201, headers: privateHeaders });
   } catch (error) {
-    const apiError = error instanceof ApiError
-      ? error
-      : new ApiError({ status: 500, message: "No se pudo emitir la planilla", isOperational: false });
+    let apiError = new ApiError({ status: 500, message: "No se pudo emitir la planilla", isOperational: false });
+
+    if (error instanceof ApiError) {
+      apiError = error;
+    } else if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+      apiError = new ApiError({ status: 409, message: "El padrón cambió mientras se emitía la planilla. Actualizá los datos y volvé a intentar." });
+    }
     const response = apiErrorHandler({ error: apiError, request, fallbackMessage: "No se pudo emitir la planilla" });
     response.headers.set("Cache-Control", privateHeaders["Cache-Control"]);
     return response;

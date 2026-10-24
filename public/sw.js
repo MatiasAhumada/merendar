@@ -1,4 +1,4 @@
-const CACHE_NAME = "merendar-public-v3";
+const CACHE_NAME = "merendar-public-v4";
 const OFFLINE_URL = "/offline";
 const PUBLIC_ASSETS = [
   OFFLINE_URL,
@@ -8,6 +8,7 @@ const PUBLIC_ASSETS = [
   "/apple-icon.png",
   "/merendar-logo.png",
   "/brand/merendar-isotipo.png",
+  "/brand/ministerio-desarrollo-social-tucuman.png",
 ];
 
 self.addEventListener("install", (event) => {

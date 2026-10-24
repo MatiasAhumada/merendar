@@ -1,59 +1,10 @@
 import "dotenv/config";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
-import assert from "node:assert/strict";
-import { expect, test, type Browser, type BrowserContext, type Page, type TestInfo } from "@playwright/test";
+import { randomBytes, randomUUID } from "node:crypto";
+import { expect, test, type Browser, type Page, type TestInfo } from "@playwright/test";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-
-const SESSION_COOKIE = "merendar_session";
-const SESSION_DURATION_MS = 12 * 60 * 60 * 1_000;
-const BASE_URL = process.env.BASE_URL ?? "http://127.0.0.1:3022";
-
-interface BrowserIdentity {
-  userId: string;
-  sessionToken: string;
-}
-
-async function createBrowserIdentity(role: UserRole): Promise<BrowserIdentity> {
-  assert.equal(process.env.ALLOW_BROWSER_TESTS, "true", "Definí ALLOW_BROWSER_TESTS=true para crear usuarios browser descartables.");
-  const configuredDatabaseUrl = process.env.DATABASE_URL;
-  assert.ok(configuredDatabaseUrl, "DATABASE_URL es obligatoria para las pruebas de navegador.");
-  const databaseUrl = new URL(configuredDatabaseUrl);
-  assert.ok(["localhost", "127.0.0.1", "::1"].includes(databaseUrl.hostname), "Las pruebas browser requieren PostgreSQL local.");
-  assert.match(databaseUrl.pathname.toLowerCase(), /(dev|test|local)/, "Las pruebas browser solo usan una base dev, test o local.");
-
-  const suffix = randomUUID();
-  const sessionToken = randomBytes(32).toString("hex");
-  const tokenHash = createHash("sha256").update(sessionToken).digest("hex");
-  const user = await prisma.user.create({
-    data: {
-      email: `browser-${suffix}@example.test`,
-      username: `browser-${suffix}`,
-      name: `Browser ${role}`,
-      role,
-      isActive: true,
-    },
-  });
-
-  try {
-    await prisma.authSession.create({
-      data: {
-        userId: user.id,
-        tokenHash,
-        expiresAt: new Date(Date.now() + SESSION_DURATION_MS),
-      },
-    });
-  } catch (error) {
-    await prisma.user.delete({ where: { id: user.id } });
-    throw error;
-  }
-
-  return { userId: user.id, sessionToken };
-}
-
-async function removeBrowserIdentity(identity: BrowserIdentity) {
-  await prisma.user.deleteMany({ where: { id: identity.userId } });
-}
+import { familyService } from "@/server/services/family.service";
+import { createBrowserIdentity, removeBrowserIdentity, setBrowserIdentity, type BrowserIdentity } from "./browser-identity";
 
 async function removeBrowserFamily(name: string) {
   const family = await prisma.family.findFirst({ where: { name }, select: { id: true, members: { select: { personId: true } } } });
@@ -69,16 +20,6 @@ async function removeBrowserFamily(name: string) {
       referencedBy: { none: {} },
     },
   });
-}
-
-async function setBrowserIdentity(context: BrowserContext, page: Page, identity: BrowserIdentity) {
-  await context.addCookies([{
-    name: SESSION_COOKIE,
-    value: identity.sessionToken,
-    url: BASE_URL,
-    httpOnly: true,
-    sameSite: "Lax",
-  }]);
 }
 
 async function captureBrowserEvidence(browser: Browser, page: Page, testInfo: TestInfo) {
@@ -110,7 +51,7 @@ test("renders the role access matrix for every account type", async ({ browser, 
     for (const access of roles) {
       const identity = await createBrowserIdentity(access.role);
       identities.push(identity);
-      await setBrowserIdentity(context, page, identity);
+      await setBrowserIdentity(context, identity);
       await page.goto("/");
       await expect(page.getByRole("heading", { name: `Hola, Browser ${access.role}` })).toBeVisible();
 
@@ -139,7 +80,7 @@ test("prepares private views, keeps them available after network loss, and isola
   let secretary: BrowserIdentity | undefined;
 
   try {
-    await setBrowserIdentity(context, page, president);
+    await setBrowserIdentity(context, president);
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
@@ -157,7 +98,7 @@ test("prepares private views, keeps them available after network loss, and isola
 
     const privateCacheCheck = await page.evaluate(async () => {
       const cacheNames = await caches.keys();
-      const publicCache = await caches.open("merendar-public-v3");
+      const publicCache = await caches.open("merendar-public-v4");
       const cachedRequests = await publicCache.keys();
       return {
         cacheNames,
@@ -166,7 +107,7 @@ test("prepares private views, keeps them available after network loss, and isola
         cachedPaths: cachedRequests.map((request) => new URL(request.url).pathname),
       };
     });
-    expect(privateCacheCheck.cacheNames).toEqual(["merendar-public-v3"]);
+    expect(privateCacheCheck.cacheNames).toEqual(["merendar-public-v4"]);
     expect(privateCacheCheck.privateApiCached).toBe(false);
     expect(privateCacheCheck.privateRouteCached).toBe(false);
     expect(privateCacheCheck.cachedPaths.some((path) => path.startsWith("/api/") || path === "/familias")).toBe(false);
@@ -183,7 +124,7 @@ test("prepares private views, keeps them available after network loss, and isola
 
     secretary = await createBrowserIdentity(UserRole.TESORERIA);
     await context.setOffline(false);
-    await setBrowserIdentity(context, page, secretary);
+    await setBrowserIdentity(context, secretary);
     await page.goto("/");
     await expect(page.getByRole("heading", { name: `Hola, Browser ${UserRole.TESORERIA}` })).toBeVisible();
     await page.waitForFunction(async (expectedUserId) => {
@@ -221,12 +162,29 @@ test("prepares private views, keeps them available after network loss, and isola
   }
 });
 
-test("shows an online family immediately and retains one record after refresh", async ({ browser, context, page }, testInfo) => {
+test("recovers a confirmed family after a failed list refresh without duplicating it", async ({ browser, context, page }, testInfo) => {
   const president = await createBrowserIdentity(UserRole.PRESIDENTE);
   const familyName = `Browser Online ${randomUUID()}`;
+  let failFamilyRefreshes = false;
+  let failedFamilyRefreshes = 0;
 
   try {
-    await setBrowserIdentity(context, page, president);
+    await setBrowserIdentity(context, president);
+    await page.route("**/*", async (route) => {
+      const requestUrl = new URL(route.request().url());
+
+      if (failFamilyRefreshes && requestUrl.pathname === "/api/families" && route.request().method() === "GET") {
+        failedFamilyRefreshes += 1;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { message: "Falla de refresco sintética" } }),
+        });
+        return;
+      }
+
+      await route.continue();
+    });
     await page.goto("/familias");
     await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
     await page.getByRole("button", { name: "Nueva familia" }).click();
@@ -234,10 +192,19 @@ test("shows an online family immediately and retains one record after refresh", 
     await page.locator("#family-neighborhood").click();
     await page.getByRole("option", { name: "San Cayetano" }).click();
     await page.locator("#family-address").fill("Domicilio de prueba 1478");
+    await page.locator("#family-phone").fill("3815550142");
     await page.locator('input[id^="member-first-"]').fill("Integrante");
     await page.locator('input[id^="member-last-"]').fill("Online");
+    await page.locator('input[id^="member-dni-"]').fill("14790001");
+    failFamilyRefreshes = true;
     await page.getByRole("button", { name: "Guardar familia" }).click();
 
+    await expect(page.getByRole("alert").getByText("La familia ya está confirmada en el servidor, pero no pudimos actualizar el padrón. Reintentá la actualización sin volver a cargarla.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reintentar actualización" })).toBeEnabled();
+    await expect.poll(async () => prisma.family.count({ where: { name: familyName } }), { timeout: 15_000 }).toBe(1);
+    expect(failedFamilyRefreshes).toBeGreaterThan(0);
+    failFamilyRefreshes = false;
+    await page.getByRole("button", { name: "Reintentar actualización" }).click();
     await expect(page.getByRole("heading", { name: familyName, exact: true })).toHaveCount(1);
     await expect.poll(async () => prisma.family.count({ where: { name: familyName } }), { timeout: 15_000 }).toBe(1);
     await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyName);
@@ -255,12 +222,144 @@ test("shows an online family immediately and retains one record after refresh", 
   }
 });
 
+test("confirms family deactivation, preserves sheet history and explains blocked records", async ({ browser, context, page }, testInfo) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const suffix = randomUUID();
+  const familyNames = [`COD1484 con planilla ${suffix}`, `COD1484 sin historial ${suffix}`];
+  const personDni = `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`;
+  let periodId: string | null = null;
+
+  try {
+    const familyWithSheet = await familyService.create({
+      name: familyNames[0] ?? "",
+      neighborhood: "Villa Nueva",
+      address: "Calle de prueba 1484",
+      contactPhone: "381 555 0142",
+      referenceMemberIndex: 0,
+      members: [{ firstName: "Browser", lastName: "Con historial", dni: personDni, relationship: "Referente", missingDocuments: [] }],
+    }, president.userId, randomUUID());
+    const secondFamily = await familyService.create({
+      name: familyNames[1] ?? "",
+      neighborhood: "Villa Nueva",
+      address: "Calle de prueba 1485",
+      contactPhone: "381 555 0142",
+      referenceMemberIndex: 0,
+      members: [{ firstName: "Browser", lastName: "Sin historial", dni: `${Number(personDni) + 1}`, relationship: "Referente", missingDocuments: [] }],
+    }, president.userId, randomUUID());
+    const period = await prisma.merchandisePeriod.create({
+      data: {
+        label: `COD1484 browser ${suffix}`,
+        agency: "Browser test",
+        startsAt: new Date("2026-10-01T00:00:00.000Z"),
+        endsAt: new Date("2026-10-31T00:00:00.000Z"),
+      },
+    });
+    periodId = period.id;
+    const personIdWithSheet = familyWithSheet.members[0]?.id;
+    expect(personIdWithSheet).toBeTruthy();
+    await prisma.beneficiarySheet.create({
+      data: {
+        periodId: period.id,
+        version: 1,
+        createdById: president.userId,
+        snapshot: { beneficiaries: [{ personId: personIdWithSheet }] },
+      },
+    });
+
+    await setBrowserIdentity(context, president);
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.goto("/familias");
+    await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyWithSheet.name);
+    await page.getByRole("button", { name: "Ver ficha familiar" }).click();
+    await page.getByRole("button", { name: "Dar de baja familia" }).click();
+    await expect(page.getByRole("heading", { name: "Dar de baja la familia" })).toBeVisible();
+    await expect(page.getByText(/Si hay entregas o planillas históricas/)).toBeVisible();
+    await testInfo.attach("family-deactivation-confirmation.png", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    await page.getByRole("button", { name: "Confirmar baja" }).click();
+    await expect(page.getByText(/aparece en entregas o planillas históricas/).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: familyWithSheet.name })).toBeVisible();
+    expect((await prisma.family.findUniqueOrThrow({ where: { id: familyWithSheet.id }, select: { deactivatedAt: true } })).deactivatedAt).toBeNull();
+    await page.getByRole("button", { name: "Cerrar ficha" }).click();
+
+    await page.getByRole("searchbox", { name: "Buscar familias" }).fill(secondFamily.name);
+    await page.getByRole("button", { name: "Ver ficha familiar" }).click();
+    await page.getByRole("button", { name: "Dar de baja familia" }).click();
+    await page.getByRole("button", { name: "Confirmar baja" }).click();
+    await expect(page.getByText("No hay resultados", { exact: true })).toBeVisible();
+    const deactivatedFamily = await prisma.family.findUniqueOrThrow({ where: { id: secondFamily.id }, select: { deactivatedAt: true, deactivatedById: true } });
+    expect(deactivatedFamily.deactivatedAt).toBeTruthy();
+    expect(deactivatedFamily.deactivatedById).toBe(president.userId);
+    expect(pageErrors).toEqual([]);
+    await testInfo.attach("family-deactivation-complete.png", {
+      body: await page.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    await captureBrowserEvidence(browser, page, testInfo);
+  } finally {
+    await context.setOffline(false);
+    await prisma.distributionRecord.deleteMany({ where: { periodId: periodId ?? "" } });
+    await prisma.beneficiarySheet.deleteMany({ where: { periodId: periodId ?? "" } });
+    await prisma.merchandisePeriod.deleteMany({ where: { id: periodId ?? "" } });
+    await Promise.all(familyNames.map(removeBrowserFamily));
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("reports a family as pending when the server has not confirmed synchronization", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const familyName = `Browser Pending ${randomUUID()}`;
+  let failNextSynchronization = false;
+
+  try {
+    await setBrowserIdentity(context, president);
+    await page.route("**/api/synchronizations", async (route) => {
+      if (failNextSynchronization && route.request().method() === "POST") {
+        failNextSynchronization = false;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "server_unavailable", message: "Falla de sincronización sintética" } }),
+        });
+        return;
+      }
+
+      await route.continue();
+    });
+    await page.goto("/familias");
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
+    await page.getByRole("button", { name: "Nueva familia" }).click();
+    await page.locator("#family-name").fill(familyName);
+    await page.locator("#family-neighborhood").click();
+    await page.getByRole("option", { name: "San Cayetano" }).click();
+    await page.locator("#family-address").fill("Domicilio de prueba 1479");
+    await page.locator("#family-phone").fill("3815550142");
+    await page.locator('input[id^="member-first-"]').fill("Integrante");
+    await page.locator('input[id^="member-last-"]').fill("Pendiente");
+    await page.locator('input[id^="member-dni-"]').fill("14790004");
+    failNextSynchronization = true;
+    await page.getByRole("button", { name: "Guardar familia" }).click();
+
+    await expect(page.getByRole("alert").getByText("El borrador quedó guardado en este dispositivo y sigue pendiente de confirmación del servidor. Reintentá la sincronización cuando esté disponible.")).toBeVisible();
+    await expect(page.getByText(familyName, { exact: true })).toBeVisible();
+    await expect.poll(async () => prisma.family.count({ where: { name: familyName } })).toBe(0);
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
 test("creates a family and adds a member offline, then syncs the dependency chain once", async ({ browser, context, page }, testInfo) => {
   const president = await createBrowserIdentity(UserRole.PRESIDENTE);
   const familyName = `Browser Offline ${randomUUID()}`;
 
   try {
-    await setBrowserIdentity(context, page, president);
+    await setBrowserIdentity(context, president);
     await page.goto("/");
     await page.getByRole("button", { name: "Preparar offline" }).click();
     await expect(page.getByText(/Vistas preparadas el/)).toBeVisible({ timeout: 30_000 });
@@ -275,8 +374,10 @@ test("creates a family and adds a member offline, then syncs the dependency chai
     await page.locator("#family-neighborhood").click();
     await page.getByRole("option", { name: "San Cayetano" }).click();
     await page.locator("#family-address").fill("Domicilio de prueba 1478");
+    await page.locator("#family-phone").fill("3815550142");
     await page.locator('input[id^="member-first-"]').fill("Integrante");
     await page.locator('input[id^="member-last-"]').fill("Offline");
+    await page.locator('input[id^="member-dni-"]').fill("14790002");
     await page.getByRole("button", { name: "Guardar familia" }).click();
     await expect(page.getByText(familyName, { exact: true })).toBeVisible();
     await expect(page.getByText("1 integrante", { exact: true })).toBeVisible();
@@ -285,6 +386,7 @@ test("creates a family and adds a member offline, then syncs the dependency chai
     await page.getByRole("button", { name: "Agregar integrante" }).click();
     await page.locator("#family-member-first-name").fill("Segundo");
     await page.locator("#family-member-last-name").fill("Offline");
+    await page.locator("#family-member-dni").fill("14790003");
     await page.getByRole("button", { name: "Guardar integrante" }).click();
     await expect.poll(async () => page.evaluate(async (userId) => {
       const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);

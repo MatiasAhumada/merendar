@@ -61,6 +61,8 @@ ALLOW_AUTH_INTEGRATION_TESTS=true ALLOW_FAMILY_INTEGRATION_TESTS=true ALLOW_SYNC
 
 La estrategia de instalación, caché pública y acceso sin conexión está documentada en [docs/offline.md](docs/offline.md).
 
+El ciclo de baja lógica, sus bloqueos de integridad y el referente familiar están documentados en [docs/family-deactivation.md](docs/family-deactivation.md).
+
 El modelo, los permisos y el flujo de recepción de mercadería están documentados en [docs/merchandise.md](docs/merchandise.md).
 
 Los registros de beneficiarios, planillas versionadas y permisos están documentados en [docs/delivery.md](docs/delivery.md).

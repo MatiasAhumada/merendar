@@ -3,6 +3,7 @@ export const BRAND = {
   shortName: "Merendar",
   description: "Plataforma comunitaria para organizar jornadas y acompañar a las familias.",
   logoPath: "/brand/merendar-isotipo.png",
+  institutionLogoPath: "/brand/ministerio-desarrollo-social-tucuman.png",
   wordmarkPath: "/merendar-logo.png",
   darkWordmarkPath: "/merendar-logo-dark.png",
   monochromeWordmarkPath: "/merendar-logo-monochrome.png",

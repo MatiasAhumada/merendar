@@ -62,7 +62,14 @@ test("database sessions reject invalid credentials and support persistence, expi
     assert.equal(storedSession.userId, user.id);
     assert.equal(storedSession.revokedAt, null);
     assert.equal((await authService.getSession(login.token))?.user.id, user.id);
-    assert.equal(await authService.getSession(`${login.token.slice(0, -1)}0`), null);
+    let replacementTokenSuffix = "0";
+
+    if (login.token.endsWith("0")) {
+      replacementTokenSuffix = "1";
+    }
+
+    const alteredToken = `${login.token.slice(0, -1)}${replacementTokenSuffix}`;
+    assert.equal(await authService.getSession(alteredToken), null);
 
     const expiringLogin = await authService.login(email.toUpperCase(), password);
     assert.equal(expiringLogin.type, "authenticated");

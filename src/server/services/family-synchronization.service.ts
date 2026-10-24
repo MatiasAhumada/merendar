@@ -1,12 +1,86 @@
-import { familyPayloadSchema } from "@/validations/family.validation";
+import { familyDeactivationTargetSchema, familyPayloadSchema } from "@/validations/family.validation";
 import type { SyncHandlerResult, SynchronizationHandler } from "@/interfaces/synchronization.interface";
 import { familyMemberChangeSchema } from "@/validations/family.validation";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { deactivateFamilyInTransaction } from "@/server/repository/family.repository";
+
+export class FamilyDeactivationSyncError extends Error {
+  readonly code: "family_deactivation_blocked" | "family_member_deactivation_blocked";
+
+  constructor(code: FamilyDeactivationSyncError["code"], message: string) {
+    super(message);
+    this.name = "FamilyDeactivationSyncError";
+    this.code = code;
+  }
+}
 
 export const familySynchronizationHandler: SynchronizationHandler = {
   async apply(transaction, operation): Promise<SyncHandlerResult> {
     const baseVersionValidation = z.null().safeParse(operation.baseVersion);
+
+    if (operation.operation === "delete") {
+      const baseVersion = z.number().int().nonnegative().safeParse(operation.baseVersion);
+      const parsedTarget = familyDeactivationTargetSchema.safeParse(operation.payload);
+
+      if (!baseVersion.success || !parsedTarget.success) {
+        throw new Error("La baja familiar no tiene una versión base o un destino válido");
+      }
+
+      const requestHash = createHash("sha256").update(JSON.stringify({
+        familyId: operation.resourceId,
+        target: parsedTarget.data,
+        baseVersion: baseVersion.data,
+      })).digest("hex");
+      const result = await deactivateFamilyInTransaction(transaction, {
+        familyId: operation.resourceId,
+        target: parsedTarget.data,
+        baseVersion: baseVersion.data,
+        actorId: operation.userId,
+        operationId: operation.operationId,
+        requestHash,
+      });
+
+      if (result.type === "deactivated") {
+        return {
+          type: "synchronized",
+          resourceVersion: result.family.version,
+          result: { resourceId: result.family.id, name: result.family.name },
+        };
+      }
+
+      if (result.type === "conflict") {
+        const currentFamily = await transaction.family.findUnique({ where: { id: operation.resourceId }, select: { version: true } });
+        const currentVersion = currentFamily?.version ?? 0;
+        return { type: "conflict", resourceVersion: currentVersion, current: { kind: "family_changed", version: currentVersion } };
+      }
+
+      let message = "No encontramos esa familia para dar de baja.";
+
+      if (result.type === "missing-member") {
+        message = "No encontramos ese integrante en esta familia.";
+      }
+
+      if (result.type === "has-records") {
+        message = "No se puede dar de baja porque la familia o el integrante aparece en entregas o planillas históricas.";
+      }
+
+      if (result.type === "last-member") {
+        message = "No se puede dar de baja al último integrante. Primero agregá otra persona a la familia.";
+      }
+
+      if (result.type === "reference-member") {
+        message = "No se puede dar de baja al referente. Primero elegí otro referente para la familia.";
+      }
+
+      let code: "family_deactivation_blocked" | "family_member_deactivation_blocked" = "family_member_deactivation_blocked";
+
+      if (parsedTarget.data.kind === "family") {
+        code = "family_deactivation_blocked";
+      }
+
+      throw new FamilyDeactivationSyncError(code, message);
+    }
 
     if (operation.operation === "create") {
       if (!baseVersionValidation.success) {
@@ -134,7 +208,10 @@ export const familySynchronizationHandler: SynchronizationHandler = {
       return { type: "conflict", resourceVersion: previousMemberOperation.family.version, current: { kind: "operation_key_reused" } };
     }
 
-    const family = await transaction.family.findUnique({ where: { id: operation.resourceId }, include: { members: true } });
+    const family = await transaction.family.findFirst({
+      where: { id: operation.resourceId, deactivatedAt: null },
+      include: { members: { where: { deactivatedAt: null } } },
+    });
 
     if (!family) {
       return { type: "conflict", resourceVersion: 0, current: { kind: "family_missing" } };

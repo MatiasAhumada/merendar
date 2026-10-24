@@ -19,6 +19,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectGroup,
@@ -42,7 +50,7 @@ import type { JsonObject } from "@/types/json-value";
 import type { FamilyMemberChangeInput, FamilyPersonInput } from "@/types/family";
 import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import type { OfflineOperation } from "@/types/offline-operation";
-import { familyCollectionSchema, familyMemberChangeSchema, familyMemberInputSchema, familyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
+import { familyCollectionSchema, familyDeactivationTargetSchema, familyMemberChangeSchema, familyMemberInputSchema, familyPayloadSchema, newFamilyMemberChangeSchema, newFamilyMemberInputSchema, newFamilyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
 import { z } from "zod";
 import clientAxios from "@/utils/clientAxios.util";
 
@@ -295,7 +303,7 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
     event.preventDefault();
     setFieldErrors({});
     setFormMessage("");
-    const parsedMember = familyMemberInputSchema.safeParse({
+    const memberInput = {
       firstName,
       lastName,
       dni: dni || undefined,
@@ -303,7 +311,10 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
       phone: phone || undefined,
       relationship,
       missingDocuments,
-    });
+    };
+    const parsedMember = member
+      ? familyMemberInputSchema.safeParse(memberInput)
+      : newFamilyMemberInputSchema.safeParse(memberInput);
 
     if (!parsedMember.success) {
       const errors: Record<string, string[]> = {};
@@ -343,7 +354,7 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
             <div className="grid gap-3 sm:grid-cols-2">
               <Field><FieldLabel htmlFor="family-member-first-name">Nombre *</FieldLabel><Input id="family-member-first-name" value={firstName} onChange={(event) => setFirstName(event.target.value)} required aria-invalid={Boolean(fieldErrors.firstName?.length)} />{fieldErrors.firstName?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
               <Field><FieldLabel htmlFor="family-member-last-name">Apellido *</FieldLabel><Input id="family-member-last-name" value={lastName} onChange={(event) => setLastName(event.target.value)} required aria-invalid={Boolean(fieldErrors.lastName?.length)} />{fieldErrors.lastName?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-              <Field><FieldLabel htmlFor="family-member-dni">DNI</FieldLabel><Input id="family-member-dni" inputMode="numeric" value={dni} onChange={(event) => setDni(event.target.value.replace(/\D/g, "").slice(0, 8))} aria-invalid={Boolean(fieldErrors.dni?.length)} /><FieldDescription>Ingresá 7 u 8 números. Si no tiene, dejalo vacío.</FieldDescription>{fieldErrors.dni?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+              <Field><FieldLabel htmlFor="family-member-dni">DNI{member ? "" : " *"}</FieldLabel><Input id="family-member-dni" inputMode="numeric" value={dni} onChange={(event) => setDni(event.target.value.replace(/\D/g, "").slice(0, 8))} aria-invalid={Boolean(fieldErrors.dni?.length)} aria-required={!member} /><FieldDescription>{member ? "Los registros existentes sin DNI pueden seguir consultándose; completalo cuando esté disponible." : "Ingresá los 7 u 8 números del DNI."}</FieldDescription>{fieldErrors.dni?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
               <Field><FieldLabel htmlFor="family-member-phone">Teléfono</FieldLabel><Input id="family-member-phone" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} /></Field>
               <Field><FieldLabel htmlFor="family-member-email">Email</FieldLabel><Input id="family-member-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(fieldErrors.email?.length)} />{fieldErrors.email?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
               <Field><FieldLabel htmlFor="family-member-relationship">Vínculo *</FieldLabel><Select value={relationship} onValueChange={setRelationship}><SelectTrigger id="family-member-relationship" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{FAMILY_MEMBER_RELATIONSHIPS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent></Select></Field>
@@ -376,15 +387,45 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
   );
 }
 
-function FamilyDetails({ family, canWrite, pendingMemberIds, onClose, onAddMember, onEditMember }: {
+function FamilyDetails({ family, canWrite, pendingMemberIds, onClose, onAddMember, onEditMember, onDeactivateFamily, onDeactivateMember }: {
   family: FamilyRecord;
   canWrite: boolean;
   pendingMemberIds: string[];
   onClose: () => void;
   onAddMember: () => void;
   onEditMember: (member: FamilyPersonRecord) => void;
+  onDeactivateFamily: (family: FamilyRecord) => Promise<string | null>;
+  onDeactivateMember: (family: FamilyRecord, member: FamilyPersonRecord) => Promise<string | null>;
 }) {
   const referencePerson = family.members.find((member) => member.id === family.referencePersonId);
+  const [deactivationTarget, setDeactivationTarget] = useState<"family" | FamilyPersonRecord | null>(null);
+  const [deactivationError, setDeactivationError] = useState("");
+  const [isDeactivating, setIsDeactivating] = useState(false);
+
+  async function confirmDeactivation() {
+    if (!deactivationTarget) {
+      return;
+    }
+
+    setIsDeactivating(true);
+    setDeactivationError("");
+    let message: string | null;
+
+    if (deactivationTarget === "family") {
+      message = await onDeactivateFamily(family);
+    } else {
+      message = await onDeactivateMember(family, deactivationTarget);
+    }
+
+    if (message) {
+      setDeactivationError(message);
+      setIsDeactivating(false);
+      return;
+    }
+
+    setDeactivationTarget(null);
+    setIsDeactivating(false);
+  }
 
   return (
     <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -423,14 +464,28 @@ function FamilyDetails({ family, canWrite, pendingMemberIds, onClose, onAddMembe
                     </div>
                   ) : null}
                   {pendingMemberIds.includes(member.id) ? <Badge variant="warning">Pendiente de sincronización</Badge> : null}
-                  {canWrite ? <Button size="sm" variant="outline" onClick={() => onEditMember(member)}>Editar datos</Button> : null}
+                  {canWrite ? <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => onEditMember(member)}>Editar datos</Button><Button size="sm" variant="destructive" disabled={pendingMemberIds.includes(member.id)} onClick={() => setDeactivationTarget(member)}>{pendingMemberIds.includes(member.id) ? "Baja pendiente" : "Dar de baja"}</Button></div> : null}
                 </CardContent>
               </Card>
             ))}
           </section>
         </div>
-        <SheetFooter><SheetClose asChild><Button variant="outline">Cerrar ficha</Button></SheetClose></SheetFooter>
+        <SheetFooter className="flex-wrap justify-between gap-2"><SheetClose asChild><Button variant="outline">Cerrar ficha</Button></SheetClose>{canWrite ? <Button variant="destructive" disabled={pendingMemberIds.includes("family")} onClick={() => setDeactivationTarget("family")}>{pendingMemberIds.includes("family") ? "Baja pendiente" : "Dar de baja familia"}</Button> : null}</SheetFooter>
       </SheetContent>
+      <Dialog open={Boolean(deactivationTarget)} onOpenChange={(open) => { if (!open && !isDeactivating) { setDeactivationTarget(null); setDeactivationError(""); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{deactivationTarget === "family" ? "Dar de baja la familia" : "Dar de baja a esta persona"}</DialogTitle>
+            <DialogDescription>La baja conserva la ficha y los datos de las personas. Si hay entregas o planillas históricas, el sistema la bloqueará para preservar esos registros.</DialogDescription>
+          </DialogHeader>
+          <div className="rounded-xl bg-muted p-3 text-sm font-medium">{deactivationTarget === "family" ? family.name : `${deactivationTarget?.firstName ?? ""} ${deactivationTarget?.lastName ?? ""}`}</div>
+          {deactivationError ? <p role="alert" className="text-sm text-destructive">{deactivationError}</p> : null}
+          <DialogFooter>
+            <Button variant="outline" disabled={isDeactivating} onClick={() => setDeactivationTarget(null)}>Volver</Button>
+            <Button variant="destructive" disabled={isDeactivating} onClick={() => void confirmDeactivation()}>{isDeactivating ? "Guardando baja…" : "Confirmar baja"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Sheet>
   );
 }
@@ -450,6 +505,8 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
   const [formErrors, setFormErrors] = useState<Record<string, string[]>>({});
   const [formMessage, setFormMessage] = useState("");
   const [queueMessage, setQueueMessage] = useState("");
+  const [needsFamilyRefresh, setNeedsFamilyRefresh] = useState(false);
+  const [isRefreshingFamilies, setIsRefreshingFamilies] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const refreshOfflineFamilies = useCallback(async () => {
     try {
@@ -607,7 +664,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
         membershipId: member.membershipId,
         firstName: member.firstName,
         lastName: member.lastName,
-        dni: member.dni || undefined,
+        dni: member.dni || (editingOperation ? undefined : ""),
         email: member.email || undefined,
         phone: member.phone || undefined,
         relationship: member.relationship,
@@ -615,7 +672,9 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       })),
     };
 
-    const parsedPayload = familyPayloadSchema.safeParse(payload);
+    const parsedPayload = editingOperation
+      ? familyPayloadSchema.safeParse(payload)
+      : newFamilyPayloadSchema.safeParse(payload);
 
     if (!parsedPayload.success) {
       const errors: Record<string, string[]> = {};
@@ -635,10 +694,12 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     }
 
     try {
+      let submittedOperationId = editingOperation?.operationId;
+
       if (editingOperation) {
         await updateOfflineOperationPayload(userId, editingOperation.operationId, toFamilyJsonPayload(parsedPayload.data));
       } else {
-        await enqueueOfflineOperation(userId, sessionExpiresAt, {
+        const queuedOperation = await enqueueOfflineOperation(userId, sessionExpiresAt, {
           resource: "families",
           resourceId: crypto.randomUUID(),
           operation: "create",
@@ -646,6 +707,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
           dependencies: [],
           payload: toFamilyJsonPayload(parsedPayload.data),
         });
+        submittedOperationId = queuedOperation.operationId;
       }
       await refreshOfflineFamilies();
       closeForm();
@@ -653,10 +715,25 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       if (navigator.onLine) {
         try {
           await synchronizeOfflineQueue(userId);
+        } catch {
           await refreshOfflineFamilies();
+          setQueueMessage("El borrador quedó guardado en este dispositivo y sigue pendiente de confirmación del servidor. Reintentá la sincronización cuando vuelva a estar disponible.");
+          return;
+        }
+
+        const pendingFamilyOperations = await refreshOfflineFamilies();
+        const submittedOperation = pendingFamilyOperations.find((operation) => operation.operationId === submittedOperationId);
+
+        if (submittedOperation) {
+          setQueueMessage("El borrador quedó guardado en este dispositivo y sigue pendiente de confirmación del servidor. Reintentá la sincronización cuando esté disponible.");
+          return;
+        }
+
+        try {
           await refreshFamilies();
         } catch {
-          setQueueMessage("El borrador quedó guardado y se sincronizará cuando el servidor esté disponible.");
+          setNeedsFamilyRefresh(true);
+          setQueueMessage("La familia ya está confirmada en el servidor, pero no pudimos actualizar el padrón. Reintentá la actualización sin volver a cargarla.");
         }
       }
     } catch (error) {
@@ -668,6 +745,95 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function retryFamilyRefresh() {
+    setIsRefreshingFamilies(true);
+
+    try {
+      await refreshFamilies();
+      setNeedsFamilyRefresh(false);
+      setQueueMessage("");
+    } catch {
+      setQueueMessage("La familia está confirmada en el servidor, pero el padrón sigue sin actualizarse. Podés volver a intentarlo sin duplicar el registro.");
+    } finally {
+      setIsRefreshingFamilies(false);
+    }
+  }
+
+  async function deactivateFamily(family: FamilyRecord, target: { kind: "family" } | { kind: "member"; memberId: string }) {
+    const unresolvedOperations = offlineOperations.filter((operation) =>
+      operation.resourceId === family.id && operation.status !== "synced",
+    );
+    const blockedOperation = unresolvedOperations.find((operation) => operation.status === "error" || operation.status === "conflict");
+
+    if (blockedOperation) {
+      return "Primero resolvé el cambio familiar pendiente antes de solicitar una baja.";
+    }
+
+    if (unresolvedOperations.some((operation) => operation.operation === "delete")) {
+      return "Ya hay una baja pendiente para esta familia.";
+    }
+
+    setQueueMessage("");
+
+    try {
+      const queuedOperation = await enqueueOfflineOperation(userId, sessionExpiresAt, {
+        resource: "families",
+        resourceId: family.id,
+        operation: "delete",
+        baseVersion: family.version,
+        dependencies: unresolvedOperations.map((operation) => operation.operationId),
+        payload: target,
+      });
+      await refreshOfflineFamilies();
+      setQueueMessage("La baja quedó guardada y se confirmará cuando el servidor valide que no haya registros históricos vinculados.");
+
+      if (!navigator.onLine) {
+        return null;
+      }
+
+      await synchronizeOfflineQueue(userId);
+      const remainingOperations = await refreshOfflineFamilies();
+      const submittedOperation = remainingOperations.find((operation) => operation.operationId === queuedOperation.operationId);
+
+      if (submittedOperation) {
+        setQueueMessage(submittedOperation.message ?? "La baja permanece guardada en este dispositivo y espera confirmación del servidor.");
+        return null;
+      }
+
+      try {
+        const response = await clientAxios.get<unknown>("/api/families", { headers: { "Cache-Control": "no-store" } });
+        const parsedFamilies = familyCollectionSchema.safeParse(response.data);
+
+        if (!parsedFamilies.success) {
+          setNeedsFamilyRefresh(true);
+          setQueueMessage("La baja quedó confirmada; no pudimos actualizar el padrón. Reintentá la actualización sin repetir la solicitud.");
+          return null;
+        }
+
+        setFamilies(parsedFamilies.data.families);
+        const updatedFamily = parsedFamilies.data.families.find((currentFamily) => currentFamily.id === family.id);
+
+        if (target.kind === "family" || !updatedFamily) {
+          setSelectedFamily(null);
+        } else {
+          setSelectedFamily(updatedFamily);
+        }
+        setQueueMessage("");
+      } catch {
+        setNeedsFamilyRefresh(true);
+        setQueueMessage("La baja quedó confirmada; no pudimos actualizar el padrón. Reintentá la actualización sin repetir la solicitud.");
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        return error.message;
+      }
+
+      return "No se pudo guardar la solicitud de baja.";
+    }
+
+    return null;
   }
 
   async function saveFamilyMember(values: FamilyMemberValues, referencePersonId: string, memberId: string, personId: string) {
@@ -692,7 +858,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       change = { action: "add-member", memberId, personId, member: values, referencePersonId };
     }
 
-    const parsedChange = familyMemberChangeSchema.safeParse(change);
+    const parsedChange = newFamilyMemberChangeSchema.safeParse(change);
 
     if (!parsedChange.success) {
       return "Revisá los datos del integrante antes de guardar.";
@@ -782,8 +948,13 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
 
       {queueMessage ? (
         <Alert variant="info">
-          <AlertTitle>Estado de la captura offline</AlertTitle>
-          <AlertDescription>{queueMessage}</AlertDescription>
+          <AlertTitle>{needsFamilyRefresh ? "Actualización pendiente" : "Estado de la captura offline"}</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center gap-3">
+            <span>{queueMessage}</span>
+            {needsFamilyRefresh ? <Button type="button" variant="outline" size="sm" onClick={() => void retryFamilyRefresh()} disabled={isRefreshingFamilies}>
+              {isRefreshingFamilies ? "Actualizando padrón…" : "Reintentar actualización"}
+            </Button> : null}
+          </AlertDescription>
         </Alert>
       ) : null}
 
@@ -826,8 +997,9 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
                   <Input id="family-address" name="address" defaultValue={editingPayload?.address ?? ""} placeholder="Calle, altura, manzana y lote" required aria-invalid={Boolean(formErrors.address?.length)} />
                   {formErrors.address?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
                 </Field>
+                <div className="space-y-2"><p className="text-sm font-medium">Contacto del grupo *</p><p className="text-sm text-muted-foreground">Completá al menos un teléfono argentino o un email válido.</p></div>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field><FieldLabel htmlFor="family-phone">Teléfono de contacto</FieldLabel><Input id="family-phone" name="contactPhone" type="tel" defaultValue={editingPayload?.contactPhone ?? ""} placeholder="Código de área y número" /></Field>
+                  <Field><FieldLabel htmlFor="family-phone">Teléfono argentino de contacto</FieldLabel><Input id="family-phone" name="contactPhone" type="tel" defaultValue={editingPayload?.contactPhone ?? ""} placeholder="381 555 0142 o +54 9 381 555 0142" aria-invalid={Boolean(formErrors.contactPhone?.length)} /><FieldDescription>Usá característica y abonado (10 dígitos); podés agregar +54 y separadores.</FieldDescription>{formErrors.contactPhone?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                   <Field><FieldLabel htmlFor="family-email">Email de contacto</FieldLabel><Input id="family-email" name="contactEmail" type="email" defaultValue={editingPayload?.contactEmail ?? ""} placeholder="nombre@correo.com" aria-invalid={Boolean(formErrors.contactEmail?.length)} />{formErrors.contactEmail?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
@@ -849,7 +1021,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
                       <div className="grid gap-3 sm:grid-cols-2">
                         <Field><FieldLabel htmlFor={`member-first-${member.localId}`}>Nombre *</FieldLabel><Input id={`member-first-${member.localId}`} value={member.firstName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, firstName: event.target.value }))} required aria-invalid={Boolean(formErrors[`members.${index}.firstName`]?.length)} />{formErrors[`members.${index}.firstName`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                         <Field><FieldLabel htmlFor={`member-last-${member.localId}`}>Apellido *</FieldLabel><Input id={`member-last-${member.localId}`} value={member.lastName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, lastName: event.target.value }))} required aria-invalid={Boolean(formErrors[`members.${index}.lastName`]?.length)} />{formErrors[`members.${index}.lastName`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-                        <Field><FieldLabel htmlFor={`member-dni-${member.localId}`}>DNI</FieldLabel><Input id={`member-dni-${member.localId}`} inputMode="numeric" value={member.dni ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, dni: event.target.value.replace(/\D/g, "").slice(0, 8) }))} aria-invalid={Boolean(formErrors[`members.${index}.dni`]?.length)} /><FieldDescription>Ingresá 7 u 8 números. Si no tiene, dejalo vacío.</FieldDescription>{formErrors[`members.${index}.dni`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                        <Field><FieldLabel htmlFor={`member-dni-${member.localId}`}>DNI{editingOperation ? "" : " *"}</FieldLabel><Input id={`member-dni-${member.localId}`} inputMode="numeric" value={member.dni ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, dni: event.target.value.replace(/\D/g, "").slice(0, 8) }))} aria-invalid={Boolean(formErrors[`members.${index}.dni`]?.length)} aria-required={!editingOperation} /><FieldDescription>{editingOperation ? "Este borrador anterior puede conservar integrantes sin DNI." : "Ingresá los 7 u 8 números del DNI."}</FieldDescription>{formErrors[`members.${index}.dni`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                         <Field><FieldLabel htmlFor={`member-phone-${member.localId}`}>Teléfono</FieldLabel><Input id={`member-phone-${member.localId}`} type="tel" value={member.phone ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, phone: event.target.value }))} /></Field>
                         <Field><FieldLabel htmlFor={`member-email-${member.localId}`}>Email</FieldLabel><Input id={`member-email-${member.localId}`} type="email" value={member.email ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, email: event.target.value }))} aria-invalid={Boolean(formErrors[`members.${index}.email`]?.length)} />{formErrors[`members.${index}.email`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                         <Field><FieldLabel htmlFor={`member-relationship-${member.localId}`}>Vínculo *</FieldLabel><Select value={member.relationship} onValueChange={(relationship) => updateMember(member.localId, (currentMember) => ({ ...currentMember, relationship }))}><SelectTrigger id={`member-relationship-${member.localId}`} className="w-full"><SelectValue /></SelectTrigger><SelectContent>{FAMILY_MEMBER_RELATIONSHIPS.map((relationship) => <SelectItem key={relationship} value={relationship}>{relationship}</SelectItem>)}</SelectContent></Select></Field>
@@ -885,7 +1057,8 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
           {visibleFamilies.map((family) => {
             const missingCount = family.members.reduce((total, member) => total + member.missingDocuments.length, 0);
             const referencePerson = family.members.find((member) => member.id === family.referencePersonId);
-            const offlineOperation = familyOperations.find((operation) => operation.resourceId === family.id);
+            const familyOperationsForCard = familyOperations.filter((operation) => operation.resourceId === family.id);
+            const offlineOperation = familyOperationsForCard[familyOperationsForCard.length - 1];
             let offlineVariant: "secondary" | "warning" | "destructive" = "secondary";
 
             if (offlineOperation?.status === "conflict") {
@@ -947,8 +1120,34 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       {selectedFamilyView ? <FamilyDetails
         family={selectedFamilyView}
         canWrite={canWrite}
+        onClose={() => setSelectedFamily(null)}
+        onAddMember={() => setMemberEditor({})}
+        onEditMember={(member) => setMemberEditor({ member })}
+        onDeactivateFamily={(family) => deactivateFamily(family, { kind: "family" })}
+        onDeactivateMember={(family, member) => deactivateFamily(family, { kind: "member", memberId: member.membershipId })}
         pendingMemberIds={offlineOperations.flatMap((operation) => {
-          if (operation.resourceId !== selectedFamilyView.id || operation.operation !== "update") {
+          if (operation.resourceId !== selectedFamilyView.id) {
+            return [];
+          }
+
+          if (operation.operation === "delete") {
+            const parsedTarget = familyDeactivationTargetSchema.safeParse(operation.payload);
+
+            if (!parsedTarget.success) {
+              return [];
+            }
+
+            const target = parsedTarget.data;
+
+            if (target.kind === "family") {
+              return ["family"];
+            }
+
+            const member = selectedFamilyView.members.find((familyMember) => familyMember.membershipId === target.memberId);
+            return member ? [member.id] : [];
+          }
+
+          if (operation.operation !== "update") {
             return [];
           }
 
@@ -962,15 +1161,8 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
           }
 
           const member = selectedFamilyView.members.find((familyMember) => familyMember.membershipId === parsedChange.data.memberId);
-          if (!member) {
-            return [];
-          }
-
-          return [member.id];
+          return member ? [member.id] : [];
         })}
-        onClose={() => setSelectedFamily(null)}
-        onAddMember={() => setMemberEditor({})}
-        onEditMember={(member) => setMemberEditor({ member })}
       /> : null}
       {selectedFamilyView && memberEditor ? <FamilyMemberForm
         key={memberEditor.member?.membershipId ?? selectedFamilyView.id}

@@ -5,7 +5,7 @@ import { AUTH } from "@/constants/auth.constant";
 import { authService } from "@/server/services/auth.service";
 import { isSameOriginRequest } from "@/server/services/origin.service";
 import { createSynchronizationHandlers, synchronizationService } from "@/server/services/synchronization.service";
-import { familyMemberChangeSchema, familyPayloadSchema } from "@/validations/family.validation";
+import { familyDeactivationTargetSchema, familyMemberChangeSchema, familyPayloadSchema } from "@/validations/family.validation";
 import {
   SynchronizationConflictError,
   SynchronizationDependencyError,
@@ -24,6 +24,7 @@ import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/
 import { renditionSynchronizationPayloadSchema } from "@/validations/rendition.validation";
 import { RenditionDocumentError } from "@/server/services/rendition-synchronization.service";
 import { RecordSynchronizationError } from "@/server/services/record-synchronization.service";
+import { FamilyDeactivationSyncError } from "@/server/services/family-synchronization.service";
 import { hasEffectiveCapability } from "@/server/services/access-policy.service";
 
 const synchronizationSchema = z.object({
@@ -113,6 +114,14 @@ export async function POST(request: NextRequest) {
       }
 
       parsedOperation.data.payload = parsedMemberChange.data;
+    } else if (parsedOperation.data.operation === "delete" && z.number().int().nonnegative().safeParse(parsedOperation.data.baseVersion).success) {
+      const parsedTarget = familyDeactivationTargetSchema.safeParse(parsedOperation.data.payload);
+
+      if (!parsedTarget.success) {
+        return errorResponse(400, "invalid_family_deactivation", "Revisá el destino de la baja familiar pendiente.");
+      }
+
+      parsedOperation.data.payload = parsedTarget.data;
     } else {
       return errorResponse(400, "invalid_family_operation", "El padrón solo permite altas o cambios de integrantes.");
     }
@@ -243,6 +252,10 @@ export async function POST(request: NextRequest) {
     const result = await synchronizationService.apply(operation, resource, handler);
     return NextResponse.json(result, { status: 200, headers: privateHeaders });
   } catch (error) {
+    if (error instanceof FamilyDeactivationSyncError) {
+      return errorResponse(409, error.code, error.message);
+    }
+
     if (error instanceof RecordSynchronizationError) {
       return errorResponse(error.status, error.code, error.message);
     }

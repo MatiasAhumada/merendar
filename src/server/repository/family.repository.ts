@@ -1,9 +1,160 @@
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
+import { FamilyOperationAction, Prisma } from "@prisma/client";
 import type { CreateFamilyInput, FindFamiliesOptions, UpdateFamilyInput } from "@/types/family";
+
+export type FamilyDeactivationTarget = { kind: "family" } | { kind: "member"; memberId: string };
+export type FamilyDeactivationResult =
+  | { type: "deactivated"; family: FamilyWithMembers }
+  | { type: "missing" }
+  | { type: "missing-member" }
+  | { type: "conflict" }
+  | { type: "has-records" }
+  | { type: "last-member" }
+  | { type: "reference-member" };
+
+async function hasBeneficiarySheetReference(transaction: Prisma.TransactionClient, personIds: string[]) {
+  if (!personIds.length) {
+    return false;
+  }
+
+  const matchingSheets = await transaction.beneficiarySheet.findMany({
+    where: {
+      OR: personIds.map((personId) => ({
+        snapshot: { path: ["beneficiaries"], array_contains: [{ personId }] },
+      })),
+    },
+    select: { id: true },
+    take: 1,
+  });
+
+  return matchingSheets.length > 0;
+}
+
+export async function deactivateFamilyInTransaction(
+  transaction: Prisma.TransactionClient,
+  input: { familyId: string; target: FamilyDeactivationTarget; baseVersion: number; actorId: string; operationId: string; requestHash: string },
+): Promise<FamilyDeactivationResult> {
+  const target = input.target;
+  await transaction.$queryRaw(Prisma.sql`SELECT "id" FROM "Family" WHERE "id" = ${input.familyId} FOR UPDATE`);
+  const previousOperation = await transaction.familyOperation.findUnique({
+    where: { operationId: input.operationId },
+    include: { family: { include: FAMILY_INCLUDE } },
+  });
+
+  if (previousOperation) {
+    let expectedAction: FamilyOperationAction;
+
+    if (target.kind === "family") {
+      expectedAction = FamilyOperationAction.FAMILY_DEACTIVATED;
+    } else {
+      expectedAction = FamilyOperationAction.MEMBER_DEACTIVATED;
+    }
+    if (previousOperation.actorId !== input.actorId || previousOperation.requestHash !== input.requestHash || previousOperation.action !== expectedAction) {
+      return { type: "conflict" };
+    }
+
+    return { type: "deactivated", family: previousOperation.family };
+  }
+
+  const family = await transaction.family.findFirst({
+    where: { id: input.familyId, deactivatedAt: null },
+    include: { members: { where: { deactivatedAt: null }, include: { person: true, missingDocuments: true } } },
+  });
+
+  if (!family) {
+    return { type: "missing" };
+  }
+
+  if (family.version !== input.baseVersion) {
+    return { type: "conflict" };
+  }
+
+  let targetMember: FamilyWithMembers["members"][number] | undefined;
+
+  if (target.kind === "member") {
+    targetMember = family.members.find((member) => member.id === target.memberId);
+  }
+
+  if (target.kind === "member" && !targetMember) {
+    return { type: "missing-member" };
+  }
+
+  if (targetMember && family.members.length <= 1) {
+    return { type: "last-member" };
+  }
+
+  if (targetMember && family.referencePersonId === targetMember.personId) {
+    return { type: "reference-member" };
+  }
+
+  let affectedMembers = family.members;
+
+  if (targetMember) {
+    affectedMembers = [targetMember];
+  }
+  const affectedMemberIds = affectedMembers.map((member) => member.id);
+  const affectedPersonIds = affectedMembers.map((member) => member.personId);
+  const distributionRecord = await transaction.distributionRecord.findFirst({
+    where: { familyMemberId: { in: affectedMemberIds } },
+    select: { id: true },
+  });
+  const hasSheetReference = await hasBeneficiarySheetReference(transaction, affectedPersonIds);
+
+  if (distributionRecord || hasSheetReference) {
+    return { type: "has-records" };
+  }
+
+  const deactivatedAt = new Date();
+  const familyUpdate = await transaction.family.updateMany({
+    where: { id: family.id, version: input.baseVersion, deactivatedAt: null },
+    data: { version: { increment: 1 }, updatedAt: deactivatedAt },
+  });
+
+  if (!familyUpdate.count) {
+    return { type: "conflict" };
+  }
+
+  if (target.kind === "family") {
+    await transaction.family.update({
+      where: { id: family.id },
+      data: { deactivatedAt, deactivatedById: input.actorId },
+    });
+    await transaction.familyMember.updateMany({
+      where: { familyId: family.id, deactivatedAt: null },
+      data: { deactivatedAt, deactivatedById: input.actorId },
+    });
+  } else if (targetMember) {
+    await transaction.familyMember.update({
+      where: { id: targetMember.id },
+      data: { deactivatedAt, deactivatedById: input.actorId },
+    });
+  }
+
+  let action: FamilyOperationAction;
+
+  if (target.kind === "family") {
+    action = FamilyOperationAction.FAMILY_DEACTIVATED;
+  } else {
+    action = FamilyOperationAction.MEMBER_DEACTIVATED;
+  }
+
+  await transaction.familyOperation.create({
+    data: {
+      operationId: input.operationId,
+      actorId: input.actorId,
+      familyId: family.id,
+      requestHash: input.requestHash,
+      action,
+    },
+  });
+
+  const updatedFamily = await transaction.family.findUniqueOrThrow({ where: { id: family.id }, include: FAMILY_INCLUDE });
+  return { type: "deactivated", family: updatedFamily };
+}
 
 export const FAMILY_INCLUDE = {
   members: {
+    where: { deactivatedAt: null },
     include: {
       person: true,
       missingDocuments: true,
@@ -59,18 +210,25 @@ export const familyRepository = {
     }
 
     return prisma.family.findMany({
-      where: { AND: filters },
+      where: { AND: [...filters, { deactivatedAt: null }] },
       include: FAMILY_INCLUDE,
       orderBy: [{ neighborhood: "asc" }, { name: "asc" }],
     });
   },
 
   async findById(id: string) {
-    return prisma.family.findUnique({ where: { id }, include: FAMILY_INCLUDE });
+    return prisma.family.findFirst({ where: { id, deactivatedAt: null }, include: FAMILY_INCLUDE });
   },
 
   async findOperation(operationId: string) {
     return prisma.familyOperation.findUnique({ where: { operationId }, include: { family: { include: FAMILY_INCLUDE } } });
+  },
+
+  async deactivate(input: { familyId: string; target: FamilyDeactivationTarget; baseVersion: number; actorId: string; operationId: string; requestHash: string }) {
+    return prisma.$transaction(
+      (transaction) => deactivateFamilyInTransaction(transaction, input),
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
   },
 
   async findPersonByDni(dni: string) {
@@ -131,7 +289,7 @@ export const familyRepository = {
 
   async update(id: string, input: UpdateFamilyInput) {
     return prisma.family.updateMany({
-      where: { id, version: input.baseVersion },
+      where: { id, version: input.baseVersion, deactivatedAt: null },
       data: {
         name: input.name,
         neighborhood: input.neighborhood,
@@ -166,7 +324,7 @@ export const familyRepository = {
 
       if (input.action === "update-member") {
         const membership = await transaction.familyMember.findFirst({
-          where: { id: input.memberId, familyId },
+        where: { id: input.memberId, familyId, deactivatedAt: null },
           select: { personId: true },
         });
 

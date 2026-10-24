@@ -28,6 +28,8 @@ La decisión queda aceptada: Presidencia puede habilitar o quitar únicamente ca
 
 COD-1456 implementa el catálogo cerrado en `AccessCapability`, los valores por rol en `RoleCapabilityPolicy` y el historial append-only en `AccessPolicyChange`. `/permisos` permite a Presidencia revisar la matriz y las cuentas afectadas antes de guardar. La autorización efectiva se comprueba en el servidor para páginas y operaciones API, incluidos documentos privados y sincronización offline; la navegación refleja la política, pero no concede acceso. La administración de usuarios y de la propia política permanece reservada a Presidencia fuera de las capacidades editables.
 
+COD-1484 define las bajas de familias e integrantes como lógicas: conserva las filas `Person`, relaciones e historial, registra actor/fecha/operación y oculta la ficha del padrón activo. Las entregas o planillas vinculadas impiden la baja; el referente y el último integrante tampoco pueden quedar inactivos. Se aplican las mismas reglas a las solicitudes offline al sincronizar.
+
 ### Matriz inicial propuesta
 
 Las capacidades siguientes describen comportamiento ya implementado. Los nombres son contratos conceptuales para el ticket de implementación, no identificadores ya disponibles en código.
