@@ -4,7 +4,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { UserRole } from "@prisma/client";
 import { PDFDocument } from "pdf-lib";
-import { createBeneficiarySheetPdf } from "@/server/services/beneficiary-sheet.service";
+import { BENEFICIARY_SHEET_COLUMN_HEADERS, createBeneficiarySheetPdf } from "@/server/services/beneficiary-sheet.service";
 import { createLocalBeneficiarySheetPdf } from "@/services/local-beneficiary-sheet.service";
 import { NextRequest } from "next/server";
 import { z } from "zod";
@@ -33,6 +33,7 @@ function createRequest(url: string, method: string, token: string, body?: unknow
 }
 
 test("beneficiary records synchronize once and issued sheets retain a printable snapshot", async () => {
+  assert.equal(BENEFICIARY_SHEET_COLUMN_HEADERS.family, "Familia");
   assert.equal(process.env.ALLOW_SYNC_INTEGRATION_TESTS, "true");
   const databaseUrl = new URL(String(process.env.DATABASE_URL));
   assert.ok(["localhost", "127.0.0.1", "::1"].includes(databaseUrl.hostname));
@@ -145,7 +146,7 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     assert.notEqual(secondResult.sheet.id, sheetId);
     const preservedSheets = await prisma.beneficiarySheet.findMany({ where: { periodId }, orderBy: { version: "asc" } });
     assert.deepEqual(preservedSheets.map((savedSheet) => savedSheet.version), [1, 2]);
-    const firstSnapshotSchema = z.object({ beneficiaries: z.array(z.object({ name: z.string() })) });
+    const firstSnapshotSchema = z.object({ beneficiaries: z.array(z.object({ name: z.string(), familyName: z.string() })) });
     const firstSnapshot = firstSnapshotSchema.safeParse(preservedSheets[0]?.snapshot);
     assert.equal(firstSnapshot.success, true);
 
@@ -154,6 +155,7 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     }
 
     assert.equal(firstSnapshot.data.beneficiaries[0]?.name, "José Pérez");
+    assert.equal(firstSnapshot.data.beneficiaries[0]?.familyName, "Familia Pérez");
 
     const offlineSheetId = randomUUID();
     const offlineSheetOperation: SubmittedSyncOperation = {
@@ -224,7 +226,7 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
         personId: `person-${index}`,
         name: `María José Beneficiaria ${index}`,
         dni: `${index}`.padStart(8, "0"),
-        familyName: `Grupo Comunitario ${index}`,
+        familyName: `Familia Comunitaria ${index}`,
         address: "Pasaje de la Constitución y barrio de la Solidaridad 123",
       })),
     });

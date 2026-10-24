@@ -14,6 +14,14 @@ type PrintableRow = {
   height: number;
 };
 
+export const BENEFICIARY_SHEET_COLUMN_HEADERS = {
+  number: "N°",
+  beneficiary: "Beneficiario / DNI",
+  family: "Familia",
+  address: "Domicilio",
+  signature: "Firma manuscrita",
+} as const;
+
 const snapshotSchema = z.object({
   period: z.object({ label: z.string(), agency: z.string(), startsAt: z.string(), endsAt: z.string() }),
   version: z.number().int().positive(),
@@ -96,7 +104,7 @@ export async function createBeneficiarySheetPdf(rawSnapshot: unknown) {
     page.drawLine({ start: { x: margin, y }, end: { x: pageWidth - margin, y }, thickness: 0.8, color: accent });
     y -= 20;
     const columns = [margin, 54, 196, 275, 384];
-    const headers = ["N°", "Beneficiario / DNI", "Grupo", "Domicilio", "Firma manuscrita"];
+    const headers = Object.values(BENEFICIARY_SHEET_COLUMN_HEADERS);
 
     headers.forEach((header, index) => page.drawText(header, { x: columns[index], y, size: 7, font: boldFont, color: ink }));
     y -= 12;
