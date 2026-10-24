@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
 
       const memberships = await transaction.familyMember.findMany({
         where: { personId: { in: personIds } },
-        include: { person: { select: { id: true, firstName: true, lastName: true, dni: true } }, family: { select: { name: true, address: true } } },
+        include: { person: { select: { id: true, firstName: true, lastName: true, dni: true } }, family: { select: { name: true, address: true, neighborhood: true } } },
         orderBy: [{ family: { name: "asc" } }, { person: { lastName: "asc" } }, { person: { firstName: "asc" } }],
       });
 
@@ -53,12 +53,14 @@ export async function POST(request: NextRequest) {
         },
         version,
         createdAt,
+        templateVersion: 2,
         beneficiaries: memberships.map(({ person, family }) => ({
           personId: person.id,
           name: `${person.firstName} ${person.lastName}`,
           dni: person.dni ?? "",
           familyName: family.name,
           address: family.address,
+          neighborhood: family.neighborhood,
         })),
       };
 

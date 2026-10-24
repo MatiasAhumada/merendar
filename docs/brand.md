@@ -12,6 +12,7 @@ Merendar es la marca del software. Orgullo y Solidaridad conserva su nombre en c
 | Isotipo transparente | `public/brand/merendar-isotipo.png` | Navegación y espacios compactos |
 | Isotipo para fondos oscuros | `public/brand/merendar-isotipo-dark.png` | Fondo oscuro |
 | Isotipo monocromático | `public/brand/merendar-isotipo-monochrome.png` | Impresión a una tinta |
+| Logo aprobado del Ministerio de Desarrollo Social y Gobierno de Tucumán | `public/brand/ministerio-desarrollo-social-tucuman.png` | Encabezado de la planilla aprobada de entrega de módulos; PNG con transparencia |
 | Máster raster del isotipo | `public/brand/merendar-mark-master.png` | Emblema de 1200 × 1200 px con transparencia |
 | Favicon | `src/app/favicon.ico` | ICO con tamaños 16, 32 y 48 px |
 | Icono de aplicación | `public/icon-192.png`, `public/icon-512.png` | PNG de 192 y 512 px |

@@ -1,11 +1,13 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { UserRole } from "@prisma/client";
 import { PDFDocument } from "pdf-lib";
-import { BENEFICIARY_SHEET_COLUMN_HEADERS, createBeneficiarySheetPdf } from "@/server/services/beneficiary-sheet.service";
+import { createBeneficiarySheetPdf } from "@/server/services/beneficiary-sheet.service";
 import { createLocalBeneficiarySheetPdf } from "@/services/local-beneficiary-sheet.service";
+import { BENEFICIARY_SHEET_COLUMN_HEADERS } from "@/validations/record.validation";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";
@@ -33,7 +35,7 @@ function createRequest(url: string, method: string, token: string, body?: unknow
 }
 
 test("beneficiary records synchronize once and issued sheets retain a printable snapshot", async () => {
-  assert.equal(BENEFICIARY_SHEET_COLUMN_HEADERS.family, "Familia");
+  assert.deepEqual(Object.values(BENEFICIARY_SHEET_COLUMN_HEADERS), ["N°", "Apellido y Nombre", "DNI", "Dirección", "Barrio", "Fecha de entrega", "Firma"]);
   assert.equal(process.env.ALLOW_SYNC_INTEGRATION_TESTS, "true");
   const databaseUrl = new URL(String(process.env.DATABASE_URL));
   assert.ok(["localhost", "127.0.0.1", "::1"].includes(databaseUrl.hostname));
@@ -144,13 +146,21 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     assert.match(pdfStructure, /\/Subtype\s*\/Image/);
     assert.match(pdfStructure, /\/SMask\s+\d+\s+\d+\s+R/);
 
+    const legacyPdf = await PDFDocument.load(await createBeneficiarySheetPdf({
+      period: { label: `Octubre ${suffix}`, agency: "Desarrollo Social", startsAt: "2026-10-01", endsAt: "2026-10-31" },
+      version: 1,
+      createdAt: new Date().toISOString(),
+      beneficiaries: [{ personId, name: "José Pérez", dni: "12345678", familyName: "Familia Pérez", address: "Pasaje de la Constitución 123" }],
+    }));
+    assert.equal(legacyPdf.getPageCount(), 1);
+
     const secondIssue = await issueSheet(createRequest("http://localhost:3000/api/records/sheets", "POST", token, { periodId, personIds: [personId] }));
     const secondResult = await secondIssue.json() as { sheet: { id: string; version: number } };
     assert.equal(secondResult.sheet.version, 2);
     assert.notEqual(secondResult.sheet.id, sheetId);
     const preservedSheets = await prisma.beneficiarySheet.findMany({ where: { periodId }, orderBy: { version: "asc" } });
     assert.deepEqual(preservedSheets.map((savedSheet) => savedSheet.version), [1, 2]);
-    const firstSnapshotSchema = z.object({ beneficiaries: z.array(z.object({ name: z.string(), familyName: z.string() })) });
+    const firstSnapshotSchema = z.object({ templateVersion: z.literal(2), beneficiaries: z.array(z.object({ name: z.string(), familyName: z.string(), neighborhood: z.string() })) });
     const firstSnapshot = firstSnapshotSchema.safeParse(preservedSheets[0]?.snapshot);
     assert.equal(firstSnapshot.success, true);
 
@@ -160,6 +170,7 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
 
     assert.equal(firstSnapshot.data.beneficiaries[0]?.name, "José Pérez");
     assert.equal(firstSnapshot.data.beneficiaries[0]?.familyName, "Familia Pérez");
+    assert.equal(firstSnapshot.data.beneficiaries[0]?.neighborhood, "Villa Nueva");
 
     const offlineSheetId = randomUUID();
     const offlineSheetOperation: SubmittedSyncOperation = {
@@ -174,12 +185,13 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
         kind: "beneficiary-sheet",
         id: offlineSheetId,
         periodId,
+        templateVersion: 2,
         period: { label: `Octubre ${suffix}`, agency: "Desarrollo Social", startsAt: "2026-10-01", endsAt: "2026-10-31" },
-        beneficiaries: [{ personId, name: "José Pérez impreso", dni: "12345678", familyName: "Familia Pérez", address: "Pasaje de la Constitución 123" }],
+        beneficiaries: [{ personId, name: "José Pérez impreso", dni: "12345678", familyName: "Familia Pérez", address: "Pasaje de la Constitución 123", neighborhood: "Villa Nueva" }],
       },
     };
     const offlineDraft = beneficiarySheetDraftSchema.parse(offlineSheetOperation.payload);
-    const localPdf = await PDFDocument.load(await createLocalBeneficiarySheetPdf(offlineDraft));
+    const localPdf = await PDFDocument.load(await createLocalBeneficiarySheetPdf(offlineDraft, await readFile("public/brand/ministerio-desarrollo-social-tucuman.png")));
     assert.equal(localPdf.getPageCount(), 1);
     const offlineSheetResult = await synchronizationService.apply(offlineSheetOperation, "RECORDS", recordSynchronizationHandler);
     const replayedOfflineSheetResult = await synchronizationService.apply(offlineSheetOperation, "RECORDS", recordSynchronizationHandler);
@@ -226,13 +238,15 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
       period: { label: "Módulo de prueba", agency: "Desarrollo Social", startsAt: "2026-10-01", endsAt: "2026-10-31" },
       version: 3,
       createdAt: new Date().toISOString(),
-      beneficiaries: Array.from({ length: 30 }, (_, index) => ({
+      beneficiaries: Array.from({ length: 50 }, (_, index) => ({
         personId: `person-${index}`,
         name: `María José Beneficiaria ${index}`,
         dni: `${index}`.padStart(8, "0"),
         familyName: `Familia Comunitaria ${index}`,
         address: "Pasaje de la Constitución y barrio de la Solidaridad 123",
+        neighborhood: "Villa Nueva",
       })),
+      templateVersion: 2,
     });
     const paginatedDocument = await PDFDocument.load(paginatedBytes);
     assert.ok(paginatedDocument.getPageCount() > 1);
