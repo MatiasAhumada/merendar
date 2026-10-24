@@ -11,29 +11,8 @@ import { PATCH } from "@/app/api/families/[id]/route";
 import { POST as addFamilyMember } from "@/app/api/families/[id]/members/route";
 import { PATCH as updateFamilyMember } from "@/app/api/families/[id]/members/[memberId]/route";
 import { POST as synchronizeOperation } from "@/app/api/synchronizations/route";
+import { familyCollectionSchema, familyResponseSchema } from "@/validations/family.validation";
 
-const createdFamilySchema = z.object({
-  family: z.object({
-    id: z.string(),
-    name: z.string(),
-    neighborhood: z.string(),
-    address: z.string(),
-    contactPhone: z.string().nullable(),
-    contactEmail: z.string().nullable(),
-    referencePersonId: z.string().nullable(),
-    updatedAt: z.string(),
-    version: z.number(),
-    members: z.array(z.object({
-      id: z.string(),
-      membershipId: z.string(),
-      firstName: z.string(),
-      lastName: z.string(),
-      dni: z.string().nullable(),
-      missingDocuments: z.array(z.object({ id: z.string(), documentType: z.string() })),
-    })),
-  }),
-});
-const familyListSchema = z.object({ families: z.array(z.object({ id: z.string(), name: z.string(), members: z.array(z.object({ dni: z.string().nullable() })) })) });
 const errorSchema = z.object({ error: z.object({ message: z.string(), details: z.record(z.string(), z.array(z.string())).optional() }) });
 const synchronizationResponseSchema = z.object({
   operationId: z.uuid(),
@@ -103,7 +82,7 @@ test("family registry persists records, rejects duplicate identities and enforce
     const createResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, familyInput));
     assert.equal(createResponse.status, 201);
     assert.match(createResponse.headers.get("cache-control") ?? "", /no-store/);
-    const parsedCreate = createdFamilySchema.safeParse(await createResponse.json());
+    const parsedCreate = familyResponseSchema.safeParse(await createResponse.json());
     assert.equal(parsedCreate.success, true);
 
     if (!parsedCreate.success) {
@@ -115,9 +94,11 @@ test("family registry persists records, rejects duplicate identities and enforce
     assert.equal(createdFamily.members.length, 2);
     assert.equal(createdFamily.members.reduce((total, member) => total + member.missingDocuments.length, 0), 1);
     assert.equal(createdFamily.members.some((member) => member.dni === dnis[0]), true);
+    assert.equal(createdFamily.members.some((member) => member.relationship === "Referente"), true);
+    assert.equal(createdFamily.members.some((member) => member.missingDocuments.some((document) => document.documentType === "DNI")), true);
 
     const retriedResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, familyInput));
-    const parsedRetry = createdFamilySchema.safeParse(await retriedResponse.json());
+    const parsedRetry = familyResponseSchema.safeParse(await retriedResponse.json());
     assert.equal(retriedResponse.status, 201);
     assert.equal(parsedRetry.success, true);
 
@@ -129,7 +110,7 @@ test("family registry persists records, rejects duplicate identities and enforce
 
     const listResponse = await GET(createRequest(`http://localhost:3000/api/families?search=${dnis[0]}`, "GET", secretaryToken));
     assert.equal(listResponse.status, 200);
-    const parsedList = familyListSchema.safeParse(await listResponse.json());
+    const parsedList = familyCollectionSchema.safeParse(await listResponse.json());
     assert.equal(parsedList.success, true);
 
     if (!parsedList.success) {
@@ -138,6 +119,8 @@ test("family registry persists records, rejects duplicate identities and enforce
 
     assert.equal(parsedList.data.families.length, 1);
     assert.equal(parsedList.data.families[0]?.name, familyInput.name);
+    assert.equal(parsedList.data.families[0]?.members.some((member) => member.relationship === "Referente"), true);
+    assert.equal(parsedList.data.families[0]?.members.some((member) => member.missingDocuments.some((document) => document.documentType === "DNI")), true);
 
     const duplicateResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", secretaryToken, {
       ...familyInput,
@@ -237,7 +220,7 @@ test("family registry persists records, rejects duplicate identities and enforce
     };
     const addMemberResponse = await addFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members`, "POST", secretaryToken, addMemberBody), { params: Promise.resolve({ id: createdFamily.id }) });
     assert.equal(addMemberResponse.status, 201);
-    const parsedAddedMember = createdFamilySchema.safeParse(await addMemberResponse.json());
+    const parsedAddedMember = familyResponseSchema.safeParse(await addMemberResponse.json());
     assert.equal(parsedAddedMember.success, true);
 
     if (!parsedAddedMember.success) {
@@ -251,7 +234,7 @@ test("family registry persists records, rejects duplicate identities and enforce
 
     const replayedAddMember = await addFamilyMember(createRequest(`http://localhost:3000/api/families/${createdFamily.id}/members`, "POST", secretaryToken, addMemberBody), { params: Promise.resolve({ id: createdFamily.id }) });
     assert.equal(replayedAddMember.status, 201);
-    const replayedFamilyBody = createdFamilySchema.safeParse(await replayedAddMember.json());
+    const replayedFamilyBody = familyResponseSchema.safeParse(await replayedAddMember.json());
     assert.equal(replayedFamilyBody.success, true);
 
     if (!replayedFamilyBody.success) {
@@ -286,7 +269,7 @@ test("family registry persists records, rejects duplicate identities and enforce
       referencePersonId: createdFamily.members[0]?.id ?? "",
     }), { params: Promise.resolve({ id: createdFamily.id, memberId: addedMemberId }) });
     assert.equal(updateMemberResponse.status, 200);
-    const parsedUpdatedFamily = createdFamilySchema.safeParse(await updateMemberResponse.json());
+    const parsedUpdatedFamily = familyResponseSchema.safeParse(await updateMemberResponse.json());
     assert.equal(parsedUpdatedFamily.success, true);
 
     if (!parsedUpdatedFamily.success) {

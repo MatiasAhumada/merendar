@@ -453,6 +453,8 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
   const [formErrors, setFormErrors] = useState<Record<string, string[]>>({});
   const [formMessage, setFormMessage] = useState("");
   const [queueMessage, setQueueMessage] = useState("");
+  const [needsFamilyRefresh, setNeedsFamilyRefresh] = useState(false);
+  const [isRefreshingFamilies, setIsRefreshingFamilies] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const refreshOfflineFamilies = useCallback(async () => {
     try {
@@ -640,10 +642,12 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     }
 
     try {
+      let submittedOperationId = editingOperation?.operationId;
+
       if (editingOperation) {
         await updateOfflineOperationPayload(userId, editingOperation.operationId, toFamilyJsonPayload(parsedPayload.data));
       } else {
-        await enqueueOfflineOperation(userId, sessionExpiresAt, {
+        const queuedOperation = await enqueueOfflineOperation(userId, sessionExpiresAt, {
           resource: "families",
           resourceId: crypto.randomUUID(),
           operation: "create",
@@ -651,6 +655,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
           dependencies: [],
           payload: toFamilyJsonPayload(parsedPayload.data),
         });
+        submittedOperationId = queuedOperation.operationId;
       }
       await refreshOfflineFamilies();
       closeForm();
@@ -658,10 +663,25 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       if (navigator.onLine) {
         try {
           await synchronizeOfflineQueue(userId);
+        } catch {
           await refreshOfflineFamilies();
+          setQueueMessage("El borrador quedó guardado en este dispositivo y sigue pendiente de confirmación del servidor. Reintentá la sincronización cuando vuelva a estar disponible.");
+          return;
+        }
+
+        const pendingFamilyOperations = await refreshOfflineFamilies();
+        const submittedOperation = pendingFamilyOperations.find((operation) => operation.operationId === submittedOperationId);
+
+        if (submittedOperation) {
+          setQueueMessage("El borrador quedó guardado en este dispositivo y sigue pendiente de confirmación del servidor. Reintentá la sincronización cuando esté disponible.");
+          return;
+        }
+
+        try {
           await refreshFamilies();
         } catch {
-          setQueueMessage("El borrador quedó guardado y se sincronizará cuando el servidor esté disponible.");
+          setNeedsFamilyRefresh(true);
+          setQueueMessage("La familia ya está confirmada en el servidor, pero no pudimos actualizar el padrón. Reintentá la actualización sin volver a cargarla.");
         }
       }
     } catch (error) {
@@ -672,6 +692,20 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       }
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function retryFamilyRefresh() {
+    setIsRefreshingFamilies(true);
+
+    try {
+      await refreshFamilies();
+      setNeedsFamilyRefresh(false);
+      setQueueMessage("");
+    } catch {
+      setQueueMessage("La familia está confirmada en el servidor, pero el padrón sigue sin actualizarse. Podés volver a intentarlo sin duplicar el registro.");
+    } finally {
+      setIsRefreshingFamilies(false);
     }
   }
 
@@ -787,8 +821,13 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
 
       {queueMessage ? (
         <Alert variant="info">
-          <AlertTitle>Estado de la captura offline</AlertTitle>
-          <AlertDescription>{queueMessage}</AlertDescription>
+          <AlertTitle>{needsFamilyRefresh ? "Familia guardada" : "Estado de la captura offline"}</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center gap-3">
+            <span>{queueMessage}</span>
+            {needsFamilyRefresh ? <Button type="button" variant="outline" size="sm" onClick={() => void retryFamilyRefresh()} disabled={isRefreshingFamilies}>
+              {isRefreshingFamilies ? "Actualizando padrón…" : "Reintentar actualización"}
+            </Button> : null}
+          </AlertDescription>
         </Alert>
       ) : null}
 

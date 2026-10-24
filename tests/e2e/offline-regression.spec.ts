@@ -157,7 +157,7 @@ test("prepares private views, keeps them available after network loss, and isola
 
     const privateCacheCheck = await page.evaluate(async () => {
       const cacheNames = await caches.keys();
-      const publicCache = await caches.open("merendar-public-v3");
+      const publicCache = await caches.open("merendar-public-v4");
       const cachedRequests = await publicCache.keys();
       return {
         cacheNames,
@@ -166,7 +166,7 @@ test("prepares private views, keeps them available after network loss, and isola
         cachedPaths: cachedRequests.map((request) => new URL(request.url).pathname),
       };
     });
-    expect(privateCacheCheck.cacheNames).toEqual(["merendar-public-v3"]);
+    expect(privateCacheCheck.cacheNames).toEqual(["merendar-public-v4"]);
     expect(privateCacheCheck.privateApiCached).toBe(false);
     expect(privateCacheCheck.privateRouteCached).toBe(false);
     expect(privateCacheCheck.cachedPaths.some((path) => path.startsWith("/api/") || path === "/familias")).toBe(false);
@@ -221,12 +221,29 @@ test("prepares private views, keeps them available after network loss, and isola
   }
 });
 
-test("shows an online family immediately and retains one record after refresh", async ({ browser, context, page }, testInfo) => {
+test("recovers a confirmed family after a failed list refresh without duplicating it", async ({ browser, context, page }, testInfo) => {
   const president = await createBrowserIdentity(UserRole.PRESIDENTE);
   const familyName = `Browser Online ${randomUUID()}`;
+  let failFamilyRefreshes = false;
+  let failedFamilyRefreshes = 0;
 
   try {
     await setBrowserIdentity(context, page, president);
+    await page.route("**/*", async (route) => {
+      const requestUrl = new URL(route.request().url());
+
+      if (failFamilyRefreshes && requestUrl.pathname === "/api/families" && route.request().method() === "GET") {
+        failedFamilyRefreshes += 1;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { message: "Falla de refresco sintética" } }),
+        });
+        return;
+      }
+
+      await route.continue();
+    });
     await page.goto("/familias");
     await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
     await page.getByRole("button", { name: "Nueva familia" }).click();
@@ -234,10 +251,19 @@ test("shows an online family immediately and retains one record after refresh", 
     await page.locator("#family-neighborhood").click();
     await page.getByRole("option", { name: "San Cayetano" }).click();
     await page.locator("#family-address").fill("Domicilio de prueba 1478");
+    await page.locator("#family-phone").fill("3815550142");
     await page.locator('input[id^="member-first-"]').fill("Integrante");
     await page.locator('input[id^="member-last-"]').fill("Online");
+    await page.locator('input[id^="member-dni-"]').fill("14790001");
+    failFamilyRefreshes = true;
     await page.getByRole("button", { name: "Guardar familia" }).click();
 
+    await expect(page.getByRole("alert").getByText("La familia ya está confirmada en el servidor, pero no pudimos actualizar el padrón. Reintentá la actualización sin volver a cargarla.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reintentar actualización" })).toBeEnabled();
+    await expect.poll(async () => prisma.family.count({ where: { name: familyName } }), { timeout: 15_000 }).toBe(1);
+    expect(failedFamilyRefreshes).toBeGreaterThan(0);
+    failFamilyRefreshes = false;
+    await page.getByRole("button", { name: "Reintentar actualización" }).click();
     await expect(page.getByRole("heading", { name: familyName, exact: true })).toHaveCount(1);
     await expect.poll(async () => prisma.family.count({ where: { name: familyName } }), { timeout: 15_000 }).toBe(1);
     await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyName);
@@ -250,6 +276,50 @@ test("shows an online family immediately and retains one record after refresh", 
   } finally {
     await context.setOffline(false);
     await removeBrowserFamily(familyName);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("reports a family as pending when the server has not confirmed synchronization", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const familyName = `Browser Pending ${randomUUID()}`;
+  let failNextSynchronization = false;
+
+  try {
+    await setBrowserIdentity(context, page, president);
+    await page.route("**/api/synchronizations", async (route) => {
+      if (failNextSynchronization && route.request().method() === "POST") {
+        failNextSynchronization = false;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "server_unavailable", message: "Falla de sincronización sintética" } }),
+        });
+        return;
+      }
+
+      await route.continue();
+    });
+    await page.goto("/familias");
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
+    await page.getByRole("button", { name: "Nueva familia" }).click();
+    await page.locator("#family-name").fill(familyName);
+    await page.locator("#family-neighborhood").click();
+    await page.getByRole("option", { name: "San Cayetano" }).click();
+    await page.locator("#family-address").fill("Domicilio de prueba 1479");
+    await page.locator("#family-phone").fill("3815550142");
+    await page.locator('input[id^="member-first-"]').fill("Integrante");
+    await page.locator('input[id^="member-last-"]').fill("Pendiente");
+    await page.locator('input[id^="member-dni-"]').fill("14790004");
+    failNextSynchronization = true;
+    await page.getByRole("button", { name: "Guardar familia" }).click();
+
+    await expect(page.getByRole("alert").getByText("El borrador quedó guardado en este dispositivo y sigue pendiente de confirmación del servidor. Reintentá la sincronización cuando esté disponible.")).toBeVisible();
+    await expect(page.getByText(familyName, { exact: true })).toBeVisible();
+    await expect.poll(async () => prisma.family.count({ where: { name: familyName } })).toBe(0);
+  } finally {
+    await context.setOffline(false);
     await removeBrowserIdentity(president);
     await prisma.$disconnect();
   }
@@ -275,8 +345,10 @@ test("creates a family and adds a member offline, then syncs the dependency chai
     await page.locator("#family-neighborhood").click();
     await page.getByRole("option", { name: "San Cayetano" }).click();
     await page.locator("#family-address").fill("Domicilio de prueba 1478");
+    await page.locator("#family-phone").fill("3815550142");
     await page.locator('input[id^="member-first-"]').fill("Integrante");
     await page.locator('input[id^="member-last-"]').fill("Offline");
+    await page.locator('input[id^="member-dni-"]').fill("14790002");
     await page.getByRole("button", { name: "Guardar familia" }).click();
     await expect(page.getByText(familyName, { exact: true })).toBeVisible();
     await expect(page.getByText("1 integrante", { exact: true })).toBeVisible();
@@ -285,6 +357,7 @@ test("creates a family and adds a member offline, then syncs the dependency chai
     await page.getByRole("button", { name: "Agregar integrante" }).click();
     await page.locator("#family-member-first-name").fill("Segundo");
     await page.locator("#family-member-last-name").fill("Offline");
+    await page.locator("#family-member-dni").fill("14790003");
     await page.getByRole("button", { name: "Guardar integrante" }).click();
     await expect.poll(async () => page.evaluate(async (userId) => {
       const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
