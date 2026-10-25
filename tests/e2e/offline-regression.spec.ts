@@ -75,7 +75,7 @@ test("renders the role access matrix for every account type", async ({ browser, 
   }
 });
 
-test("prepares private views, keeps them available after network loss, and isolates a second account", async ({ browser, context, page }, testInfo) => {
+test("prepares private views automatically from a deep route, keeps them available after network loss, and isolates a second account", async ({ browser, context, page }, testInfo) => {
   const president = await createBrowserIdentity(UserRole.PRESIDENTE);
   let secretary: BrowserIdentity | undefined;
 
@@ -84,11 +84,26 @@ test("prepares private views, keeps them available after network loss, and isola
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
-    await page.goto("/");
-    await expect(page.getByRole("heading", { name: `Hola, Browser ${UserRole.PRESIDENTE}` })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Preparar offline" })).toBeEnabled();
-    await page.getByRole("button", { name: "Preparar offline" }).click();
-    await expect(page.getByText(/Vistas preparadas el/)).toBeVisible({ timeout: 30_000 });
+    await page.goto("/familias");
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "Preparar offline" })).toHaveCount(0);
+
+    const preparedSnapshot = await page.evaluate(async (userId) => {
+      const databaseRequest = indexedDB.open(`merendar-offline-preparation-${encodeURIComponent(userId)}`, 3);
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        databaseRequest.onsuccess = () => resolve(databaseRequest.result);
+        databaseRequest.onerror = () => reject(databaseRequest.error);
+      });
+      const snapshot = await new Promise<{ snapshots: Record<string, unknown> } | undefined>((resolve, reject) => {
+        const request = database.transaction("workspace", "readonly").objectStore("workspace").get("latest");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      database.close();
+      return Object.keys(snapshot?.snapshots ?? {});
+    }, president.userId);
+    expect(preparedSnapshot).toEqual(expect.arrayContaining(["/", "/familias", "/mercaderia", "/entrega", "/usuarios", "/permisos"]));
 
     await page.evaluate(async () => {
       await navigator.serviceWorker.ready;
@@ -144,7 +159,8 @@ test("prepares private views, keeps them available after network loss, and isola
     await context.setOffline(true);
     await page.goto("/familias");
     await expect(page.getByRole("heading", { name: "Acceso sin conexión" })).toBeVisible();
-    await expect(page.getByText("No hay una preparación vigente para esta cuenta", { exact: true })).toBeVisible();
+    await expect(page.getByText("Browser TESORERIA · Tesorería", { exact: true })).toBeVisible();
+    await expect(page.getByText("Esta vista no está habilitada para esta cuenta", { exact: true })).toBeVisible();
     await expect(page.getByText(/Datos privados recuperados del almacenamiento local de Browser/)).toHaveCount(0);
     const isolationScreenshot = await page.screenshot({ fullPage: true });
     await testInfo.attach("offline-account-isolation.png", {
@@ -158,6 +174,410 @@ test("prepares private views, keeps them available after network loss, and isola
     if (secretary) {
       await removeBrowserIdentity(secretary);
     }
+    await prisma.$disconnect();
+  }
+});
+
+test("prepares merchandise requests without treating them as beneficiary sheet PDFs", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const suffix = randomUUID();
+  let periodId: string | null = null;
+  let requestId: string | null = null;
+  let quotaId: string | null = null;
+  let remittanceId: string | null = null;
+  const beneficiarySheetRequests: string[] = [];
+
+  try {
+    const period = await prisma.merchandisePeriod.create({
+      data: {
+        label: `COD1478 preparation ${suffix}`,
+        agency: "QA browser",
+        startsAt: new Date("2026-10-01T00:00:00.000Z"),
+        endsAt: new Date("2026-10-31T00:00:00.000Z"),
+      },
+    });
+    periodId = period.id;
+    const request = await prisma.merchandiseRequest.create({
+      data: {
+        periodId: period.id,
+        requestNumber: `COD1478-${suffix}`,
+        requestedAt: new Date("2026-10-25T00:00:00.000Z"),
+        requestedQuantity: 1,
+        createdById: president.userId,
+      },
+    });
+    requestId = request.id;
+    const quota = await prisma.merchandiseQuota.create({
+      data: {
+        requestId: request.id,
+        approvedQuantity: 1,
+        approvedAt: new Date("2026-10-25T00:00:00.000Z"),
+        approvedById: president.userId,
+      },
+    });
+    quotaId = quota.id;
+    const remittance = await prisma.merchandiseRemittance.create({
+      data: {
+        requestId: request.id,
+        quotaId: quota.id,
+        remittanceNumber: `COD1478-REM-${suffix}`,
+        receivedAt: new Date("2026-10-25T00:00:00.000Z"),
+        receivedQuantity: 1,
+        responsibleName: "QA browser",
+        createdById: president.userId,
+      },
+    });
+    remittanceId = remittance.id;
+
+    await setBrowserIdentity(context, president);
+    page.on("request", (requestEvent) => {
+      if (requestEvent.url().includes("/api/records/sheets/")) {
+        beneficiarySheetRequests.push(requestEvent.url());
+      }
+    });
+    await page.goto("/mercaderia");
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/No se completó la preparación automática/)).toHaveCount(0);
+    expect(beneficiarySheetRequests).toEqual([]);
+  } finally {
+    await context.setOffline(false);
+    if (remittanceId) {
+      await prisma.merchandiseRemittance.delete({ where: { id: remittanceId } });
+    }
+    if (quotaId) {
+      await prisma.merchandiseQuota.delete({ where: { id: quotaId } });
+    }
+    if (requestId) {
+      await prisma.merchandiseRequest.delete({ where: { id: requestId } });
+    }
+    if (periodId) {
+      await prisma.merchandisePeriod.delete({ where: { id: periodId } });
+    }
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("creates a dependent merchandise chain offline and synchronizes each operation once", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const suffix = randomUUID();
+  const periodLabel = `COD1478 Offline ${suffix}`;
+  const requestNumber = `COD1478-REQ-${suffix}`;
+  const remittanceNumber = `COD1478-REM-${suffix}`;
+  let periodId = "";
+  let requestId = "";
+  let quotaId = "";
+  let remittanceId = "";
+  const pageErrors: string[] = [];
+
+  try {
+    await setBrowserIdentity(context, president);
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.goto("/mercaderia");
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(async () => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+    await context.setOffline(true);
+    await page.goto("/mercaderia");
+    await expect(page).toHaveURL(/\/offline\?route=%2Fmercaderia/);
+    await expect(page.getByRole("heading", { name: "Recepción de mercadería" })).toBeVisible();
+    await expect(page.getByText("Sin conexión", { exact: true }).first()).toBeVisible();
+    await page.getByRole("button", { name: "Nuevo período" }).click();
+    await page.locator("#period-label").fill(periodLabel);
+    await page.locator("#period-agency").fill("COD1478 QA offline");
+    await page.locator("#period-start").fill("2026-10-01");
+    await page.locator("#period-end").fill("2026-10-31");
+    await page.getByRole("button", { name: "Guardar período" }).click();
+    await expect(page.getByRole("heading", { name: periodLabel })).toBeVisible();
+
+    await page.getByRole("button", { name: "Registrar solicitud" }).click();
+    await page.locator('input[id^="request-number-"]').fill(requestNumber);
+    await page.locator('input[id^="request-date-"]').fill("2026-10-25");
+    await page.locator('input[id^="request-quantity-"]').fill("3");
+    await page.getByRole("button", { name: "Guardar solicitud" }).click();
+    await expect(page.getByRole("heading", { name: `Solicitud ${requestNumber}` })).toBeVisible();
+
+    await page.getByRole("button", { name: "Registrar cupo" }).click();
+    await page.locator('input[id^="quota-quantity-"]').fill("3");
+    await page.locator('input[id^="quota-date-"]').fill("2026-10-25");
+    await page.getByRole("button", { name: "Guardar cupo" }).click();
+
+    await page.getByRole("button", { name: "Registrar remito" }).click();
+    await page.locator('input[id^="remittance-number-"]').fill(remittanceNumber);
+    await page.locator('input[id^="remittance-date-"]').fill("2026-10-25");
+    await page.locator('input[id^="remittance-quantity-"]').fill("3");
+    await page.locator('input[id^="remittance-manager-"]').fill("Responsable QA offline");
+    await page.getByRole("button", { name: "Guardar remito" }).click();
+    await expect(page.getByRole("heading", { name: `Remito N° ${remittanceNumber}` })).toBeVisible();
+
+    const queuedOperations = await page.evaluate(async (userId) => {
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const operations = await new Promise<Array<{ operationId: string; resource: string; dependencies: string[]; resourceId: string; createdAt: string }>>((resolve, reject) => {
+        const operationRequest = database.transaction("operations", "readonly").objectStore("operations").getAll();
+        operationRequest.onsuccess = () => resolve(operationRequest.result);
+        operationRequest.onerror = () => reject(operationRequest.error);
+      });
+      database.close();
+      return operations.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    }, president.userId);
+    expect(queuedOperations).toHaveLength(4);
+    expect(queuedOperations.every((operation) => operation.resource === "remittances")).toBe(true);
+    periodId = queuedOperations[0]?.resourceId ?? "";
+    requestId = queuedOperations[1]?.resourceId ?? "";
+    quotaId = queuedOperations[2]?.resourceId ?? "";
+    remittanceId = queuedOperations[3]?.resourceId ?? "";
+    expect(queuedOperations[1]?.dependencies).toContain(queuedOperations[0]?.operationId);
+    expect(queuedOperations[2]?.dependencies).toContain(queuedOperations[1]?.operationId);
+    expect(queuedOperations[3]?.dependencies).toEqual(expect.arrayContaining([queuedOperations[1]?.operationId, queuedOperations[2]?.operationId]));
+    expect(await prisma.merchandisePeriod.count({ where: { id: periodId } })).toBe(0);
+
+    await context.setOffline(false);
+    await expect.poll(async () => prisma.synchronizationReceipt.count({ where: { operationId: { in: queuedOperations.map((operation) => operation.operationId) } } }), { timeout: 30_000 }).toBe(4);
+    const syncedPeriod = await prisma.merchandisePeriod.findUnique({
+      where: { id: periodId },
+      include: { requests: { include: { quota: true, remittances: true } } },
+    });
+    expect(syncedPeriod?.requests).toHaveLength(1);
+    expect(syncedPeriod?.requests[0]?.quota?.approvedQuantity).toBe(3);
+    expect(syncedPeriod?.requests[0]?.remittances).toHaveLength(1);
+    expect(syncedPeriod?.requests[0]?.remittances[0]?.receivedQuantity).toBe(3);
+
+    await context.setOffline(true);
+    await context.setOffline(false);
+    await expect.poll(async () => prisma.synchronizationReceipt.count({ where: { operationId: { in: queuedOperations.map((operation) => operation.operationId) } } }), { timeout: 10_000 }).toBe(4);
+    expect(await prisma.merchandiseRequest.count({ where: { id: requestId } })).toBe(1);
+    expect(await prisma.merchandiseQuota.count({ where: { id: quotaId } })).toBe(1);
+    expect(await prisma.merchandiseRemittance.count({ where: { id: remittanceId } })).toBe(1);
+    expect(pageErrors).toEqual([]);
+  } finally {
+    await context.setOffline(false);
+    await prisma.merchandiseRemittance.deleteMany({ where: { id: remittanceId } });
+    await prisma.merchandiseQuota.deleteMany({ where: { id: quotaId } });
+    await prisma.merchandiseRequest.deleteMany({ where: { id: requestId } });
+    await prisma.merchandisePeriod.deleteMany({ where: { id: periodId } });
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("uploads a rendition PDF offline and preserves the file through idempotent synchronization", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const suffix = randomUUID();
+  const periodLabel = `COD1478 Rendition offline ${suffix}`;
+  const originalName = `planilla-firmada-${suffix}.pdf`;
+  const pdfContent = Buffer.from("%PDF-1.7\nBrowser synthetic signed sheet\n%%EOF\n");
+  let periodId = "";
+  let sheetId = "";
+  let documentId = "";
+  let renditionId = "";
+  const pageErrors: string[] = [];
+
+  try {
+    const period = await prisma.merchandisePeriod.create({
+      data: {
+        label: periodLabel,
+        agency: "COD1478 QA browser",
+        startsAt: new Date("2026-10-01T00:00:00.000Z"),
+        endsAt: new Date("2026-10-31T00:00:00.000Z"),
+      },
+    });
+    periodId = period.id;
+    const sheet = await prisma.beneficiarySheet.create({
+      data: {
+        periodId: period.id,
+        version: 1,
+        createdById: president.userId,
+        snapshot: {
+          period: { label: period.label, agency: period.agency, startsAt: "2026-10-01", endsAt: "2026-10-31" },
+          version: 1,
+          createdAt: new Date().toISOString(),
+          beneficiaries: [{ personId: randomUUID(), name: "Browser QA", dni: "14802789", familyName: "COD1478 QA", address: "Domicilio sintético" }],
+        },
+      },
+    });
+    sheetId = sheet.id;
+
+    await setBrowserIdentity(context, president);
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.goto("/mercaderia#rendiciones");
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("combobox", { name: "Módulo o período" }).click();
+    await page.getByRole("option", { name: new RegExp(periodLabel) }).click();
+    await expect(page.getByRole("combobox", { name: "Planilla emitida" })).toContainText("Versión 1");
+    await page.evaluate(async () => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+    await context.setOffline(true);
+    await page.goto("/mercaderia");
+    await expect(page).toHaveURL(/\/offline\?route=%2Fmercaderia/);
+    await expect(page.getByText("Rendiciones preparadas", { exact: true })).toBeVisible();
+    await expect(page.getByText("Sin conexión", { exact: true }).first()).toBeVisible();
+    await page.locator("#rendition-documents").setInputFiles({ name: originalName, mimeType: "application/pdf", buffer: pdfContent });
+    await expect(page.getByText(`Seleccionados: ${originalName}`)).toBeVisible();
+    await page.getByRole("button", { name: "Guardar documentos" }).click();
+    await expect(page.getByText(new RegExp(originalName))).toBeVisible();
+
+    const queuedOperations = await page.evaluate(async (userId) => {
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const operations = await new Promise<Array<{ operationId: string; resource: string }>>((resolve, reject) => {
+        const operationRequest = database.transaction("operations", "readonly").objectStore("operations").getAll();
+        operationRequest.onsuccess = () => resolve(operationRequest.result);
+        operationRequest.onerror = () => reject(operationRequest.error);
+      });
+      database.close();
+      return operations;
+    }, president.userId);
+    expect(queuedOperations).toHaveLength(1);
+    expect(queuedOperations[0]?.resource).toBe("renditions");
+    expect(await prisma.rendition.count({ where: { beneficiarySheetId: sheet.id } })).toBe(0);
+    const operationId = queuedOperations[0]?.operationId;
+    expect(operationId).toBeTruthy();
+
+    await context.setOffline(false);
+    await expect.poll(async () => prisma.renditionDocument.findFirst({ where: { originalName }, select: { id: true, renditionId: true } }), { timeout: 30_000 }).not.toBeNull();
+    const persistedDocument = await prisma.renditionDocument.findFirstOrThrow({ where: { originalName } });
+    documentId = persistedDocument.id;
+    renditionId = persistedDocument.renditionId;
+    expect(persistedDocument.content).toEqual(pdfContent);
+    if (!operationId) {
+      throw new Error("La operación offline no generó un identificador.");
+    }
+    expect(await prisma.synchronizationReceipt.count({ where: { operationId } })).toBe(1);
+
+    await context.setOffline(true);
+    await context.setOffline(false);
+    expect(await prisma.renditionDocument.count({ where: { id: documentId } })).toBe(1);
+    expect(await prisma.rendition.count({ where: { beneficiarySheetId: sheetId } })).toBe(1);
+    expect(pageErrors).toEqual([]);
+  } finally {
+    await context.setOffline(false);
+    await prisma.renditionDocument.deleteMany({ where: { OR: [{ id: documentId }, { renditionId }] } });
+    await prisma.rendition.deleteMany({ where: { beneficiarySheetId: sheetId } });
+    await prisma.beneficiarySheet.deleteMany({ where: { id: sheetId } });
+    await prisma.merchandisePeriod.deleteMany({ where: { id: periodId } });
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("registers a beneficiary offline, emits a local PDF and synchronizes both operations once", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const suffix = randomUUID();
+  const familyName = `COD1478 Registro offline ${suffix}`;
+  const periodLabel = `COD1478 Entrega offline ${suffix}`;
+  const beneficiaryName = `Registro ${suffix.slice(0, 8)}`;
+  const personDni = `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`;
+  let periodId = "";
+  let familyId = "";
+  const pageErrors: string[] = [];
+
+  try {
+    const family = await familyService.create({
+      name: familyName,
+      neighborhood: "San Cayetano",
+      address: "Domicilio sintético COD1478",
+      contactPhone: "3815551478",
+      referenceMemberIndex: 0,
+      members: [{ firstName: beneficiaryName, lastName: "Offline", dni: personDni, relationship: "Referente", missingDocuments: [] }],
+    }, president.userId, randomUUID());
+    familyId = family.id;
+    const period = await prisma.merchandisePeriod.create({
+      data: {
+        label: periodLabel,
+        agency: "COD1478 QA browser",
+        startsAt: new Date("2026-10-01T00:00:00.000Z"),
+        endsAt: new Date("2026-10-31T00:00:00.000Z"),
+      },
+    });
+    periodId = period.id;
+
+    await setBrowserIdentity(context, president);
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.goto("/entrega");
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(async () => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+    await context.setOffline(true);
+    await page.goto("/entrega");
+    await expect(page).toHaveURL(/\/offline\?route=%2Fentrega/);
+    await expect(page.getByText("Registro preparado", { exact: true })).toBeVisible();
+    await page.locator("#record-period").click();
+    await page.getByRole("option", { name: new RegExp(periodLabel) }).click();
+    await page.locator("#record-family").click();
+    await page.getByRole("option", { name: new RegExp(familyName) }).click();
+    await page.locator("#record-person").click();
+    await page.getByRole("option", { name: new RegExp(personDni) }).click();
+    await page.locator("#record-type").fill("Módulo offline COD1478");
+    await page.locator("#record-quantity").fill("2");
+    await page.locator("#record-date").fill("2026-10-25");
+    await page.getByRole("button", { name: "Confirmar registro" }).click();
+    await expect(page.getByText(/Registro pendiente/)).toBeVisible();
+
+    await page.getByRole("checkbox", { name: new RegExp(`Incluir a ${beneficiaryName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }).check();
+    await page.getByRole("button", { name: /Descargar PDF/ }).click();
+    await expect(page.getByText(/Borrador local .* todavía no tiene versión oficial/)).toBeVisible();
+    const offlineData = await page.evaluate(async (userId) => {
+      const databaseRequest = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        databaseRequest.onsuccess = () => resolve(databaseRequest.result);
+        databaseRequest.onerror = () => reject(databaseRequest.error);
+      });
+      const operations = await new Promise<Array<{ operationId: string; resource: string; resourceId: string }>>((resolve, reject) => {
+        const request = database.transaction("operations", "readonly").objectStore("operations").getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      database.close();
+      const preparationRequest = indexedDB.open(`merendar-offline-preparation-${encodeURIComponent(userId)}`, 3);
+      const preparationDatabase = await new Promise<IDBDatabase>((resolve, reject) => {
+        preparationRequest.onsuccess = () => resolve(preparationRequest.result);
+        preparationRequest.onerror = () => reject(preparationRequest.error);
+      });
+      const documents = await new Promise<Array<{ id: string; byteSize: number; documentType?: string }>>((resolve, reject) => {
+        const request = preparationDatabase.transaction("documents", "readonly").objectStore("documents").getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      preparationDatabase.close();
+      return { operations, documents };
+    }, president.userId);
+    expect(offlineData.operations).toHaveLength(2);
+    expect(offlineData.operations.every((operation) => operation.resource === "records")).toBe(true);
+    const localSheet = offlineData.documents.find((document) => document.documentType === "beneficiary-sheet-local");
+    expect(localSheet?.byteSize).toBeGreaterThan(0);
+    expect(localSheet?.id).toMatch(/^local:/);
+
+    await context.setOffline(false);
+    await expect.poll(async () => prisma.synchronizationReceipt.count({ where: { operationId: { in: offlineData.operations.map((operation) => operation.operationId) } } }), { timeout: 30_000 }).toBe(2);
+    expect(await prisma.distributionRecord.count({ where: { periodId, familyMember: { person: { dni: personDni } } } })).toBe(1);
+    const officialSheet = await prisma.beneficiarySheet.findFirst({ where: { periodId } });
+    expect(officialSheet?.snapshot).toMatchObject({ beneficiaries: [{ dni: personDni, familyName }] });
+
+    await context.setOffline(true);
+    await context.setOffline(false);
+    expect(await prisma.distributionRecord.count({ where: { periodId, familyMember: { person: { dni: personDni } } } })).toBe(1);
+    expect(await prisma.beneficiarySheet.count({ where: { periodId } })).toBe(1);
+    expect(pageErrors).toEqual([]);
+  } finally {
+    await context.setOffline(false);
+    await prisma.distributionRecord.deleteMany({ where: { periodId } });
+    await prisma.beneficiarySheet.deleteMany({ where: { periodId } });
+    await prisma.merchandisePeriod.deleteMany({ where: { id: periodId } });
+    if (familyId) {
+      await prisma.family.deleteMany({ where: { id: familyId } });
+      await prisma.person.deleteMany({ where: { dni: personDni, memberships: { none: {} }, referencedBy: { none: {} } } });
+    }
+    await removeBrowserIdentity(president);
     await prisma.$disconnect();
   }
 });
@@ -262,14 +682,39 @@ test("confirms family deactivation, preserves sheet history and explains blocked
         periodId: period.id,
         version: 1,
         createdById: president.userId,
-        snapshot: { beneficiaries: [{ personId: personIdWithSheet }] },
+        snapshot: {
+          period: {
+            label: period.label,
+            agency: period.agency,
+            startsAt: period.startsAt.toISOString().slice(0, 10),
+            endsAt: period.endsAt.toISOString().slice(0, 10),
+          },
+          version: 1,
+          createdAt: new Date().toISOString(),
+          beneficiaries: [{
+            personId: personIdWithSheet,
+            name: "Browser Con historial",
+            dni: personDni,
+            familyName: familyWithSheet.name,
+            address: familyWithSheet.address,
+            neighborhood: familyWithSheet.neighborhood,
+          }],
+        },
       },
     });
 
     await setBrowserIdentity(context, president);
     const pageErrors: string[] = [];
+    const sheetDownloadStatuses: number[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
+    page.on("response", (response) => {
+      if (response.url().includes("/api/records/sheets/") && !response.ok()) {
+        sheetDownloadStatuses.push(response.status());
+      }
+    });
     await page.goto("/familias");
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    expect(sheetDownloadStatuses).toEqual([]);
     await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyWithSheet.name);
     await page.getByRole("button", { name: "Ver ficha familiar" }).click();
     await page.getByRole("button", { name: "Dar de baja familia" }).click();
@@ -354,15 +799,217 @@ test("reports a family as pending when the server has not confirmed synchronizat
   }
 });
 
+test("adds a member to a confirmed family after reopening the route offline", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const familyName = `COD1478 Familia confirmada ${randomUUID()}`;
+  const originalDni = `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`;
+  const memberDni = `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`;
+  let familyId = "";
+
+  try {
+    const family = await familyService.create({
+      name: familyName,
+      neighborhood: "San Cayetano",
+      address: "Domicilio de fixture confirmado",
+      contactPhone: "3815551478",
+      referenceMemberIndex: 0,
+      members: [{ firstName: "Familia", lastName: "Confirmada", dni: originalDni, relationship: "Referente", missingDocuments: [] }],
+    }, president.userId, randomUUID());
+    familyId = family.id;
+
+    await setBrowserIdentity(context, president);
+    await page.goto("/familias");
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(async () => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+    await context.setOffline(true);
+    await page.goto("/familias");
+    await expect(page).toHaveURL(/\/offline\?route=%2Ffamilias/);
+    await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyName);
+    await page.getByRole("button", { name: "Ver ficha familiar" }).click();
+    await page.getByRole("button", { name: "Agregar integrante" }).click();
+    await page.locator("#family-member-first-name").fill("Integrante");
+    await page.locator("#family-member-last-name").fill("Agregado offline");
+    await page.locator("#family-member-dni").fill(memberDni);
+    await page.getByRole("button", { name: "Guardar integrante" }).click();
+    await expect(page.getByText("Integrantes (2)", { exact: true })).toBeVisible();
+
+    const queuedOperations = await page.evaluate(async (userId) => {
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const operations = await new Promise<Array<{ operationId: string; resourceId: string; status: string }>>((resolve, reject) => {
+        const operationRequest = database.transaction("operations", "readonly").objectStore("operations").getAll();
+        operationRequest.onsuccess = () => resolve(operationRequest.result);
+        operationRequest.onerror = () => reject(operationRequest.error);
+      });
+      database.close();
+      return operations;
+    }, president.userId);
+    expect(queuedOperations).toHaveLength(1);
+    expect(queuedOperations[0]).toMatchObject({ resourceId: familyId, status: "pending" });
+    const operationId = queuedOperations[0]?.operationId;
+    expect(operationId).toBeTruthy();
+    if (!operationId) {
+      throw new Error("La operación offline no generó un identificador.");
+    }
+
+    await context.setOffline(false);
+    await expect.poll(async () => prisma.familyMember.count({ where: { familyId } }), { timeout: 30_000 }).toBe(2);
+    await expect.poll(async () => prisma.synchronizationReceipt.count({ where: { operationId } }), { timeout: 30_000 }).toBe(1);
+    expect(await prisma.person.count({ where: { dni: memberDni, memberships: { some: { familyId } } } })).toBe(1);
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserFamily(familyName);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("edits a confirmed family member after reopening the route offline", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const familyName = `COD1478 Edición offline ${randomUUID()}`;
+  const memberDni = `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`;
+  let familyId = "";
+
+  try {
+    const family = await familyService.create({
+      name: familyName,
+      neighborhood: "San Cayetano",
+      address: "Domicilio de fixture para editar",
+      contactPhone: "3815551478",
+      referenceMemberIndex: 0,
+      members: [{ firstName: "Persona", lastName: "Original", dni: memberDni, relationship: "Referente", missingDocuments: [] }],
+    }, president.userId, randomUUID());
+    familyId = family.id;
+
+    await setBrowserIdentity(context, president);
+    await page.goto("/familias");
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(async () => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+    await context.setOffline(true);
+    await page.goto("/familias");
+    await expect(page).toHaveURL(/\/offline\?route=%2Ffamilias/);
+    await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyName);
+    await page.getByRole("button", { name: "Ver ficha familiar" }).click();
+    await page.getByRole("button", { name: "Editar datos" }).click();
+    await page.locator("#family-member-last-name").fill("Actualizado offline");
+    await page.getByRole("button", { name: "Guardar integrante" }).click();
+    await expect(page.getByText(/Persona Actualizado offline/).first()).toBeVisible();
+
+    const queuedOperations = await page.evaluate(async (userId) => {
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const operations = await new Promise<Array<{ operationId: string; resourceId: string; status: string }>>((resolve, reject) => {
+        const operationRequest = database.transaction("operations", "readonly").objectStore("operations").getAll();
+        operationRequest.onsuccess = () => resolve(operationRequest.result);
+        operationRequest.onerror = () => reject(operationRequest.error);
+      });
+      database.close();
+      return operations;
+    }, president.userId);
+    expect(queuedOperations).toHaveLength(1);
+    expect(queuedOperations[0]).toMatchObject({ resourceId: familyId, status: "pending" });
+    const operationId = queuedOperations[0]?.operationId;
+    expect(operationId).toBeTruthy();
+    if (!operationId) {
+      throw new Error("La operación offline no generó un identificador.");
+    }
+
+    await context.setOffline(false);
+    await expect.poll(async () => prisma.familyMember.findFirst({ where: { familyId, person: { lastName: "Actualizado offline" } } }), { timeout: 30_000 }).not.toBeNull();
+    await expect.poll(async () => prisma.synchronizationReceipt.count({ where: { operationId } }), { timeout: 30_000 }).toBe(1);
+    expect(await prisma.person.count({ where: { dni: memberDni, lastName: "Actualizado offline", memberships: { some: { familyId } } } })).toBe(1);
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserFamily(familyName);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("deactivates a confirmed family offline after reopening the route", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const familyName = `COD1478 Baja offline ${randomUUID()}`;
+  const memberDni = `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`;
+  let familyId = "";
+
+  try {
+    const family = await familyService.create({
+      name: familyName,
+      neighborhood: "San Cayetano",
+      address: "Domicilio de fixture para dar de baja",
+      contactPhone: "3815551478",
+      referenceMemberIndex: 0,
+      members: [{ firstName: "Persona", lastName: "Baja", dni: memberDni, relationship: "Referente", missingDocuments: [] }],
+    }, president.userId, randomUUID());
+    familyId = family.id;
+
+    await setBrowserIdentity(context, president);
+    await page.goto("/familias");
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(async () => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+    await context.setOffline(true);
+    await page.goto("/familias");
+    await expect(page).toHaveURL(/\/offline\?route=%2Ffamilias/);
+    await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyName);
+    await page.getByRole("button", { name: "Ver ficha familiar" }).click();
+    await page.getByRole("button", { name: "Dar de baja familia" }).click();
+    await page.getByRole("button", { name: "Confirmar baja" }).click();
+    await expect(page.getByRole("button", { name: "Baja pendiente" })).toBeVisible();
+
+    const queuedOperations = await page.evaluate(async (userId) => {
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const operations = await new Promise<Array<{ operationId: string; resourceId: string; operation: string; status: string }>>((resolve, reject) => {
+        const operationRequest = database.transaction("operations", "readonly").objectStore("operations").getAll();
+        operationRequest.onsuccess = () => resolve(operationRequest.result);
+        operationRequest.onerror = () => reject(operationRequest.error);
+      });
+      database.close();
+      return operations;
+    }, president.userId);
+    expect(queuedOperations).toHaveLength(1);
+    expect(queuedOperations[0]).toMatchObject({ resourceId: familyId, operation: "delete", status: "pending" });
+    const operationId = queuedOperations[0]?.operationId;
+    expect(operationId).toBeTruthy();
+    if (!operationId) {
+      throw new Error("La operación offline no generó un identificador.");
+    }
+
+    await context.setOffline(false);
+    await expect.poll(async () => prisma.family.findUnique({ where: { id: familyId }, select: { deactivatedAt: true } }).then((currentFamily) => currentFamily?.deactivatedAt), { timeout: 30_000 }).not.toBeNull();
+    await expect.poll(async () => prisma.synchronizationReceipt.count({ where: { operationId } }), { timeout: 30_000 }).toBe(1);
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserFamily(familyName);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
 test("creates a family and adds a member offline, then syncs the dependency chain once", async ({ browser, context, page }, testInfo) => {
   const president = await createBrowserIdentity(UserRole.PRESIDENTE);
   const familyName = `Browser Offline ${randomUUID()}`;
 
   try {
     await setBrowserIdentity(context, president);
-    await page.goto("/");
-    await page.getByRole("button", { name: "Preparar offline" }).click();
-    await expect(page.getByText(/Vistas preparadas el/)).toBeVisible({ timeout: 30_000 });
+    await page.goto("/familias");
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "Preparar offline" })).toHaveCount(0);
     await page.evaluate(async () => navigator.serviceWorker.ready);
 
     await context.setOffline(true);
@@ -380,7 +1027,7 @@ test("creates a family and adds a member offline, then syncs the dependency chai
     await page.locator('input[id^="member-dni-"]').fill("14790002");
     await page.getByRole("button", { name: "Guardar familia" }).click();
     await expect(page.getByText(familyName, { exact: true })).toBeVisible();
-    await expect(page.getByText("1 integrante", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Listado de familias" }).getByText(familyName, { exact: true })).toBeVisible();
 
     await page.getByRole("region", { name: "Listado de familias" }).getByRole("button", { name: "Ver ficha familiar" }).last().click();
     await page.getByRole("button", { name: "Agregar integrante" }).click();
@@ -430,6 +1077,7 @@ test("creates a family and adds a member offline, then syncs the dependency chai
 
     await context.setOffline(false);
     await expect.poll(async () => prisma.family.findFirst({ where: { name: familyName }, select: { id: true } }), { timeout: 30_000 }).not.toBeNull();
+    await expect.poll(async () => prisma.synchronizationReceipt.count({ where: { operationId: { in: operationIds.map((operation) => operation.operationId) } } }), { timeout: 30_000 }).toBe(2);
     const syncedFamily = await prisma.family.findFirst({ where: { name: familyName }, include: { members: true } });
     expect(syncedFamily?.members).toHaveLength(2);
     await expect(page.getByText(familyName, { exact: true })).toBeVisible();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { z } from "zod";
 import Image from "next/image";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -20,14 +20,13 @@ import {
   type OfflinePreparedDocument,
 } from "@/services/offline-preparation.service";
 import type { JsonValue } from "@/types/json-value";
-import { listOfflineOperations } from "@/services/offline-queue.service";
+import { listOfflineOperations, synchronizeOfflineQueue } from "@/services/offline-queue.service";
 import type { OfflineOperation } from "@/types/offline-operation";
 import { FamilyRegistry } from "@/components/families/FamilyRegistry";
 import { familyCollectionSchema } from "@/validations/family.validation";
 import { DeliveryWorkbench } from "@/components/delivery/DeliveryWorkbench";
 import { recordsCollectionSchema } from "@/validations/record.validation";
-import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace";
-import { merchandiseResponseSchema } from "@/components/merchandise/MerchandiseWorkspace";
+import { MerchandiseWorkspace, merchandiseResponseSchema } from "@/components/merchandise/MerchandiseWorkspace";
 import { DASHBOARD_METRICS } from "@/constants/dashboard.constant";
 import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
 
@@ -274,55 +273,14 @@ function PendingOperations({ operations }: { operations: OfflineOperation[] }) {
   );
 }
 
-function PreparedRenditionWorkspace({
-  initialPeriods,
-  preparation,
-  preparationIsValid,
-  documents,
-}: {
-  initialPeriods: z.infer<typeof merchandiseResponseSchema>['periods'];
-  preparation: OfflinePreparation;
-  preparationIsValid: boolean;
-  documents: OfflinePreparedDocument[];
-}) {
-  const [periods, setPeriods] = useState(initialPeriods);
-
-  async function refreshPeriods() {
-    const response = await fetch("/api/merchandise", { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) {
-      throw new Error("No se pudieron actualizar las rendiciones al recuperar conexión.");
-    }
-
-    const parsedResponse = merchandiseResponseSchema.safeParse(await response.json());
-    if (!parsedResponse.success) {
-      throw new Error("La respuesta actualizada de rendiciones no tiene un formato válido.");
-    }
-
-    setPeriods(parsedResponse.data.periods);
-  }
-
-  return <RenditionWorkspace
-    periods={periods}
-    userId={preparation.userId}
-    sessionExpiresAt={preparation.sessionExpiresAt}
-    onRefresh={refreshPeriods}
-    canWrite={preparationIsValid && preparation.capabilities.includes("renditions.write")}
-    canReview={preparationIsValid && preparation.capabilities.includes("renditions.review")}
-    canCreatePeriods={false}
-    periodStatus="ready"
-    offlineMode
-    preparedDocuments={documents}
-  />;
-}
-
 function PreparedRoute({ route, preparation, preparationIsValid, documents, operations, searchTerm, setSearchTerm }: { route: OfflinePreparedRoute; preparation: OfflinePreparation; preparationIsValid: boolean; documents: OfflinePreparedDocument[]; operations: OfflineOperation[]; searchTerm: string; setSearchTerm: (value: string) => void }) {
   const snapshot = preparation.snapshots[route]?.data;
 
   if (!snapshot) {
     return (
       <Alert variant="info">
-        <AlertTitle>Esta vista no está preparada</AlertTitle>
-        <AlertDescription>{OFFLINE_PREPARATION.MESSAGES.NOT_PREPARED} Conectate, abrí la app y usá “Preparar offline”.</AlertDescription>
+        <AlertTitle>Esta vista no está habilitada para esta cuenta</AlertTitle>
+        <AlertDescription>La preparación local solo muestra las vistas autorizadas para la cuenta activa.</AlertDescription>
       </Alert>
     );
   }
@@ -469,11 +427,17 @@ function PreparedRoute({ route, preparation, preparationIsValid, documents, oper
             <AlertTitle>Rendiciones preparadas</AlertTitle>
             <AlertDescription>Períodos, planillas y documentos disponibles al {formatDate(preparation.snapshots[route].capturedAt)}. Las cargas y revisiones pendientes se sincronizan con validación del servidor.</AlertDescription>
           </Alert>
-          <PreparedRenditionWorkspace
+          <MerchandiseWorkspace
+            userId={preparation.userId}
+            sessionExpiresAt={preparation.sessionExpiresAt}
+            canReadMerchandise={preparationIsValid && preparation.capabilities.includes("merchandise.read")}
+            canWriteMerchandise={preparationIsValid && preparation.capabilities.includes("merchandise.write")}
+            canReadRenditions={preparationIsValid && preparation.capabilities.includes("renditions.read")}
+            canWriteRenditions={preparationIsValid && preparation.capabilities.includes("renditions.write")}
+            canReviewRenditions={preparationIsValid && preparation.capabilities.includes("renditions.review")}
+            offlineMode
             initialPeriods={merchandiseSnapshot.data.periods}
-            preparation={preparation}
-            preparationIsValid={preparationIsValid}
-            documents={documents}
+            preparedDocuments={documents}
           />
         </div>
       );
@@ -508,6 +472,7 @@ export function OfflineScreen() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const synchronizingRef = useRef(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -587,6 +552,37 @@ export function OfflineScreen() {
     return () => window.removeEventListener("offline-queue-change", refreshQueue);
   }, [preparation]);
 
+  useEffect(() => {
+    const hasSynchronizableOperations = operations.some((operation) =>
+      operation.status === "pending" || (operation.status === "syncing" && (operation.leaseExpiresAt ?? 0) <= Date.now()),
+    );
+
+    if (!isOnline || !preparationIsValid || !preparation?.userId || synchronizingRef.current || !hasSynchronizableOperations) {
+      return;
+    }
+
+    let cancelled = false;
+    synchronizingRef.current = true;
+    void synchronizeOfflineQueue(preparation.userId).then(async () => {
+      window.dispatchEvent(new Event("merendar-server-data-changed"));
+      const queuedOperations = await listOfflineOperations(preparation.userId);
+      if (!cancelled) {
+        setOperations(queuedOperations);
+        setQueueError("");
+      }
+    }).catch((error: unknown) => {
+      if (!cancelled) {
+        setQueueError(error instanceof Error ? error.message : "No se pudo sincronizar la cola offline.");
+      }
+    }).finally(() => {
+      synchronizingRef.current = false;
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOnline, operations, preparation, preparationIsValid]);
+
   function retryConnection() {
     window.location.assign(route);
   }
@@ -635,7 +631,7 @@ export function OfflineScreen() {
         <Alert variant="info">
           <HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} />
           <AlertTitle>No hay una preparación vigente para esta cuenta</AlertTitle>
-          <AlertDescription>{OFFLINE_PREPARATION.MESSAGES.NOT_PREPARED} Al recuperar conexión, iniciá sesión y prepará el acceso desde la aplicación.</AlertDescription>
+          <AlertDescription>{OFFLINE_PREPARATION.MESSAGES.NOT_PREPARED} Al recuperar conexión, iniciá sesión y la aplicación preparará las vistas autorizadas automáticamente.</AlertDescription>
         </Alert>
       ) : null}
 

@@ -17,6 +17,10 @@ export const OFFLINE_PREPARATION = {
   DOCUMENTS_STORE: "documents",
   KEY: "latest",
   MAX_AGE_HOURS: 12,
+  PREPARATION_REUSE_WINDOW_MS: 2 * 60_000,
+  PREPARATION_CHANGE_DEBOUNCE_MS: 1_000,
+  PREPARATION_MAX_ATTEMPTS: 3,
+  PREPARATION_RETRY_DELAY_MS: 2_000,
   MAX_DOCUMENT_BYTES: 512 * 1024,
   MAX_DOCUMENTS_TOTAL_BYTES: 20 * 1024 * 1024,
   STORAGE_RESERVE_BYTES: 2_000_000,
@@ -31,8 +35,8 @@ export const OFFLINE_PREPARATION = {
   },
   MESSAGES: {
     NOT_PREPARED: "Esta vista todavía no está preparada para usarse sin conexión.",
-    EXPIRED: "La preparación venció. Conectate y prepará el acceso de nuevo.",
-    PREPARING: "Guardando los módulos autorizados para este dispositivo…",
+    EXPIRED: "La preparación venció. Conectate para renovarla automáticamente.",
+    PREPARING: "Preparando automáticamente las vistas autorizadas…",
     READY: "Las vistas habilitadas están preparadas para usarse sin conexión durante un máximo de 12 horas.",
   },
 } as const;

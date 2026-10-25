@@ -1,4 +1,5 @@
 import { z } from "zod";
+import axios from "axios";
 import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import type { JsonValue } from "@/types/json-value";
@@ -56,6 +57,13 @@ const offlinePreparedDocumentSchema = z.object({
 });
 const merchandiseDocumentUrl = (documentId: string) => `/api/merchandise/documents/${encodeURIComponent(documentId)}`;
 const renditionDocumentUrl = (documentId: string) => `/api/renditions/documents/${encodeURIComponent(documentId)}`;
+const beneficiarySheetCollectionSchema = z.object({
+  sheets: z.array(z.object({
+    id: z.string().min(1),
+    periodId: z.string().min(1),
+    version: z.number().int().positive(),
+  })),
+});
 
 export type OfflinePreparation = z.infer<typeof offlinePreparationSchema>;
 export type OfflinePreparedDocument = z.infer<typeof offlinePreparedDocumentSchema>;
@@ -288,33 +296,19 @@ function collectDocumentReferences(value: JsonValue, references: OfflineDocument
 }
 
 function collectBeneficiarySheetReferences(value: JsonValue, references: OfflineDocumentReference[]) {
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      collectBeneficiarySheetReferences(entry, references);
-    }
-    return;
+  const parsedCollection = beneficiarySheetCollectionSchema.safeParse(value);
+
+  if (!parsedCollection.success) {
+    throw new OfflinePreparationError("El servidor devolvió planillas con un formato que no se puede preparar.");
   }
 
-  const parsedObject = z.record(z.string(), z.json()).safeParse(value);
-  if (!parsedObject.success) {
-    return;
-  }
-
-  const sheetId = z.string().min(1).safeParse(parsedObject.data.id);
-  const periodId = z.string().min(1).safeParse(parsedObject.data.periodId);
-  const version = z.number().int().positive().safeParse(parsedObject.data.version);
-
-  if (sheetId.success && periodId.success && version.success) {
+  for (const sheet of parsedCollection.data.sheets) {
     references.push({
-      id: sheetId.data,
-      originalName: `planilla-${periodId.data}-v${version.data}.pdf`,
-      url: `/api/records/sheets/${encodeURIComponent(sheetId.data)}`,
+      id: sheet.id,
+      originalName: `planilla-${sheet.periodId}-v${sheet.version}.pdf`,
+      url: `/api/records/sheets/${encodeURIComponent(sheet.id)}`,
       documentType: "beneficiary-sheet",
     });
-  }
-
-  for (const nestedValue of Object.values(parsedObject.data)) {
-    collectBeneficiarySheetReferences(nestedValue, references);
   }
 }
 
@@ -323,7 +317,11 @@ function collectPreparedDocumentReferences(snapshots: OfflinePreparation["snapsh
 
   for (const snapshot of Object.values(snapshots)) {
     collectDocumentReferences(snapshot.data, documentReferences);
-    collectBeneficiarySheetReferences(snapshot.data, documentReferences);
+  }
+
+  const recordsSnapshot = snapshots["/entrega"];
+  if (recordsSnapshot) {
+    collectBeneficiarySheetReferences(recordsSnapshot.data, documentReferences);
   }
 
   return documentReferences;
@@ -561,7 +559,117 @@ export async function readOfflinePreparedWorkspace(userId: string): Promise<Offl
   return { preparation, documents: await readOfflinePreparedDocuments(userId) };
 }
 
-export async function prepareOfflineWorkspace(
+const pendingPreparations = new Map<string, Promise<OfflinePreparation>>();
+
+function preparationKey(userId: string, capabilities: string[], sessionExpiresAt: string) {
+  return `${userId}:${[...capabilities].sort().join(",")}:${sessionExpiresAt}`;
+}
+
+function canRetryPreparation(error: unknown) {
+  if (!axios.isAxiosError(error)) {
+    return false;
+  }
+
+  if (!error.response) {
+    return true;
+  }
+
+  return error.response.status >= 500 || error.response.status === 429;
+}
+
+async function prepareWithBoundedRetries(
+  userId: string,
+  userName: string,
+  roleLabel: string,
+  capabilities: string[],
+  sessionExpiresAt: string,
+) {
+  let attempt = 0;
+
+  while (attempt < OFFLINE_PREPARATION.PREPARATION_MAX_ATTEMPTS) {
+    try {
+      return await prepareOfflineWorkspaceOnce(userId, userName, roleLabel, capabilities, sessionExpiresAt);
+    } catch (error) {
+      attempt += 1;
+      if (attempt >= OFFLINE_PREPARATION.PREPARATION_MAX_ATTEMPTS || !canRetryPreparation(error)) {
+        throw error;
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, OFFLINE_PREPARATION.PREPARATION_RETRY_DELAY_MS * attempt));
+    }
+  }
+
+  throw new OfflinePreparationError("No se pudo completar la preparación automática después de varios intentos.");
+}
+
+async function coordinateOfflinePreparation(
+  userId: string,
+  userName: string,
+  roleLabel: string,
+  capabilities: string[],
+  sessionExpiresAt: string,
+  forceRefresh: boolean,
+) {
+  async function prepareIfStale() {
+    const currentPreparation = await readOfflinePreparation(userId);
+    const matchesCurrentAccess = currentPreparation
+      && currentPreparation.sessionExpiresAt === sessionExpiresAt
+      && currentPreparation.capabilities.length === capabilities.length
+      && capabilities.every((capability) => currentPreparation.capabilities.includes(capability));
+    const preparedRecently = currentPreparation
+      && Date.now() - Date.parse(currentPreparation.preparedAt) < OFFLINE_PREPARATION.PREPARATION_REUSE_WINDOW_MS;
+
+    if (!forceRefresh && matchesCurrentAccess && preparedRecently) {
+      return currentPreparation;
+    }
+
+    return prepareWithBoundedRetries(userId, userName, roleLabel, capabilities, sessionExpiresAt);
+  }
+
+  if (navigator.locks) {
+    const lockName = `merendar-offline-preparation:${userId}`;
+    const availableLock = await navigator.locks.request(lockName, { mode: "exclusive", ifAvailable: true }, (lock) => {
+      if (!lock) {
+        return null;
+      }
+
+      return prepareWithBoundedRetries(userId, userName, roleLabel, capabilities, sessionExpiresAt);
+    });
+
+    if (availableLock) {
+      return availableLock;
+    }
+
+    return navigator.locks.request(lockName, { mode: "exclusive" }, prepareIfStale);
+  }
+
+  return prepareWithBoundedRetries(userId, userName, roleLabel, capabilities, sessionExpiresAt);
+}
+
+export function prepareOfflineWorkspace(
+  userId: string,
+  userName: string,
+  roleLabel: string,
+  capabilities: string[],
+  sessionExpiresAt: string,
+  forceRefresh = false,
+) {
+  const key = `${preparationKey(userId, capabilities, sessionExpiresAt)}:${forceRefresh ? "refresh" : "normal"}`;
+  const activePreparation = pendingPreparations.get(key);
+
+  if (activePreparation) {
+    return activePreparation;
+  }
+
+  const preparation = coordinateOfflinePreparation(userId, userName, roleLabel, capabilities, sessionExpiresAt, forceRefresh);
+  pendingPreparations.set(key, preparation);
+  void preparation.then(
+    () => pendingPreparations.delete(key),
+    () => pendingPreparations.delete(key),
+  );
+  return preparation;
+}
+
+async function prepareOfflineWorkspaceOnce(
   userId: string,
   userName: string,
   roleLabel: string,
