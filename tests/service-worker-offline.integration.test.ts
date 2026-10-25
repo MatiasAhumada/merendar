@@ -28,8 +28,11 @@ async function createWorkerHarness(networkFetch: (request: ServiceWorkerRequest)
   let cacheWrites = 0;
   let cacheReads = 0;
   const publicCache = {
-    match: async () => {
+    match: async (request?: string) => {
       cacheReads += 1;
+      if (request === "/offline") {
+        return new Response("offline shell", { status: 200 });
+      }
       return undefined;
     },
     put: async () => {
@@ -90,6 +93,44 @@ test("an offline protected navigation redirects to the public shell with the ori
   const response = await responsePromise;
   assert.equal(response.status, 302);
   assert.equal(response.headers.get("location"), "https://merendar.example/offline?route=%2Ffamilias%3Ffilter%3Dalerts");
+  assert.equal(harness.getCacheWrites(), 0);
+});
+
+test("an offline shell request refreshes stale cached HTML when the network is available", async () => {
+  const harness = await createWorkerHarness(async () => new Response("fresh offline shell", {
+    status: 200,
+    headers: { "Cache-Control": "public, max-age=0" },
+  }));
+  let responsePromise: Promise<Response> | undefined;
+  harness.handleFetch({
+    request: serviceWorkerRequest("/offline", "cors"),
+    respondWith(nextResponse) {
+      responsePromise = Promise.resolve(nextResponse);
+    },
+  });
+
+  assert.ok(responsePromise);
+  const response = await responsePromise;
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "fresh offline shell");
+  assert.equal(harness.getCacheWrites(), 1);
+});
+
+test("an offline shell request serves its cached page when the network is unavailable", async () => {
+  const harness = await createWorkerHarness(async () => Promise.reject(new Error("offline")));
+  let responsePromise: Promise<Response> | undefined;
+  harness.handleFetch({
+    request: serviceWorkerRequest("/offline", "cors"),
+    respondWith(nextResponse) {
+      responsePromise = Promise.resolve(nextResponse);
+    },
+  });
+
+  assert.ok(responsePromise);
+  const response = await responsePromise;
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "offline shell");
+  assert.equal(harness.getCacheReads(), 1);
   assert.equal(harness.getCacheWrites(), 0);
 });
 

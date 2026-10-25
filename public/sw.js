@@ -1,4 +1,4 @@
-const CACHE_NAME = "merendar-public-v4";
+const CACHE_NAME = "merendar-public-v5";
 const OFFLINE_URL = "/offline";
 const PUBLIC_ASSETS = [
   OFFLINE_URL,
@@ -54,6 +54,32 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (!requestUrl.pathname.startsWith("/_next/static/") && !PUBLIC_ASSETS.includes(requestUrl.pathname)) {
+    return;
+  }
+
+  if (requestUrl.pathname === OFFLINE_URL) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_NAME);
+
+      try {
+        const networkResponse = await fetch(event.request);
+        const cacheControl = networkResponse.headers.get("cache-control") || "";
+        const isPublicResponse = networkResponse.ok && !cacheControl.includes("private") && !cacheControl.includes("no-store");
+
+        if (isPublicResponse) {
+          await cache.put(OFFLINE_URL, networkResponse.clone());
+        }
+
+        return networkResponse;
+      } catch {
+        const offlinePage = await cache.match(OFFLINE_URL);
+        if (offlinePage) {
+          return offlinePage;
+        }
+
+        return Response.error();
+      }
+    })());
     return;
   }
 

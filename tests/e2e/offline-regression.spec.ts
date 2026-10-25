@@ -113,7 +113,11 @@ test("prepares private views automatically from a deep route, keeps them availab
 
     const privateCacheCheck = await page.evaluate(async () => {
       const cacheNames = await caches.keys();
-      const publicCache = await caches.open("merendar-public-v4");
+      const publicCacheName = cacheNames.find((cacheName) => cacheName.startsWith("merendar-public-"));
+      if (!publicCacheName) {
+        return { cacheNames, privateApiCached: false, privateHtmlCached: false, privatePdfCached: false };
+      }
+      const publicCache = await caches.open(publicCacheName);
       const cachedRequests = await publicCache.keys();
       return {
         cacheNames,
@@ -122,7 +126,7 @@ test("prepares private views automatically from a deep route, keeps them availab
         cachedPaths: cachedRequests.map((request) => new URL(request.url).pathname),
       };
     });
-    expect(privateCacheCheck.cacheNames).toEqual(["merendar-public-v4"]);
+    expect(privateCacheCheck.cacheNames).toEqual(["merendar-public-v5"]);
     expect(privateCacheCheck.privateApiCached).toBe(false);
     expect(privateCacheCheck.privateRouteCached).toBe(false);
     expect(privateCacheCheck.cachedPaths.some((path) => path.startsWith("/api/") || path === "/familias")).toBe(false);
@@ -142,6 +146,7 @@ test("prepares private views automatically from a deep route, keeps them availab
     await setBrowserIdentity(context, secretary);
     await page.goto("/");
     await expect(page.getByRole("heading", { name: `Hola, Browser ${UserRole.TESORERIA}` })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
     await page.waitForFunction(async (expectedUserId) => {
       const databaseRequest = indexedDB.open("merendar-offline-account-index", 1);
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -174,6 +179,84 @@ test("prepares private views automatically from a deep route, keeps them availab
     if (secretary) {
       await removeBrowserIdentity(secretary);
     }
+    await prisma.$disconnect();
+  }
+});
+
+test("refreshes a stale offline shell cache after the service worker update", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+
+  try {
+    await setBrowserIdentity(context, president);
+    await page.goto("/familias");
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await page.evaluate(async () => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+
+    const previousPreparedAt = await page.evaluate(async (userId) => {
+      const databaseRequest = indexedDB.open(`merendar-offline-preparation-${encodeURIComponent(userId)}`, 3);
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        databaseRequest.onsuccess = () => resolve(databaseRequest.result);
+        databaseRequest.onerror = () => reject(databaseRequest.error);
+      });
+      const preparation = await new Promise<{ preparedAt: string } | undefined>((resolve, reject) => {
+        const request = database.transaction("workspace", "readonly").objectStore("workspace").get("latest");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      database.close();
+      return preparation?.preparedAt;
+    }, president.userId);
+    expect(previousPreparedAt).toBeTruthy();
+
+    await page.evaluate(async () => {
+      const cacheNames = await caches.keys();
+      const publicCacheName = cacheNames.find((cacheName) => cacheName.startsWith("merendar-public-"));
+      if (!publicCacheName) {
+        throw new Error("No se registró la caché pública del Service Worker.");
+      }
+      const publicCache = await caches.open(publicCacheName);
+      await publicCache.put("/offline", new Response('<!doctype html><html><head><script src="/_next/static/chunks/cod1478-stale-shell.js"></script></head><body>Shell obsoleto</body></html>', {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }));
+    });
+
+    await page.evaluate(() => window.dispatchEvent(new Event("merendar-server-data-changed")));
+    await expect.poll(async () => page.evaluate(async (userId) => {
+      const databaseRequest = indexedDB.open(`merendar-offline-preparation-${encodeURIComponent(userId)}`, 3);
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        databaseRequest.onsuccess = () => resolve(databaseRequest.result);
+        databaseRequest.onerror = () => reject(databaseRequest.error);
+      });
+      const preparation = await new Promise<{ preparedAt: string } | undefined>((resolve, reject) => {
+        const request = database.transaction("workspace", "readonly").objectStore("workspace").get("latest");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      database.close();
+      return preparation?.preparedAt;
+    }, president.userId), { timeout: 30_000 }).not.toBe(previousPreparedAt);
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible();
+    await expect(page.getByText(/No se completó la preparación automática/)).toHaveCount(0);
+
+    const cachedOfflineShell = await page.evaluate(async () => {
+      const publicCacheName = (await caches.keys()).find((cacheName) => cacheName.startsWith("merendar-public-"));
+      if (!publicCacheName) {
+        return "";
+      }
+      const response = await (await caches.open(publicCacheName)).match("/offline");
+      return response ? response.text() : "";
+    });
+    expect(cachedOfflineShell).not.toContain("cod1478-stale-shell.js");
+
+    await context.setOffline(true);
+    await page.goto("/familias");
+    await expect(page).toHaveURL(/\/offline\?route=%2Ffamilias/);
+    await expect(page.getByText("Ficha familiar preparada", { exact: true })).toBeVisible();
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserIdentity(president);
     await prisma.$disconnect();
   }
 });
@@ -420,7 +503,7 @@ test("uploads a rendition PDF offline and preserves the file through idempotent 
     await page.locator("#rendition-documents").setInputFiles({ name: originalName, mimeType: "application/pdf", buffer: pdfContent });
     await expect(page.getByText(`Seleccionados: ${originalName}`)).toBeVisible();
     await page.getByRole("button", { name: "Guardar documentos" }).click();
-    await expect(page.getByText(new RegExp(originalName))).toBeVisible();
+    await expect(page.getByRole("region", { name: "Documentación recibida" }).getByText(`Planilla firmada a mano · ${originalName}`)).toBeVisible();
 
     const queuedOperations = await page.evaluate(async (userId) => {
       const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);

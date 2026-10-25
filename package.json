@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start -p 3022 -H 0.0.0.0",
     "lint": "eslint",
-    "test:integration": "tsx --test tests/*.integration.test.ts",
+    "test:integration": "tsx --test --test-concurrency=1 tests/*.integration.test.ts",
     "test:e2e": "playwright test",
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css}\" --ignore-path .prettierignore",
     "postinstall": "prisma generate",
