@@ -321,8 +321,8 @@ function PreparedRoute({ route, preparation, preparationIsValid, documents, oper
   if (!snapshot) {
     return (
       <Alert variant="info">
-        <AlertTitle>Esta vista no está preparada</AlertTitle>
-        <AlertDescription>{OFFLINE_PREPARATION.MESSAGES.NOT_PREPARED} Conectate, abrí la app y usá “Preparar offline”.</AlertDescription>
+        <AlertTitle>Esta vista no está habilitada para esta cuenta</AlertTitle>
+        <AlertDescription>La preparación local solo muestra las vistas autorizadas para la cuenta activa.</AlertDescription>
       </Alert>
     );
   }
@@ -635,7 +635,7 @@ export function OfflineScreen() {
         <Alert variant="info">
           <HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} />
           <AlertTitle>No hay una preparación vigente para esta cuenta</AlertTitle>
-          <AlertDescription>{OFFLINE_PREPARATION.MESSAGES.NOT_PREPARED} Al recuperar conexión, iniciá sesión y prepará el acceso desde la aplicación.</AlertDescription>
+          <AlertDescription>{OFFLINE_PREPARATION.MESSAGES.NOT_PREPARED} Al recuperar conexión, iniciá sesión y la aplicación preparará las vistas autorizadas automáticamente.</AlertDescription>
         </Alert>
       ) : null}
 

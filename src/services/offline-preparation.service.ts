@@ -1,4 +1,5 @@
 import { z } from "zod";
+import axios from "axios";
 import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import type { JsonValue } from "@/types/json-value";
@@ -561,7 +562,117 @@ export async function readOfflinePreparedWorkspace(userId: string): Promise<Offl
   return { preparation, documents: await readOfflinePreparedDocuments(userId) };
 }
 
-export async function prepareOfflineWorkspace(
+const pendingPreparations = new Map<string, Promise<OfflinePreparation>>();
+
+function preparationKey(userId: string, capabilities: string[], sessionExpiresAt: string) {
+  return `${userId}:${[...capabilities].sort().join(",")}:${sessionExpiresAt}`;
+}
+
+function canRetryPreparation(error: unknown) {
+  if (!axios.isAxiosError(error)) {
+    return false;
+  }
+
+  if (!error.response) {
+    return true;
+  }
+
+  return error.response.status >= 500 || error.response.status === 429;
+}
+
+async function prepareWithBoundedRetries(
+  userId: string,
+  userName: string,
+  roleLabel: string,
+  capabilities: string[],
+  sessionExpiresAt: string,
+) {
+  let attempt = 0;
+
+  while (attempt < OFFLINE_PREPARATION.PREPARATION_MAX_ATTEMPTS) {
+    try {
+      return await prepareOfflineWorkspaceOnce(userId, userName, roleLabel, capabilities, sessionExpiresAt);
+    } catch (error) {
+      attempt += 1;
+      if (attempt >= OFFLINE_PREPARATION.PREPARATION_MAX_ATTEMPTS || !canRetryPreparation(error)) {
+        throw error;
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, OFFLINE_PREPARATION.PREPARATION_RETRY_DELAY_MS * attempt));
+    }
+  }
+
+  throw new OfflinePreparationError("No se pudo completar la preparación automática después de varios intentos.");
+}
+
+async function coordinateOfflinePreparation(
+  userId: string,
+  userName: string,
+  roleLabel: string,
+  capabilities: string[],
+  sessionExpiresAt: string,
+  forceRefresh: boolean,
+) {
+  async function prepareIfStale() {
+    const currentPreparation = await readOfflinePreparation(userId);
+    const matchesCurrentAccess = currentPreparation
+      && currentPreparation.sessionExpiresAt === sessionExpiresAt
+      && currentPreparation.capabilities.length === capabilities.length
+      && capabilities.every((capability) => currentPreparation.capabilities.includes(capability));
+    const preparedRecently = currentPreparation
+      && Date.now() - Date.parse(currentPreparation.preparedAt) < OFFLINE_PREPARATION.PREPARATION_REUSE_WINDOW_MS;
+
+    if (!forceRefresh && matchesCurrentAccess && preparedRecently) {
+      return currentPreparation;
+    }
+
+    return prepareWithBoundedRetries(userId, userName, roleLabel, capabilities, sessionExpiresAt);
+  }
+
+  if (navigator.locks) {
+    const lockName = `merendar-offline-preparation:${userId}`;
+    const availableLock = await navigator.locks.request(lockName, { mode: "exclusive", ifAvailable: true }, (lock) => {
+      if (!lock) {
+        return null;
+      }
+
+      return prepareWithBoundedRetries(userId, userName, roleLabel, capabilities, sessionExpiresAt);
+    });
+
+    if (availableLock) {
+      return availableLock;
+    }
+
+    return navigator.locks.request(lockName, { mode: "exclusive" }, prepareIfStale);
+  }
+
+  return prepareWithBoundedRetries(userId, userName, roleLabel, capabilities, sessionExpiresAt);
+}
+
+export function prepareOfflineWorkspace(
+  userId: string,
+  userName: string,
+  roleLabel: string,
+  capabilities: string[],
+  sessionExpiresAt: string,
+  forceRefresh = false,
+) {
+  const key = `${preparationKey(userId, capabilities, sessionExpiresAt)}:${forceRefresh ? "refresh" : "normal"}`;
+  const activePreparation = pendingPreparations.get(key);
+
+  if (activePreparation) {
+    return activePreparation;
+  }
+
+  const preparation = coordinateOfflinePreparation(userId, userName, roleLabel, capabilities, sessionExpiresAt, forceRefresh);
+  pendingPreparations.set(key, preparation);
+  void preparation.then(
+    () => pendingPreparations.delete(key),
+    () => pendingPreparations.delete(key),
+  );
+  return preparation;
+}
+
+async function prepareOfflineWorkspaceOnce(
   userId: string,
   userName: string,
   roleLabel: string,

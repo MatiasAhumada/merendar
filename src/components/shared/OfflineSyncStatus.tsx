@@ -134,6 +134,7 @@ export function OfflineSyncStatus({ userId, sessionExpiresAt, onQueueStatusChang
 
     try {
       await synchronizeOfflineQueue(userId);
+      window.dispatchEvent(new Event("merendar-server-data-changed"));
       await refreshQueue();
       setMessage("");
     } catch (error) {

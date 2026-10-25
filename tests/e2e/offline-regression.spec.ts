@@ -75,7 +75,7 @@ test("renders the role access matrix for every account type", async ({ browser, 
   }
 });
 
-test("prepares private views, keeps them available after network loss, and isolates a second account", async ({ browser, context, page }, testInfo) => {
+test("prepares private views automatically from a deep route, keeps them available after network loss, and isolates a second account", async ({ browser, context, page }, testInfo) => {
   const president = await createBrowserIdentity(UserRole.PRESIDENTE);
   let secretary: BrowserIdentity | undefined;
 
@@ -84,11 +84,26 @@ test("prepares private views, keeps them available after network loss, and isola
     const pageErrors: string[] = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
-    await page.goto("/");
-    await expect(page.getByRole("heading", { name: `Hola, Browser ${UserRole.PRESIDENTE}` })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Preparar offline" })).toBeEnabled();
-    await page.getByRole("button", { name: "Preparar offline" }).click();
-    await expect(page.getByText(/Vistas preparadas el/)).toBeVisible({ timeout: 30_000 });
+    await page.goto("/familias");
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "Preparar offline" })).toHaveCount(0);
+
+    const preparedSnapshot = await page.evaluate(async (userId) => {
+      const databaseRequest = indexedDB.open(`merendar-offline-preparation-${encodeURIComponent(userId)}`, 3);
+      const database = await new Promise<IDBDatabase>((resolve, reject) => {
+        databaseRequest.onsuccess = () => resolve(databaseRequest.result);
+        databaseRequest.onerror = () => reject(databaseRequest.error);
+      });
+      const snapshot = await new Promise<{ snapshots: Record<string, unknown> } | undefined>((resolve, reject) => {
+        const request = database.transaction("workspace", "readonly").objectStore("workspace").get("latest");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      database.close();
+      return Object.keys(snapshot?.snapshots ?? {});
+    }, president.userId);
+    expect(preparedSnapshot).toEqual(expect.arrayContaining(["/", "/familias", "/mercaderia", "/entrega", "/usuarios", "/permisos"]));
 
     await page.evaluate(async () => {
       await navigator.serviceWorker.ready;
@@ -144,7 +159,8 @@ test("prepares private views, keeps them available after network loss, and isola
     await context.setOffline(true);
     await page.goto("/familias");
     await expect(page.getByRole("heading", { name: "Acceso sin conexión" })).toBeVisible();
-    await expect(page.getByText("No hay una preparación vigente para esta cuenta", { exact: true })).toBeVisible();
+    await expect(page.getByText("Browser TESORERIA · Tesorería", { exact: true })).toBeVisible();
+    await expect(page.getByText("Esta vista no está habilitada para esta cuenta", { exact: true })).toBeVisible();
     await expect(page.getByText(/Datos privados recuperados del almacenamiento local de Browser/)).toHaveCount(0);
     const isolationScreenshot = await page.screenshot({ fullPage: true });
     await testInfo.attach("offline-account-isolation.png", {
@@ -360,9 +376,9 @@ test("creates a family and adds a member offline, then syncs the dependency chai
 
   try {
     await setBrowserIdentity(context, president);
-    await page.goto("/");
-    await page.getByRole("button", { name: "Preparar offline" }).click();
-    await expect(page.getByText(/Vistas preparadas el/)).toBeVisible({ timeout: 30_000 });
+    await page.goto("/familias");
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("button", { name: "Preparar offline" })).toHaveCount(0);
     await page.evaluate(async () => navigator.serviceWorker.ready);
 
     await context.setOffline(true);

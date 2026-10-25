@@ -32,6 +32,7 @@ import { OfflineSyncStatus } from "@/components/shared/OfflineSyncStatus";
 import { OfflineScreen } from "@/components/offline/OfflineScreen";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { clearOfflineQueue } from "@/services/offline-queue.service";
+import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
 import {
   clearActiveOfflineAccount,
   clearOfflinePreparation,
@@ -63,7 +64,6 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
   const [pendingOperationsCount, setPendingOperationsCount] = useState(0);
   const [queueLoaded, setQueueLoaded] = useState(false);
   const [queueReadFailed, setQueueReadFailed] = useState(false);
-  const [isPreparingOffline, setIsPreparingOffline] = useState(false);
   const [preparationMessage, setPreparationMessage] = useState("");
   const [preparationError, setPreparationError] = useState("");
   const [hasOfflinePreparation, setHasOfflinePreparation] = useState(false);
@@ -71,21 +71,70 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
 
   useEffect(() => {
     let isMounted = true;
-    void setActiveOfflineAccount(user.id).then(() => readOfflinePreparation(user.id)).then((preparation) => {
-      if (isMounted && preparation) {
-        setHasOfflinePreparation(true);
-        setPreparationMessage(`Preparado el ${new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(preparation.preparedAt))}`);
+    let preparationDebounceTimer = 0;
+    setPreparationError("");
+    setPreparationMessage(isOnline ? "Preparando automáticamente las vistas habilitadas…" : "Comprobando la preparación guardada para este dispositivo…");
+
+    async function prepareAuthorizedWorkspace(forceRefresh = false) {
+      try {
+        await setActiveOfflineAccount(user.id);
+        const currentPreparation = await readOfflinePreparation(user.id);
+        if (!isMounted) {
+          return;
+        }
+
+        setHasOfflinePreparation(Boolean(currentPreparation));
+
+        if (!isOnline) {
+          setPreparationMessage(currentPreparation
+            ? `Preparación disponible hasta ${new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(currentPreparation.expiresAt))}.`
+            : "Conectate para preparar las vistas autorizadas para uso sin conexión.");
+          return;
+        }
+
+        if (!("serviceWorker" in navigator)) {
+          throw new Error("Este navegador no admite preparación automática para uso sin conexión.");
+        }
+
+        await navigator.serviceWorker.ready;
+        const preparation = await prepareOfflineWorkspace(
+          user.id,
+          user.name,
+          USER_ROLE_LABELS[user.role],
+          capabilities,
+          sessionExpiresAt,
+          forceRefresh,
+        );
+        if (isMounted) {
+          setHasOfflinePreparation(true);
+          setPreparationMessage(`Vistas autorizadas listas. Última actualización: ${new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(preparation.preparedAt))}.`);
+        }
+      } catch (error) {
+        if (isMounted) {
+          const message = error instanceof Error ? error.message : "No se pudo completar la preparación automática.";
+          setPreparationError(message);
+          setPreparationMessage("");
+          clientErrorHandler(error, () => {}, { logToConsole: false, showToast: false });
+        }
       }
-    }).catch((error: unknown) => {
-      if (isMounted) {
-        clientErrorHandler(error, () => {}, { logToConsole: false, showToast: false });
+    }
+
+    function refreshPreparationAfterServerChange() {
+      if (isOnline) {
+        window.clearTimeout(preparationDebounceTimer);
+        preparationDebounceTimer = window.setTimeout(() => void prepareAuthorizedWorkspace(true), OFFLINE_PREPARATION.PREPARATION_CHANGE_DEBOUNCE_MS);
       }
-    });
+    }
+
+    void prepareAuthorizedWorkspace();
+    window.addEventListener("merendar-server-data-changed", refreshPreparationAfterServerChange);
 
     return () => {
       isMounted = false;
+      window.clearTimeout(preparationDebounceTimer);
+      window.removeEventListener("merendar-server-data-changed", refreshPreparationAfterServerChange);
     };
-  }, [user.id]);
+  }, [capabilities, isOnline, sessionExpiresAt, user.id, user.name, user.role]);
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
   const navigation = PRIMARY_NAVIGATION.filter((item) => {
     if (!item.capabilities) {
@@ -156,32 +205,6 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
 
   function signOut() {
     void completeSignOut();
-  }
-
-  async function prepareOfflineAccess() {
-    setIsPreparingOffline(true);
-    setPreparationError("");
-    setPreparationMessage("Guardando las vistas habilitadas y sus datos para este dispositivo…");
-
-    try {
-      const preparation = await prepareOfflineWorkspace(
-        user.id,
-        user.name,
-        USER_ROLE_LABELS[user.role],
-        capabilities,
-        sessionExpiresAt,
-      );
-      setHasOfflinePreparation(true);
-      const formattedDate = new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(preparation.preparedAt));
-      setPreparationMessage(`Vistas preparadas el ${formattedDate}. Válido hasta que venza la sesión o por 12 horas.`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo preparar el acceso sin conexión.";
-      setPreparationError(message);
-      setPreparationMessage("");
-      clientErrorHandler(error, () => {}, { logToConsole: false, showToast: false });
-    } finally {
-      setIsPreparingOffline(false);
-    }
   }
 
   return (
@@ -269,9 +292,6 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <ConnectionStatus />
-              <Button variant="outline" size="sm" onClick={() => void prepareOfflineAccess()} disabled={!isOnline || isPreparingOffline}>
-                {isPreparingOffline ? "Preparando…" : "Preparar offline"}
-              </Button>
               <Badge variant="secondary" className="hidden sm:inline-flex">{USER_ROLE_LABELS[user.role]}</Badge>
               <Avatar size="lg">
                 <AvatarFallback>{user.name.slice(0, 2).toUpperCase()}</AvatarFallback>
@@ -286,14 +306,18 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
           onQueueStatusChange={onQueueStatusChange}
         />
 
-        {(preparationMessage || preparationError) && (
-          <div className="mx-auto w-full max-w-7xl px-4 pt-3 sm:px-6 lg:px-8" aria-live="polite">
-            <Alert variant={preparationError ? "destructive" : "info"}>
-              <AlertTitle>{preparationError ? "No se pudo preparar el acceso offline" : "Acceso offline"}</AlertTitle>
-              <AlertDescription>{preparationError || preparationMessage}</AlertDescription>
+        {preparationError ? (
+          <div className="mx-auto w-full max-w-7xl px-4 pt-3 sm:px-6 lg:px-8">
+            <Alert variant="destructive" role="status">
+              <AlertTitle>No se completó la preparación automática</AlertTitle>
+              <AlertDescription>{preparationError}{hasOfflinePreparation ? " Se conserva la última preparación válida." : " Conectate para volver a intentarlo."}</AlertDescription>
             </Alert>
           </div>
-        )}
+        ) : preparationMessage ? (
+          <p className="mx-auto w-full max-w-7xl px-4 pt-2 text-xs text-muted-foreground sm:px-6 lg:px-8" role="status" aria-live="polite">
+            {preparationMessage}
+          </p>
+        ) : null}
 
         <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 pb-28 sm:px-6 lg:px-8 lg:py-8">
           {pageContent}
