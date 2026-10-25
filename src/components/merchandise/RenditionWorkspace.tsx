@@ -216,12 +216,12 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
   }, [refreshQueue]);
 
   useEffect(() => {
-    if (isOnline) {
+    if (isOnline && !offlineMode) {
       void synchronizeOfflineQueue(userId).then(async () => {
         await Promise.all([refreshQueue(), onRefresh()]);
       });
     }
-  }, [isOnline, onRefresh, refreshQueue, userId]);
+  }, [isOnline, offlineMode, onRefresh, refreshQueue, userId]);
 
   const selectedPeriod = periods.find((period) => period.id === selectedPeriodId) ?? periods[0];
   const selectedSheet = selectedPeriod?.beneficiarySheets.find((sheet) => sheet.id === selectedSheetId) ?? selectedPeriod?.beneficiarySheets[0];

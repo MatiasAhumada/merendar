@@ -57,6 +57,13 @@ const offlinePreparedDocumentSchema = z.object({
 });
 const merchandiseDocumentUrl = (documentId: string) => `/api/merchandise/documents/${encodeURIComponent(documentId)}`;
 const renditionDocumentUrl = (documentId: string) => `/api/renditions/documents/${encodeURIComponent(documentId)}`;
+const beneficiarySheetCollectionSchema = z.object({
+  sheets: z.array(z.object({
+    id: z.string().min(1),
+    periodId: z.string().min(1),
+    version: z.number().int().positive(),
+  })),
+});
 
 export type OfflinePreparation = z.infer<typeof offlinePreparationSchema>;
 export type OfflinePreparedDocument = z.infer<typeof offlinePreparedDocumentSchema>;
@@ -289,33 +296,19 @@ function collectDocumentReferences(value: JsonValue, references: OfflineDocument
 }
 
 function collectBeneficiarySheetReferences(value: JsonValue, references: OfflineDocumentReference[]) {
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      collectBeneficiarySheetReferences(entry, references);
-    }
-    return;
+  const parsedCollection = beneficiarySheetCollectionSchema.safeParse(value);
+
+  if (!parsedCollection.success) {
+    throw new OfflinePreparationError("El servidor devolvió planillas con un formato que no se puede preparar.");
   }
 
-  const parsedObject = z.record(z.string(), z.json()).safeParse(value);
-  if (!parsedObject.success) {
-    return;
-  }
-
-  const sheetId = z.string().min(1).safeParse(parsedObject.data.id);
-  const periodId = z.string().min(1).safeParse(parsedObject.data.periodId);
-  const version = z.number().int().positive().safeParse(parsedObject.data.version);
-
-  if (sheetId.success && periodId.success && version.success) {
+  for (const sheet of parsedCollection.data.sheets) {
     references.push({
-      id: sheetId.data,
-      originalName: `planilla-${periodId.data}-v${version.data}.pdf`,
-      url: `/api/records/sheets/${encodeURIComponent(sheetId.data)}`,
+      id: sheet.id,
+      originalName: `planilla-${sheet.periodId}-v${sheet.version}.pdf`,
+      url: `/api/records/sheets/${encodeURIComponent(sheet.id)}`,
       documentType: "beneficiary-sheet",
     });
-  }
-
-  for (const nestedValue of Object.values(parsedObject.data)) {
-    collectBeneficiarySheetReferences(nestedValue, references);
   }
 }
 
@@ -324,7 +317,11 @@ function collectPreparedDocumentReferences(snapshots: OfflinePreparation["snapsh
 
   for (const snapshot of Object.values(snapshots)) {
     collectDocumentReferences(snapshot.data, documentReferences);
-    collectBeneficiarySheetReferences(snapshot.data, documentReferences);
+  }
+
+  const recordsSnapshot = snapshots["/entrega"];
+  if (recordsSnapshot) {
+    collectBeneficiarySheetReferences(recordsSnapshot.data, documentReferences);
   }
 
   return documentReferences;

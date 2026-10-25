@@ -40,6 +40,7 @@ import {
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineOperation, listOfflineOperations, resolveOfflineConflict, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import type { OfflineOperation } from "@/types/offline-operation";
+import type { OfflinePreparedDocument } from "@/services/offline-preparation.service";
 import type {
   MerchandisePeriodRecord,
   MerchandiseQuotaRecord,
@@ -60,6 +61,9 @@ interface MerchandiseWorkspaceProps {
   canReadRenditions: boolean;
   canWriteRenditions: boolean;
   canReviewRenditions: boolean;
+  offlineMode?: boolean;
+  initialPeriods?: MerchandisePeriodRecord[];
+  preparedDocuments?: OfflinePreparedDocument[];
 }
 
 interface PendingRecord {
@@ -587,17 +591,22 @@ function SaveSheet({
   );
 }
 
-export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchandise, canWriteMerchandise, canReadRenditions, canWriteRenditions, canReviewRenditions }: MerchandiseWorkspaceProps) {
-  const [periods, setPeriods] = useState<MerchandisePeriodRecord[]>([]);
+export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchandise, canWriteMerchandise, canReadRenditions, canWriteRenditions, canReviewRenditions, offlineMode = false, initialPeriods = [], preparedDocuments = [] }: MerchandiseWorkspaceProps) {
+  const [periods, setPeriods] = useState<MerchandisePeriodRecord[]>(initialPeriods);
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!offlineMode);
   const [loadError, setLoadError] = useState("");
   const [syncMessage, setSyncMessage] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
   const synchronizingRef = useRef(false);
   const isOnline = useNetworkStatus();
 
-  const loadMerchandise = useCallback(async () => {
+  const loadMerchandise = useCallback(async (forceRefresh = false) => {
+    if (offlineMode && !forceRefresh) {
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await clientAxios.get<unknown>("/api/merchandise", { headers: { "Cache-Control": "no-cache" } });
       const body: unknown = response.data;
@@ -618,7 +627,9 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
     } finally {
       setLoading(false);
     }
-  }, [isOnline]);
+  }, [isOnline, offlineMode]);
+
+  const refreshServerData = useCallback(() => loadMerchandise(true), [loadMerchandise]);
 
   const refreshQueue = useCallback(async () => {
     try {
@@ -638,7 +649,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
 
     try {
       await synchronizeOfflineQueue(userId);
-      await Promise.all([loadMerchandise(), refreshQueue()]);
+      await Promise.all([loadMerchandise(true), refreshQueue()]);
       setSyncMessage("");
     } catch (error) {
       setSyncMessage(errorMessage(error));
@@ -649,6 +660,19 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
   }, [isOnline, loadMerchandise, refreshQueue, userId]);
 
   useEffect(() => {
+    if (offlineMode) {
+      void refreshQueue();
+      const queueListener = () => void refreshQueue();
+      const serverDataListener = () => void refreshServerData();
+      window.addEventListener("offline-queue-change", queueListener);
+      window.addEventListener("merendar-server-data-changed", serverDataListener);
+
+      return () => {
+        window.removeEventListener("offline-queue-change", queueListener);
+        window.removeEventListener("merendar-server-data-changed", serverDataListener);
+      };
+    }
+
     void loadMerchandise();
     void refreshQueue();
     const queueListener = () => void refreshQueue();
@@ -663,13 +687,13 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
       window.removeEventListener("offline-queue-change", queueListener);
       window.removeEventListener("online", onlineListener);
     };
-  }, [loadMerchandise, refreshQueue, synchronize]);
+  }, [loadMerchandise, offlineMode, refreshQueue, refreshServerData, synchronize]);
 
   useEffect(() => {
-    if (isOnline) {
+    if (isOnline && !offlineMode) {
       void synchronize();
     }
-  }, [isOnline, synchronize]);
+  }, [isOnline, offlineMode, synchronize]);
 
   async function savePayload(payload: MerchandiseOperationPayload, dependencyRecordIds: string[], operation: "create" | "update" | "delete" = "create", baseVersion: number | null = null) {
     const parsedPayload = merchandiseOperationPayloadSchema.safeParse(payload);
@@ -689,9 +713,9 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
     });
     setOperations((existingOperations) => [...existingOperations, queuedOperation]);
 
-    if (isOnline) {
+    if (isOnline && !offlineMode) {
       await synchronizeOfflineQueue(userId);
-      await Promise.all([loadMerchandise(), refreshQueue()]);
+      await Promise.all([loadMerchandise(true), refreshQueue()]);
     }
   }
 
@@ -941,7 +965,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
         {!visiblePeriods.some((period) => period.requests.some((request) => request.remittances.length)) ? <Card variant="muted"><CardContent className="flex items-center gap-3 py-5"><HugeiconsIcon icon={TruckIcon} strokeWidth={1.8} className="size-6 text-primary" /><p className="text-sm text-muted-foreground">Los remitos recibidos aparecerán vinculados a su solicitud y cupo aprobado.</p></CardContent></Card> : null}
       </section></> : null}
 
-      {canReadRenditions ? <RenditionWorkspace periods={visiblePeriods} userId={userId} sessionExpiresAt={sessionExpiresAt} onRefresh={loadMerchandise} canWrite={canWriteRenditions} canReview={canReviewRenditions} canCreatePeriods={canReadMerchandise && canWriteMerchandise} periodStatus={periodStatus} /> : null}
+      {canReadRenditions ? <RenditionWorkspace periods={visiblePeriods} userId={userId} sessionExpiresAt={sessionExpiresAt} onRefresh={refreshServerData} canWrite={canWriteRenditions} canReview={canReviewRenditions} canCreatePeriods={canReadMerchandise && canWriteMerchandise} periodStatus={periodStatus} offlineMode={offlineMode} preparedDocuments={preparedDocuments} /> : null}
     </div>
   );
 }
