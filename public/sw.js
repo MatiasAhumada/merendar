@@ -1,7 +1,6 @@
-const CACHE_NAME = "merendar-public-v5";
-const OFFLINE_URL = "/offline";
+const CACHE_NAME = "merendar-public-v6";
+const CANONICAL_ROUTES = ["/", "/familias", "/mercaderia", "/entrega", "/usuarios", "/permisos"];
 const PUBLIC_ASSETS = [
-  OFFLINE_URL,
   "/icon-192.png",
   "/icon-512.png",
   "/icon-maskable-512.png",
@@ -10,6 +9,15 @@ const PUBLIC_ASSETS = [
   "/brand/merendar-isotipo.png",
   "/brand/ministerio-desarrollo-social-tucuman.png",
 ];
+
+function isPublicResponse(response) {
+  const cacheControl = response.headers.get("cache-control") || "";
+  return response.ok && !response.redirected && !cacheControl.includes("private") && !cacheControl.includes("no-store");
+}
+
+function isCanonicalRoute(pathname) {
+  return CANONICAL_ROUTES.includes(pathname);
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -34,52 +42,26 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (event.request.mode === "navigate") {
-    event.respondWith(fetch(event.request).catch(async () => {
-      const offlinePage = await caches.match(OFFLINE_URL);
-
-      if (!offlinePage) {
-        return Response.error();
+  if (event.request.mode === "navigate" && isCanonicalRoute(requestUrl.pathname)) {
+    event.respondWith(fetch(event.request).then(async (networkResponse) => {
+      const responseType = networkResponse.headers.get("content-type") || "";
+      if (isPublicResponse(networkResponse) && responseType.includes("text/html")) {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(requestUrl.pathname, networkResponse.clone());
       }
-
-      if (requestUrl.pathname === OFFLINE_URL) {
-        return offlinePage;
+      return networkResponse;
+    }).catch(async () => {
+      const cache = await caches.open(CACHE_NAME);
+      const cachedShell = await cache.match(requestUrl.pathname);
+      if (cachedShell) {
+        return cachedShell;
       }
-
-      const offlineUrl = new URL(OFFLINE_URL, self.location.origin);
-      offlineUrl.searchParams.set("route", `${requestUrl.pathname}${requestUrl.search}`);
-      return Response.redirect(offlineUrl, 302);
+      return Response.error();
     }));
     return;
   }
 
   if (!requestUrl.pathname.startsWith("/_next/static/") && !PUBLIC_ASSETS.includes(requestUrl.pathname)) {
-    return;
-  }
-
-  if (requestUrl.pathname === OFFLINE_URL) {
-    event.respondWith((async () => {
-      const cache = await caches.open(CACHE_NAME);
-
-      try {
-        const networkResponse = await fetch(event.request);
-        const cacheControl = networkResponse.headers.get("cache-control") || "";
-        const isPublicResponse = networkResponse.ok && !cacheControl.includes("private") && !cacheControl.includes("no-store");
-
-        if (isPublicResponse) {
-          await cache.put(OFFLINE_URL, networkResponse.clone());
-        }
-
-        return networkResponse;
-      } catch {
-        const offlinePage = await cache.match(OFFLINE_URL);
-        if (offlinePage) {
-          return offlinePage;
-        }
-
-        return Response.error();
-      }
-    })());
     return;
   }
 
@@ -91,10 +73,7 @@ self.addEventListener("fetch", (event) => {
     }
 
     const networkResponse = await fetch(event.request);
-    const cacheControl = networkResponse.headers.get("cache-control") || "";
-    const isPublicResponse = networkResponse.ok && !cacheControl.includes("private") && !cacheControl.includes("no-store");
-
-    if (isPublicResponse) {
+    if (isPublicResponse(networkResponse)) {
       await cache.put(event.request, networkResponse.clone());
     }
 

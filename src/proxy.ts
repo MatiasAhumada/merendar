@@ -6,7 +6,6 @@ export function proxy(request: NextRequest) {
   const hasSessionCookie = Boolean(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
   const isLoginRoute = request.nextUrl.pathname === ROUTES.LOGIN;
   const isPublicPwaRoute =
-    request.nextUrl.pathname === ROUTES.OFFLINE ||
     request.nextUrl.pathname === ROUTES.PWA_MANIFEST ||
     request.nextUrl.pathname === ROUTES.SERVICE_WORKER;
   const isProtectedRoute = !isLoginRoute && !isPublicPwaRoute;
@@ -21,5 +20,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:png|svg|ico)$).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|offline(?:/|$)|favicon.ico|.*\\.(?:png|svg|ico)$).*)"],
 };

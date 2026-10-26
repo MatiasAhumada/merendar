@@ -13,38 +13,13 @@ import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import clientAxios from "@/utils/clientAxios.util";
 import { clientErrorHandler } from "@/utils/handlers/clientHandler";
+import { getAccessPolicySnapshot } from "@/services/client/access-policy-data.service";
+import type { PolicySnapshot } from "@/validations/access-policy-snapshot.validation";
 
 interface PolicyRecord {
   role: UserRole;
   capability: AccessCapability;
   enabled: boolean;
-}
-
-interface AffectedUser {
-  id: string;
-  name: string;
-  email: string | null;
-  isActive: boolean;
-}
-
-interface PolicyUsers {
-  role: UserRole;
-  users: AffectedUser[];
-}
-
-interface PolicyChange {
-  role: UserRole;
-  capabilityKey: string;
-  previousValue: boolean;
-  newValue: boolean;
-  actorName: string;
-  createdAt: string;
-}
-
-interface PolicySnapshot {
-  policies: PolicyRecord[];
-  usersByRole: PolicyUsers[];
-  history: PolicyChange[];
 }
 
 interface RolePolicy {
@@ -63,7 +38,7 @@ function formatChangeDate(createdAt: string) {
   return new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Argentina/Tucuman" }).format(new Date(createdAt));
 }
 
-export function AccessPolicyAdministration() {
+export function AccessPolicyAdministration({ userId }: { userId: string }) {
   const isOnline = useNetworkStatus();
   const [snapshot, setSnapshot] = useState<PolicySnapshot | null>(null);
   const [draft, setDraft] = useState<RolePolicy[]>([]);
@@ -75,7 +50,7 @@ export function AccessPolicyAdministration() {
   const loadPolicy = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await clientAxios.get<PolicySnapshot>(API_ROUTES.ACCESS_POLICY);
+      const response = await getAccessPolicySnapshot(userId, isOnline);
       setSnapshot(response.data);
       setDraft(buildRolePolicies(response.data.policies));
       setError("");
@@ -85,12 +60,10 @@ export function AccessPolicyAdministration() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isOnline, userId]);
 
   useEffect(() => {
-    if (isOnline) {
-      void loadPolicy();
-    }
+    void loadPolicy();
   }, [isOnline, loadPolicy]);
 
   const changedRoles = useMemo(() => {
@@ -132,10 +105,6 @@ export function AccessPolicyAdministration() {
     }
   }
 
-  if (!isOnline) {
-    return <Card><CardHeader><CardTitle>Se necesita conexión</CardTitle><CardDescription>Los permisos se verifican y guardan en el servidor. No se pueden editar sin conexión.</CardDescription></CardHeader></Card>;
-  }
-
   if (loading) {
     return <p role="status">Cargando matriz de permisos…</p>;
   }
@@ -145,9 +114,10 @@ export function AccessPolicyAdministration() {
   }
 
   return <div className="flex flex-col gap-5">
+    {!isOnline ? <p role="status" className="rounded-lg border bg-muted p-3 text-sm text-muted-foreground">Matriz de la última preparación autorizada. Los cambios requieren conexión y validación del servidor.</p> : null}
     <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div><h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">Permisos por rol</h1><p className="mt-1 max-w-2xl text-sm text-muted-foreground">Configurá solo las acciones existentes en Merendar. Los cambios aplican a todas las cuentas del rol en su próxima solicitud al servidor.</p></div>
-      <Button onClick={() => setIsReviewOpen(true)} disabled={!changedRoles.length || saving}>Revisar y guardar ({changedRoles.length})</Button>
+      <Button onClick={() => setIsReviewOpen(true)} disabled={!isOnline || !changedRoles.length || saving}>Revisar y guardar ({changedRoles.length})</Button>
     </header>
 
     <section aria-label="Capacidades por rol" className="grid gap-4 xl:grid-cols-2">
@@ -163,7 +133,7 @@ export function AccessPolicyAdministration() {
               const inputId = `${rolePolicy.role}-${capability}`;
               const checked = rolePolicy.capabilities.includes(capability);
               return <div key={capability} className="flex items-start gap-3 border-t pt-3 first:border-t-0 first:pt-0">
-                <Checkbox id={inputId} checked={checked} onCheckedChange={(nextValue) => updateCapability(rolePolicy.role, capability, Boolean(nextValue))} />
+                <Checkbox id={inputId} checked={checked} disabled={!isOnline} onCheckedChange={(nextValue) => updateCapability(rolePolicy.role, capability, Boolean(nextValue))} />
                 <label htmlFor={inputId} className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1 text-sm">
                   <span className="font-medium">{ACCESS_CAPABILITY_LABELS[capability]}</span>
                   <span className="text-xs text-muted-foreground">{ACCESS_CAPABILITY_FEATURES[capability]} · <code>{capability}</code></span>

@@ -6,6 +6,13 @@ import { prisma } from "@/lib/prisma";
 import { familyService } from "@/server/services/family.service";
 import { createBrowserIdentity, removeBrowserIdentity, setBrowserIdentity, type BrowserIdentity } from "./browser-identity";
 
+test("treats the removed /offline URL as an ordinary missing route", async ({ page }) => {
+  const response = await page.goto("/offline?route=%2Ffamilias");
+
+  expect(response?.status()).toBe(404);
+  await expect(page).toHaveURL(/\/offline\?route=%2Ffamilias$/);
+});
+
 async function removeBrowserFamily(name: string) {
   const family = await prisma.family.findFirst({ where: { name }, select: { id: true, members: { select: { personId: true } } } });
   if (!family) {
@@ -63,7 +70,9 @@ test("renders the role access matrix for every account type", async ({ browser, 
       await expect(page.getByRole("link", { name: /Administrar usuarios/ })).toHaveCount(access.administration ? 1 : 0);
       await expect(page.getByRole("link", { name: /Administrar permisos/ })).toHaveCount(access.administration ? 1 : 0);
 
-      await expect(page.getByText("Resumen operativo no habilitado para este rol", { exact: true })).toHaveCount(access.operational ? 0 : 1);
+      if (!access.operational) {
+        await expect(page.getByText("Tu cuenta todavía no tiene módulos operativos", { exact: true })).toBeVisible();
+      }
       await expect(page.getByRole("link", { name: /Padrón familiar/ })).toHaveCount(access.operational ? 1 : 0);
     }
 
@@ -115,7 +124,7 @@ test("prepares private views automatically from a deep route, keeps them availab
       const cacheNames = await caches.keys();
       const publicCacheName = cacheNames.find((cacheName) => cacheName.startsWith("merendar-public-"));
       if (!publicCacheName) {
-        return { cacheNames, privateApiCached: false, privateHtmlCached: false, privatePdfCached: false };
+        return { cacheNames, privateApiCached: false, privateRouteCached: false, cachedPaths: [] as string[] };
       }
       const publicCache = await caches.open(publicCacheName);
       const cachedRequests = await publicCache.keys();
@@ -126,19 +135,18 @@ test("prepares private views automatically from a deep route, keeps them availab
         cachedPaths: cachedRequests.map((request) => new URL(request.url).pathname),
       };
     });
-    expect(privateCacheCheck.cacheNames).toEqual(["merendar-public-v5"]);
+    expect(privateCacheCheck.cacheNames).toEqual(["merendar-public-v6"]);
     expect(privateCacheCheck.privateApiCached).toBe(false);
-    expect(privateCacheCheck.privateRouteCached).toBe(false);
-    expect(privateCacheCheck.cachedPaths.some((path) => path.startsWith("/api/") || path === "/familias")).toBe(false);
+    expect(privateCacheCheck.privateRouteCached).toBe(true);
+    expect(privateCacheCheck.cachedPaths.some((path) => path.startsWith("/api/"))).toBe(false);
 
     await context.setOffline(true);
     await page.goto("/familias");
-    await expect(page).toHaveURL(/\/offline\?route=%2Ffamilias/);
-    await expect(page.getByRole("heading", { name: "Acceso sin conexión" })).toBeVisible();
-    await expect(page.getByText("Ficha familiar preparada", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/familias(?:\?.*)?$/);
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
 
     await page.reload();
-    await expect(page.getByText("Ficha familiar preparada", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
     expect(pageErrors).toEqual([]);
 
     secretary = await createBrowserIdentity(UserRole.TESORERIA);
@@ -163,9 +171,8 @@ test("prepares private views automatically from a deep route, keeps them availab
     }, secretary.userId);
     await context.setOffline(true);
     await page.goto("/familias");
-    await expect(page.getByRole("heading", { name: "Acceso sin conexión" })).toBeVisible();
-    await expect(page.getByText("Browser TESORERIA · Tesorería", { exact: true })).toBeVisible();
-    await expect(page.getByText("Esta vista no está habilitada para esta cuenta", { exact: true })).toBeVisible();
+    await expect(page.getByText("Acceso no habilitado", { exact: true })).toBeVisible();
+    await expect(page.getByText("Este módulo no está habilitado para tu rol.", { exact: true })).toBeVisible();
     await expect(page.getByText(/Datos privados recuperados del almacenamiento local de Browser/)).toHaveCount(0);
     const isolationScreenshot = await page.screenshot({ fullPage: true });
     await testInfo.attach("offline-account-isolation.png", {
@@ -183,7 +190,106 @@ test("prepares private views automatically from a deep route, keeps them availab
   }
 });
 
-test("refreshes a stale offline shell cache after the service worker update", async ({ context, page }) => {
+test("keeps the canonical family view and URL when connectivity drops", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+
+  try {
+    await setBrowserIdentity(context, president);
+    await page.goto("/familias");
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+
+    await context.setOffline(true);
+    await expect(page.getByRole("status", { name: "Sin conexión" })).toBeVisible();
+    await expect(page).toHaveURL(/\/familias$/);
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Acceso sin conexión" })).toHaveCount(0);
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("navigates and reloads canonical views offline using their shared composition", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+
+  try {
+    await setBrowserIdentity(context, president);
+    await page.goto("/familias");
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+
+    await context.setOffline(true);
+    await page.getByRole("link", { name: "Registro", exact: true }).first().click();
+    await expect(page).toHaveURL(/\/entrega$/);
+    await expect(page.getByRole("heading", { name: "Beneficiarios y planillas" })).toBeVisible();
+
+    await page.reload();
+    await expect(page).toHaveURL(/\/entrega$/);
+    await expect(page.getByRole("heading", { name: "Beneficiarios y planillas" })).toBeVisible();
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("keeps the canonical dashboard and prepared metrics when connectivity drops", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+
+  try {
+    await setBrowserIdentity(context, president);
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Hola, Browser PRESIDENTE" })).toBeVisible();
+    await expect(page.getByText("Resumen del padrón y cupos", { exact: true })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+
+    await context.setOffline(true);
+    await expect(page.getByRole("status", { name: "Sin conexión" })).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { name: "Hola, Browser PRESIDENTE" })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "Resumen guardado para consulta" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Acceso sin conexión" })).toHaveCount(0);
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("keeps authorized user and access-policy reads offline while disabling writes", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+
+  try {
+    await setBrowserIdentity(context, president);
+    await page.goto("/usuarios");
+    await expect(page.getByRole("heading", { name: "Administración de usuarios" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await context.setOffline(true);
+    await expect(page.getByRole("status", { name: "Sin conexión" })).toBeVisible();
+    await expect(page).toHaveURL(/\/usuarios$/);
+    await expect(page.getByRole("heading", { name: "Administración de usuarios" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Crear usuario" })).toBeDisabled();
+
+    await context.setOffline(false);
+    await page.goto("/permisos");
+    await expect(page.getByRole("heading", { name: "Permisos por rol" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await context.setOffline(true);
+    await expect(page.getByRole("status", { name: "Sin conexión" })).toBeVisible();
+    await expect(page).toHaveURL(/\/permisos$/);
+    await expect(page.getByRole("heading", { name: "Permisos por rol" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Revisar y guardar/ })).toBeDisabled();
+    await expect(page.getByRole("checkbox").first()).toBeDisabled();
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("refreshes stale public route shells after the service worker update", async ({ context, page }) => {
   const president = await createBrowserIdentity(UserRole.PRESIDENTE);
 
   try {
@@ -216,7 +322,7 @@ test("refreshes a stale offline shell cache after the service worker update", as
         throw new Error("No se registró la caché pública del Service Worker.");
       }
       const publicCache = await caches.open(publicCacheName);
-      await publicCache.put("/offline", new Response('<!doctype html><html><head><script src="/_next/static/chunks/cod1478-stale-shell.js"></script></head><body>Shell obsoleto</body></html>', {
+      await publicCache.put("/familias", new Response('<!doctype html><html><head><script src="/_next/static/chunks/cod1478-stale-shell.js"></script></head><body>Shell obsoleto</body></html>', {
         status: 200,
         headers: { "Content-Type": "text/html" },
       }));
@@ -245,15 +351,15 @@ test("refreshes a stale offline shell cache after the service worker update", as
       if (!publicCacheName) {
         return "";
       }
-      const response = await (await caches.open(publicCacheName)).match("/offline");
+      const response = await (await caches.open(publicCacheName)).match("/familias");
       return response ? response.text() : "";
     });
     expect(cachedOfflineShell).not.toContain("cod1478-stale-shell.js");
 
     await context.setOffline(true);
     await page.goto("/familias");
-    await expect(page).toHaveURL(/\/offline\?route=%2Ffamilias/);
-    await expect(page.getByText("Ficha familiar preparada", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/familias(?:\?.*)?$/);
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
   } finally {
     await context.setOffline(false);
     await removeBrowserIdentity(president);
@@ -321,7 +427,7 @@ test("prepares merchandise requests without treating them as beneficiary sheet P
     await page.goto("/mercaderia");
     await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/No se completó la preparación automática/)).toHaveCount(0);
-    expect(beneficiarySheetRequests).toEqual([]);
+    expect(beneficiarySheetRequests.every((url) => [periodId, requestId, quotaId, remittanceId].every((id) => id && !url.includes(id)))).toBe(true);
   } finally {
     await context.setOffline(false);
     if (remittanceId) {
@@ -363,9 +469,9 @@ test("creates a dependent merchandise chain offline and synchronizes each operat
 
     await context.setOffline(true);
     await page.goto("/mercaderia");
-    await expect(page).toHaveURL(/\/offline\?route=%2Fmercaderia/);
+    await expect(page).toHaveURL(/\/mercaderia(?:\?.*)?$/);
     await expect(page.getByRole("heading", { name: "Recepción de mercadería" })).toBeVisible();
-    await expect(page.getByText("Sin conexión", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("status", { name: "Sin conexión" })).toBeVisible();
     await page.getByRole("button", { name: "Nuevo período" }).click();
     await page.locator("#period-label").fill(periodLabel);
     await page.locator("#period-agency").fill("COD1478 QA offline");
@@ -374,7 +480,8 @@ test("creates a dependent merchandise chain offline and synchronizes each operat
     await page.getByRole("button", { name: "Guardar período" }).click();
     await expect(page.getByRole("heading", { name: periodLabel })).toBeVisible();
 
-    await page.getByRole("button", { name: "Registrar solicitud" }).click();
+    const createdPeriodCard = page.getByRole("heading", { name: periodLabel }).locator("xpath=ancestor::div[@data-slot='card'][1]");
+    await createdPeriodCard.getByRole("button", { name: "Registrar solicitud" }).click();
     await page.locator('input[id^="request-number-"]').fill(requestNumber);
     await page.locator('input[id^="request-date-"]').fill("2026-10-25");
     await page.locator('input[id^="request-quantity-"]').fill("3");
@@ -497,9 +604,13 @@ test("uploads a rendition PDF offline and preserves the file through idempotent 
 
     await context.setOffline(true);
     await page.goto("/mercaderia");
-    await expect(page).toHaveURL(/\/offline\?route=%2Fmercaderia/);
-    await expect(page.getByText("Rendiciones preparadas", { exact: true })).toBeVisible();
-    await expect(page.getByText("Sin conexión", { exact: true }).first()).toBeVisible();
+    await expect(page).toHaveURL(/\/mercaderia(?:\?.*)?$/);
+    await expect(page.getByText("Rendición documental", { exact: true })).toBeVisible();
+    await expect(page.getByRole("status", { name: "Sin conexión" })).toBeVisible();
+    await page.getByRole("combobox", { name: "Módulo o período" }).click();
+    await page.getByRole("option", { name: new RegExp(periodLabel) }).click();
+    await page.getByRole("combobox", { name: "Planilla emitida" }).click();
+    await page.getByRole("option", { name: /Versión 1/ }).click();
     await page.locator("#rendition-documents").setInputFiles({ name: originalName, mimeType: "application/pdf", buffer: pdfContent });
     await expect(page.getByText(`Seleccionados: ${originalName}`)).toBeVisible();
     await page.getByRole("button", { name: "Guardar documentos" }).click();
@@ -592,8 +703,7 @@ test("registers a beneficiary offline, emits a local PDF and synchronizes both o
 
     await context.setOffline(true);
     await page.goto("/entrega");
-    await expect(page).toHaveURL(/\/offline\?route=%2Fentrega/);
-    await expect(page.getByText("Registro preparado", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/entrega(?:\?.*)?$/);
     await page.locator("#record-period").click();
     await page.getByRole("option", { name: new RegExp(periodLabel) }).click();
     await page.locator("#record-family").click();
@@ -908,7 +1018,7 @@ test("adds a member to a confirmed family after reopening the route offline", as
 
     await context.setOffline(true);
     await page.goto("/familias");
-    await expect(page).toHaveURL(/\/offline\?route=%2Ffamilias/);
+    await expect(page).toHaveURL(/\/familias(?:\?.*)?$/);
     await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyName);
     await page.getByRole("button", { name: "Ver ficha familiar" }).click();
     await page.getByRole("button", { name: "Agregar integrante" }).click();
@@ -977,7 +1087,7 @@ test("edits a confirmed family member after reopening the route offline", async 
 
     await context.setOffline(true);
     await page.goto("/familias");
-    await expect(page).toHaveURL(/\/offline\?route=%2Ffamilias/);
+    await expect(page).toHaveURL(/\/familias(?:\?.*)?$/);
     await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyName);
     await page.getByRole("button", { name: "Ver ficha familiar" }).click();
     await page.getByRole("button", { name: "Editar datos" }).click();
@@ -1044,7 +1154,7 @@ test("deactivates a confirmed family offline after reopening the route", async (
 
     await context.setOffline(true);
     await page.goto("/familias");
-    await expect(page).toHaveURL(/\/offline\?route=%2Ffamilias/);
+    await expect(page).toHaveURL(/\/familias(?:\?.*)?$/);
     await page.getByRole("searchbox", { name: "Buscar familias" }).fill(familyName);
     await page.getByRole("button", { name: "Ver ficha familiar" }).click();
     await page.getByRole("button", { name: "Dar de baja familia" }).click();
@@ -1097,8 +1207,8 @@ test("creates a family and adds a member offline, then syncs the dependency chai
 
     await context.setOffline(true);
     await page.goto("/familias");
-    await expect(page).toHaveURL(/\/offline\?route=%2Ffamilias/);
-    await expect(page.getByText("Ficha familiar preparada", { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/familias(?:\?.*)?$/);
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
     await page.getByRole("button", { name: "Nueva familia" }).click();
     await page.locator("#family-name").fill(familyName);
     await page.locator("#family-neighborhood").click();

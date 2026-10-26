@@ -1,16 +1,15 @@
-import { redirect } from "next/navigation";
+"use client";
+
 import { AccessPolicyAdministration } from "@/components/users/AccessPolicyAdministration";
-import { ROUTES } from "@/constants/routes";
-import { requireSession } from "@/server/services/auth-session";
-import { hasEffectiveCapability } from "@/server/services/access-policy.service";
+import { SessionRoute } from "@/components/shared/SessionRoute";
+import { useAppSession } from "@/components/shared/AppSessionContext";
 
-export default async function AccessPolicyPage() {
-  const session = await requireSession();
-  const canManageAccessPolicy = await hasEffectiveCapability(session.user.role, "access-policy.manage");
+export default function AccessPolicyPage() {
+  const { user } = useAppSession();
 
-  if (!canManageAccessPolicy) {
-    redirect(ROUTES.HOME);
-  }
-
-  return <AccessPolicyAdministration />;
+  return (
+    <SessionRoute capability="access-policy.manage">
+      {user ? <AccessPolicyAdministration userId={user.id} /> : null}
+    </SessionRoute>
+  );
 }

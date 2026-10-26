@@ -27,9 +27,7 @@ import clientAxios from "@/utils/clientAxios.util";
 import { API_ROUTES } from "@/constants/routes";
 import { clientErrorHandler } from "@/utils/handlers/clientHandler";
 import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
-import { OfflineAccessNotice } from "@/components/shared/OfflineAccessNotice";
 import { OfflineSyncStatus } from "@/components/shared/OfflineSyncStatus";
-import { OfflineScreen } from "@/components/offline/OfflineScreen";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { clearOfflineQueue } from "@/services/offline-queue.service";
 import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
@@ -135,6 +133,37 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
       window.removeEventListener("merendar-server-data-changed", refreshPreparationAfterServerChange);
     };
   }, [capabilities, isOnline, sessionExpiresAt, user.id, user.name, user.role]);
+
+  useEffect(() => {
+    function loadCanonicalRouteFromCache(event: MouseEvent) {
+      if (isOnline || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+
+      const anchor = event.target.closest<HTMLAnchorElement>("a[href]");
+      if (!anchor) {
+        return;
+      }
+
+      const destination = new URL(anchor.href);
+      const canonicalRoutes: string[] = [ROUTES.HOME, ROUTES.FAMILIES, ROUTES.GOODS, ROUTES.DELIVERY, ROUTES.USERS, ROUTES.ACCESS_POLICY];
+      if (destination.origin !== window.location.origin || !canonicalRoutes.includes(destination.pathname)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.location.assign(`${destination.pathname}${destination.search}${destination.hash}`);
+    }
+
+    window.addEventListener("click", loadCanonicalRouteFromCache, true);
+    return () => window.removeEventListener("click", loadCanonicalRouteFromCache, true);
+  }, [isOnline]);
+
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
   const navigation = PRIMARY_NAVIGATION.filter((item) => {
     if (!item.capabilities) {
@@ -143,25 +172,7 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
     return item.capabilities.some((capability) => capabilities.includes(capability));
   });
   const bottomNavigation = navigation.filter((item) => item.href !== ROUTES.USERS && item.href !== ROUTES.ACCESS_POLICY);
-  const offlineCapabilityByRoute: Record<string, string> = {
-    [ROUTES.FAMILIES]: "families.write",
-    [ROUTES.DELIVERY]: "delivery.write",
-    [ROUTES.GOODS]: "merchandise.write",
-  };
-  const offlineCapability = offlineCapabilityByRoute[pathname];
-  let canCaptureOffline = false;
-  if (offlineCapability) {
-    canCaptureOffline = capabilities.includes(offlineCapability) && Date.now() < Date.parse(sessionExpiresAt);
-  }
-  let pageContent = children;
-
-  if (!isOnline && !canCaptureOffline) {
-    if (pathname === ROUTES.HOME) {
-      pageContent = <OfflineScreen />;
-    } else {
-      pageContent = <OfflineAccessNotice />;
-    }
-  }
+  const pageContent = children;
 
   const onQueueStatusChange = useCallback((count: number, loaded: boolean, readError: boolean) => {
     setPendingOperationsCount(count);

@@ -10,6 +10,7 @@ export const OFFLINE_STORAGE = {
 } as const;
 
 export const OFFLINE_PREPARATION = {
+  PUBLIC_CACHE_NAME: "merendar-public-v6",
   DATABASE_PREFIX: "merendar-offline-preparation",
   DATABASE_VERSION: 3,
   SNAPSHOT_SCHEMA_VERSION: 4,

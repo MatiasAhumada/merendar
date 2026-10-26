@@ -6,7 +6,6 @@ export const ROUTES = {
   LOGIN: "/login",
   USERS: "/usuarios",
   ACCESS_POLICY: "/permisos",
-  OFFLINE: "/offline",
   PWA_MANIFEST: "/manifest.webmanifest",
   SERVICE_WORKER: "/sw.js",
 } as const;

@@ -44,7 +44,11 @@ export async function GET(request: NextRequest) {
       return response;
     }
 
-    return jsonResponse({ user: session.user }, 200);
+    return jsonResponse({
+      user: session.user,
+      expiresAt: session.expiresAt.toISOString(),
+      capabilities: await getEffectiveCapabilities(session.user.role),
+    }, 200);
   } catch {
     return jsonResponse({ error: { message: AUTH_MESSAGES.REQUEST_FAILED } }, 500);
   }

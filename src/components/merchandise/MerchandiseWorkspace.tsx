@@ -51,7 +51,7 @@ import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace"
 import { merchandiseCancellationPayloadSchema, merchandiseOperationPayloadSchema, merchandisePayloadSchema, merchandiseUpdatePayloadSchema, type MerchandiseCancellationPayload, type MerchandiseOperationPayload, type MerchandisePayload, type MerchandiseUpdatePayload } from "@/validations/merchandise.validation";
 import { z } from "zod";
 import { RENDITION_LIMITS } from "@/constants/rendition.constant";
-import clientAxios from "@/utils/clientAxios.util";
+import { getMerchandiseCollection } from "@/services/client/merchandise-data.service";
 
 interface MerchandiseWorkspaceProps {
   userId: string;
@@ -70,99 +70,6 @@ interface PendingRecord {
   operation: OfflineOperation;
   payload: MerchandiseOperationPayload;
 }
-
-export const merchandiseResponseSchema = z.object({
-  periods: z.array(z.object({
-    id: z.string(),
-    version: z.number().int().positive(),
-    label: z.string(),
-    agency: z.string(),
-    status: z.enum(["VIGENTE", "ANULADO"]),
-    startsAt: z.iso.datetime(),
-    endsAt: z.iso.datetime(),
-    beneficiarySheets: z.array(z.object({
-      id: z.string(),
-      version: z.number().int(),
-      createdAt: z.iso.datetime(),
-      beneficiaryCount: z.number().int().nonnegative(),
-    })),
-    renditions: z.array(z.object({
-      id: z.string(),
-      periodId: z.string(),
-      beneficiarySheetId: z.string(),
-      reviewStatus: z.enum(["PENDIENTE", "REVISADA", "OBSERVADA"]),
-      reviewNotes: z.string().nullable(),
-      reviewedAt: z.iso.datetime().nullable(),
-      beneficiarySheet: z.object({ id: z.string(), version: z.number().int(), createdAt: z.iso.datetime(), beneficiaryCount: z.number().int().nonnegative() }),
-      documents: z.array(z.object({
-        id: z.string(),
-        documentType: z.enum(["PLANILLA_FIRMADA", "REMITO", "RESPALDO"]),
-        version: z.number().int(),
-        supersedesId: z.string().nullable(),
-        originalName: z.string(),
-        byteSize: z.number().int(),
-        createdAt: z.iso.datetime(),
-      })),
-      createdAt: z.iso.datetime(),
-      updatedAt: z.iso.datetime(),
-    })),
-    requests: z.array(z.object({
-      id: z.string(),
-      version: z.number().int().positive(),
-      periodId: z.string(),
-      requestNumber: z.string(),
-      requestedAt: z.iso.datetime(),
-      requestedQuantity: z.number(),
-      status: z.enum(["PENDIENTE", "APROBADA", "RECHAZADA", "CANCELADA"]),
-      notes: z.string().nullable(),
-      createdBy: z.object({ id: z.string(), name: z.string() }),
-      quota: z.object({
-        id: z.string(),
-        version: z.number().int().positive(),
-        requestId: z.string(),
-        approvedQuantity: z.number(),
-        approvedAt: z.iso.datetime(),
-        notes: z.string().nullable(),
-        approvedBy: z.object({ id: z.string(), name: z.string() }),
-        createdAt: z.iso.datetime(),
-        updatedAt: z.iso.datetime(),
-      }).nullable(),
-      remittances: z.array(z.object({
-        id: z.string(),
-        version: z.number().int().positive(),
-        requestId: z.string(),
-        quotaId: z.string(),
-        remittanceNumber: z.string(),
-        receivedAt: z.iso.datetime(),
-        receivedQuantity: z.number(),
-        responsibleName: z.string(),
-        status: z.enum(["VIGENTE", "ANULADO"]),
-        notes: z.string().nullable(),
-        createdBy: z.object({ id: z.string(), name: z.string() }),
-        documents: z.array(z.object({
-          id: z.string(),
-          originalName: z.string(),
-          contentType: z.string(),
-          byteSize: z.number(),
-          createdAt: z.iso.datetime(),
-        })),
-        createdAt: z.iso.datetime(),
-        updatedAt: z.iso.datetime(),
-      })),
-      documents: z.array(z.object({
-        id: z.string(),
-        originalName: z.string(),
-        contentType: z.string(),
-        byteSize: z.number(),
-        createdAt: z.iso.datetime(),
-      })),
-      createdAt: z.iso.datetime(),
-      updatedAt: z.iso.datetime(),
-    })),
-    createdAt: z.iso.datetime(),
-    updatedAt: z.iso.datetime(),
-  })),
-});
 
 const receiptLimitConflictSchema = z.object({
   kind: z.literal("receipt_exceeds_quota"),
@@ -591,7 +498,9 @@ function SaveSheet({
   );
 }
 
-export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchandise, canWriteMerchandise, canReadRenditions, canWriteRenditions, canReviewRenditions, offlineMode = false, initialPeriods = [], preparedDocuments = [] }: MerchandiseWorkspaceProps) {
+export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchandise, canWriteMerchandise, canReadRenditions, canWriteRenditions, canReviewRenditions, initialPeriods = [], preparedDocuments = [] }: MerchandiseWorkspaceProps) {
+  const isOnline = useNetworkStatus();
+  const offlineMode = !isOnline;
   const [periods, setPeriods] = useState<MerchandisePeriodRecord[]>(initialPeriods);
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
   const [loading, setLoading] = useState(!offlineMode);
@@ -599,7 +508,6 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
   const [syncMessage, setSyncMessage] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
   const synchronizingRef = useRef(false);
-  const isOnline = useNetworkStatus();
 
   const loadMerchandise = useCallback(async (forceRefresh = false) => {
     if (offlineMode && !forceRefresh) {
@@ -608,26 +516,16 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
     }
 
     try {
-      const response = await clientAxios.get<unknown>("/api/merchandise", { headers: { "Cache-Control": "no-cache" } });
-      const body: unknown = response.data;
-      const parsed = merchandiseResponseSchema.safeParse(body);
+      const result = await getMerchandiseCollection(userId, isOnline);
 
-      if (!parsed.success) {
-        throw new Error("El servidor devolvió datos de mercadería que esta versión no reconoce.");
-      }
-
-      setPeriods(parsed.data.periods);
+      setPeriods(result.data.periods);
       setLoadError("");
     } catch (error) {
-      if (isOnline) {
-        setLoadError(errorMessage(error));
-      } else {
-        setLoadError("Sin conexión. Se muestran los períodos y las planillas que ya estaban cargados en esta vista.");
-      }
+      setLoadError(errorMessage(error));
     } finally {
       setLoading(false);
     }
-  }, [isOnline, offlineMode]);
+  }, [isOnline, offlineMode, userId]);
 
   const refreshServerData = useCallback(() => loadMerchandise(true), [loadMerchandise]);
 

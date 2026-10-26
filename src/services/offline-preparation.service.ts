@@ -1,6 +1,6 @@
 import { z } from "zod";
 import axios from "axios";
-import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
+import { OFFLINE_PREPARATION, type OfflinePreparedRoute } from "@/constants/offline.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import type { JsonValue } from "@/types/json-value";
 import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
@@ -237,16 +237,40 @@ export async function clearActiveOfflineAccount(userId: string) {
 }
 
 async function cachePublicOfflineShellAssets() {
-  const shellResponse = await clientAxios.get<string>("/offline", {
-    responseType: "text",
-    headers: { "Cache-Control": "no-store" },
-  });
-  const initialAssets = [...shellResponse.data.matchAll(/(?:src|href)=["']([^"']+)["']/g)]
-    .map((match) => match[1])
-    .filter((assetPath) => assetPath.startsWith("/_next/static/"));
-  const assetsToCache = new Set(initialAssets);
+  const cache = await caches.open(OFFLINE_PREPARATION.PUBLIC_CACHE_NAME);
+  const assetsToCache = new Set<string>();
 
-  for (const assetPath of initialAssets) {
+  for (const route of OFFLINE_PREPARATION.ROUTES) {
+    const response = await fetch(route, { cache: "no-store", credentials: "same-origin", redirect: "manual" });
+    const contentType = response.headers.get("content-type") ?? "";
+    const cacheControl = response.headers.get("cache-control") ?? "";
+    const isPublicShell = response.ok
+      && !response.redirected
+      && contentType.includes("text/html")
+      && !cacheControl.includes("private")
+      && !cacheControl.includes("no-store");
+
+    if (!isPublicShell) {
+      throw new OfflinePreparationError(`No se pudo preparar la ruta pública ${route} para continuar sin conexión.`);
+    }
+
+    const shellHtml = await response.text();
+    await cache.put(route, new Response(shellHtml, {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "public, max-age=0, must-revalidate",
+      },
+    }));
+
+    const routeAssets = [...shellHtml.matchAll(/(?:src|href)=["']([^"']+)["']/g)]
+      .map((match) => match[1])
+      .filter((assetPath) => assetPath.startsWith("/_next/static/"));
+    for (const assetPath of routeAssets) {
+      assetsToCache.add(assetPath);
+    }
+  }
+
+  for (const assetPath of assetsToCache) {
     if (assetPath.endsWith(".css")) {
       const stylesheetResponse = await clientAxios.get<string>(assetPath, { responseType: "text", headers: { "Cache-Control": "no-store" } });
       const stylesheetAssets = [...stylesheetResponse.data.matchAll(/url\(["']?([^"')]+)["']?\)/g)]
@@ -519,6 +543,60 @@ export async function readOfflinePreparation(userId: string): Promise<OfflinePre
     await clearOfflinePreparation(userId);
   }
   return null;
+}
+
+export async function updateOfflinePreparedSnapshot(userId: string, route: OfflinePreparedRoute, data: unknown) {
+  const parsedData = z.json().safeParse(data);
+  if (!parsedData.success || !globalThis.indexedDB) {
+    return false;
+  }
+
+  const database = await openDatabase(userId);
+
+  try {
+    return await new Promise<boolean>((resolve, reject) => {
+      const transaction = database.transaction(OFFLINE_PREPARATION.STORE, "readwrite");
+      const store = transaction.objectStore(OFFLINE_PREPARATION.STORE);
+      const request = store.get(OFFLINE_PREPARATION.KEY);
+      let snapshotUpdated = false;
+
+      request.onsuccess = () => {
+        const storedPreparation = normalizeStoredOfflinePreparation(request.result).preparation;
+        if (!storedPreparation || storedPreparation.userId !== userId || !storedPreparation.snapshots[route]) {
+          return;
+        }
+
+        const expiresAt = Date.parse(storedPreparation.expiresAt);
+        const sessionExpiresAt = Date.parse(storedPreparation.sessionExpiresAt);
+        if (Date.now() >= expiresAt || Date.now() >= sessionExpiresAt) {
+          return;
+        }
+
+        const capturedAt = new Date().toISOString();
+        store.put({
+          key: OFFLINE_PREPARATION.KEY,
+          ...storedPreparation,
+          snapshots: {
+            ...storedPreparation.snapshots,
+            [route]: {
+              schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
+              capturedAt,
+              data: parsedData.data,
+            },
+          },
+        });
+        snapshotUpdated = true;
+      };
+      request.onerror = () => {
+        reject(new OfflinePreparationError("No se pudo actualizar la vista preparada en este dispositivo."));
+      };
+      transaction.oncomplete = () => resolve(snapshotUpdated);
+      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo actualizar la vista preparada en este dispositivo."));
+      transaction.onabort = () => reject(new OfflinePreparationError("No se pudo actualizar la vista preparada en este dispositivo."));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function readOfflinePreparedDocuments(userId: string): Promise<OfflinePreparedDocument[]> {

@@ -53,6 +53,8 @@ import type { OfflineOperation } from "@/types/offline-operation";
 import { familyCollectionSchema, familyDeactivationTargetSchema, familyMemberChangeSchema, familyMemberInputSchema, familyPayloadSchema, newFamilyMemberChangeSchema, newFamilyMemberInputSchema, newFamilyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
 import { z } from "zod";
 import clientAxios from "@/utils/clientAxios.util";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import { getFamilyCollection } from "@/services/client/family-data.service";
 
 interface FamilyRegistryProps {
   initialFamilies: FamilyRecord[];
@@ -491,6 +493,7 @@ function FamilyDetails({ family, canWrite, pendingMemberIds, onClose, onAddMembe
 }
 
 export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canWrite }: FamilyRegistryProps) {
+  const isOnline = useNetworkStatus();
   const [families, setFamilies] = useState(initialFamilies);
   const [offlineOperations, setOfflineOperations] = useState<OfflineOperation[]>([]);
   const [search, setSearch] = useState("");
@@ -521,15 +524,9 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     }
   }, [userId]);
   const refreshFamilies = useCallback(async () => {
-    const response = await clientAxios.get<unknown>("/api/families", { headers: { "Cache-Control": "no-store" } });
-    const parsedResponse = familyCollectionSchema.safeParse(response.data);
-
-    if (!parsedResponse.success) {
-      throw new Error("No se pudo actualizar el padrón");
-    }
-
-    setFamilies(parsedResponse.data.families);
-  }, []);
+    const result = await getFamilyCollection(userId, isOnline);
+    setFamilies(result.data.families);
+  }, [isOnline, userId]);
   const localFamilies = useMemo(() => offlineOperations.filter((operation) => operation.operation === "create").flatMap((operation) => {
     const family = familyFromOfflineOperation(operation);
 
@@ -588,6 +585,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
 
   useEffect(() => {
     void refreshOfflineFamilies();
+    void refreshFamilies().catch(() => undefined);
     const handleQueueChange = () => {
       void refreshOfflineFamilies();
 
@@ -598,12 +596,19 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     const handleReconnect = () => {
       void synchronizeOfflineQueue(userId).then(() => refreshOfflineFamilies()).then(() => refreshFamilies()).catch(() => undefined);
     };
+    const handleDisconnect = () => {
+      void refreshFamilies().catch(() => undefined);
+    };
     window.addEventListener("offline-queue-change", handleQueueChange);
     window.addEventListener("online", handleReconnect);
+    window.addEventListener("offline", handleDisconnect);
+    window.addEventListener("merendar-network-unreachable", handleDisconnect);
 
     return () => {
       window.removeEventListener("offline-queue-change", handleQueueChange);
       window.removeEventListener("online", handleReconnect);
+      window.removeEventListener("offline", handleDisconnect);
+      window.removeEventListener("merendar-network-unreachable", handleDisconnect);
     };
   }, [refreshFamilies, refreshOfflineFamilies, userId]);
 

@@ -25,22 +25,23 @@ interface WorkerHarness {
 async function createWorkerHarness(networkFetch: (request: ServiceWorkerRequest) => Promise<Response>) {
   const serviceWorkerSource = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
   const listeners: Record<string, FetchListener> = {};
+  const cacheEntries = new Map<string, Response>();
+  cacheEntries.set("/familias", new Response("offline shell", { status: 200 }));
   let cacheWrites = 0;
   let cacheReads = 0;
   const publicCache = {
     match: async (request?: string) => {
       cacheReads += 1;
-      if (request === "/offline") {
-        return new Response("offline shell", { status: 200 });
-      }
-      return undefined;
+      const cachedResponse = cacheEntries.get(request ?? "");
+      return cachedResponse?.clone();
     },
-    put: async () => {
+    put: async (request: string, response: Response) => {
       cacheWrites += 1;
+      cacheEntries.set(request, response.clone());
     },
   };
   const cacheStorage = {
-    match: async () => new Response("offline shell", { status: 200 }),
+    match: async () => undefined,
     open: async () => publicCache,
     keys: async () => [],
     delete: async () => true,
@@ -79,7 +80,7 @@ function serviceWorkerRequest(path: string, mode: string): ServiceWorkerRequest 
   return { url: `https://merendar.example${path}`, method: "GET", mode };
 }
 
-test("an offline protected navigation redirects to the public shell with the original route", async () => {
+test("an offline canonical navigation serves its same-route public shell without redirecting", async () => {
   const harness = await createWorkerHarness(async () => Promise.reject(new Error("offline")));
   let responsePromise: Promise<Response> | undefined;
   harness.handleFetch({
@@ -91,53 +92,32 @@ test("an offline protected navigation redirects to the public shell with the ori
 
   assert.ok(responsePromise);
   const response = await responsePromise;
-  assert.equal(response.status, 302);
-  assert.equal(response.headers.get("location"), "https://merendar.example/offline?route=%2Ffamilias%3Ffilter%3Dalerts");
-  assert.equal(harness.getCacheWrites(), 0);
-});
-
-test("an offline shell request refreshes stale cached HTML when the network is available", async () => {
-  const harness = await createWorkerHarness(async () => new Response("fresh offline shell", {
-    status: 200,
-    headers: { "Cache-Control": "public, max-age=0" },
-  }));
-  let responsePromise: Promise<Response> | undefined;
-  harness.handleFetch({
-    request: serviceWorkerRequest("/offline", "cors"),
-    respondWith(nextResponse) {
-      responsePromise = Promise.resolve(nextResponse);
-    },
-  });
-
-  assert.ok(responsePromise);
-  const response = await responsePromise;
   assert.equal(response.status, 200);
-  assert.equal(await response.text(), "fresh offline shell");
-  assert.equal(harness.getCacheWrites(), 1);
-});
-
-test("an offline shell request serves its cached page when the network is unavailable", async () => {
-  const harness = await createWorkerHarness(async () => Promise.reject(new Error("offline")));
-  let responsePromise: Promise<Response> | undefined;
-  harness.handleFetch({
-    request: serviceWorkerRequest("/offline", "cors"),
-    respondWith(nextResponse) {
-      responsePromise = Promise.resolve(nextResponse);
-    },
-  });
-
-  assert.ok(responsePromise);
-  const response = await responsePromise;
-  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("location"), null);
   assert.equal(await response.text(), "offline shell");
-  assert.equal(harness.getCacheReads(), 1);
   assert.equal(harness.getCacheWrites(), 0);
+  assert.equal(harness.getCacheReads(), 1);
 });
 
-test("online navigation responses are returned without opening Cache Storage", async () => {
-  const harness = await createWorkerHarness(async () => new Response("private HTML", {
+test("an old /offline URL has no service-worker fallback handler", async () => {
+  const harness = await createWorkerHarness(async () => Promise.reject(new Error("offline")));
+  let responseHandled = false;
+  harness.handleFetch({
+    request: serviceWorkerRequest("/offline?route=%2Ffamilias", "navigate"),
+    respondWith() {
+      responseHandled = true;
+    },
+  });
+
+  assert.equal(responseHandled, false);
+  assert.equal(harness.getCacheWrites(), 0);
+  assert.equal(harness.getCacheReads(), 0);
+});
+
+test("a public canonical HTML response is cached", async () => {
+  const harness = await createWorkerHarness(async () => new Response("public route shell", {
     status: 200,
-    headers: { "Cache-Control": "private, no-store" },
+    headers: { "Cache-Control": "public, max-age=0", "Content-Type": "text/html" },
   }));
   let responsePromise: Promise<Response> | undefined;
   harness.handleFetch({
@@ -150,7 +130,26 @@ test("online navigation responses are returned without opening Cache Storage", a
   assert.ok(responsePromise);
   const response = await responsePromise;
   assert.equal(response.status, 200);
-  assert.equal(harness.getCacheReads(), 0);
+  assert.equal(await response.text(), "public route shell");
+  assert.equal(harness.getCacheWrites(), 1);
+});
+
+test("private authenticated HTML is never cached", async () => {
+  const harness = await createWorkerHarness(async () => new Response("private HTML", {
+    status: 200,
+    headers: { "Cache-Control": "private, no-store", "Content-Type": "text/html" },
+  }));
+  let responsePromise: Promise<Response> | undefined;
+  harness.handleFetch({
+    request: serviceWorkerRequest("/familias", "navigate"),
+    respondWith(nextResponse) {
+      responsePromise = Promise.resolve(nextResponse);
+    },
+  });
+
+  assert.ok(responsePromise);
+  const response = await responsePromise;
+  assert.equal(response.status, 200);
   assert.equal(harness.getCacheWrites(), 0);
 });
 
@@ -183,7 +182,6 @@ test("a private static response is not written to Cache Storage", async () => {
   });
 
   assert.ok(responsePromise);
-  const response = await responsePromise;
-  assert.equal(response.status, 200);
+  await responsePromise;
   assert.equal(harness.getCacheWrites(), 0);
 });
