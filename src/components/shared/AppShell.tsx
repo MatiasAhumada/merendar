@@ -27,7 +27,6 @@ import clientAxios from "@/utils/clientAxios.util";
 import { API_ROUTES } from "@/constants/routes";
 import { clientErrorHandler } from "@/utils/handlers/clientHandler";
 import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
-import { OfflineAccessNotice } from "@/components/shared/OfflineAccessNotice";
 import { OfflineSyncStatus } from "@/components/shared/OfflineSyncStatus";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { clearOfflineQueue } from "@/services/offline-queue.service";
@@ -134,6 +133,37 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
       window.removeEventListener("merendar-server-data-changed", refreshPreparationAfterServerChange);
     };
   }, [capabilities, isOnline, sessionExpiresAt, user.id, user.name, user.role]);
+
+  useEffect(() => {
+    function loadCanonicalRouteFromCache(event: MouseEvent) {
+      if (isOnline || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+
+      const anchor = event.target.closest<HTMLAnchorElement>("a[href]");
+      if (!anchor) {
+        return;
+      }
+
+      const destination = new URL(anchor.href);
+      const canonicalRoutes: string[] = [ROUTES.HOME, ROUTES.FAMILIES, ROUTES.GOODS, ROUTES.DELIVERY, ROUTES.USERS, ROUTES.ACCESS_POLICY];
+      if (destination.origin !== window.location.origin || !canonicalRoutes.includes(destination.pathname)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      window.location.assign(`${destination.pathname}${destination.search}${destination.hash}`);
+    }
+
+    window.addEventListener("click", loadCanonicalRouteFromCache, true);
+    return () => window.removeEventListener("click", loadCanonicalRouteFromCache, true);
+  }, [isOnline]);
+
   const currentPage = PRIMARY_NAVIGATION.find((item) => item.href === pathname);
   const navigation = PRIMARY_NAVIGATION.filter((item) => {
     if (!item.capabilities) {
@@ -142,21 +172,7 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
     return item.capabilities.some((capability) => capabilities.includes(capability));
   });
   const bottomNavigation = navigation.filter((item) => item.href !== ROUTES.USERS && item.href !== ROUTES.ACCESS_POLICY);
-  const offlineCapabilitiesByRoute: Partial<Record<string, string[]>> = {
-    [ROUTES.FAMILIES]: ["families.read"],
-    [ROUTES.DELIVERY]: ["delivery.read"],
-    [ROUTES.GOODS]: ["merchandise.read", "renditions.read"],
-    [ROUTES.USERS]: ["users.manage"],
-    [ROUTES.ACCESS_POLICY]: ["access-policy.manage"],
-  };
-  const offlineCapabilities = offlineCapabilitiesByRoute[pathname];
-  const hasOfflineReadAccess = !offlineCapabilities || offlineCapabilities.some((capability) => capabilities.includes(capability));
-  const canReadOffline = hasOfflinePreparation && hasOfflineReadAccess && Date.now() < Date.parse(sessionExpiresAt);
-  let pageContent = children;
-
-  if (!isOnline && !canReadOffline) {
-    pageContent = <OfflineAccessNotice />;
-  }
+  const pageContent = children;
 
   const onQueueStatusChange = useCallback((count: number, loaded: boolean, readError: boolean) => {
     setPendingOperationsCount(count);

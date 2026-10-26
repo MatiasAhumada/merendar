@@ -237,16 +237,40 @@ export async function clearActiveOfflineAccount(userId: string) {
 }
 
 async function cachePublicOfflineShellAssets() {
-  const shellResponse = await clientAxios.get<string>("/offline", {
-    responseType: "text",
-    headers: { "Cache-Control": "no-store" },
-  });
-  const initialAssets = [...shellResponse.data.matchAll(/(?:src|href)=["']([^"']+)["']/g)]
-    .map((match) => match[1])
-    .filter((assetPath) => assetPath.startsWith("/_next/static/"));
-  const assetsToCache = new Set(initialAssets);
+  const cache = await caches.open(OFFLINE_PREPARATION.PUBLIC_CACHE_NAME);
+  const assetsToCache = new Set<string>();
 
-  for (const assetPath of initialAssets) {
+  for (const route of OFFLINE_PREPARATION.ROUTES) {
+    const response = await fetch(route, { cache: "no-store", credentials: "same-origin", redirect: "manual" });
+    const contentType = response.headers.get("content-type") ?? "";
+    const cacheControl = response.headers.get("cache-control") ?? "";
+    const isPublicShell = response.ok
+      && !response.redirected
+      && contentType.includes("text/html")
+      && !cacheControl.includes("private")
+      && !cacheControl.includes("no-store");
+
+    if (!isPublicShell) {
+      throw new OfflinePreparationError(`No se pudo preparar la ruta pública ${route} para continuar sin conexión.`);
+    }
+
+    const shellHtml = await response.text();
+    await cache.put(route, new Response(shellHtml, {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "public, max-age=0, must-revalidate",
+      },
+    }));
+
+    const routeAssets = [...shellHtml.matchAll(/(?:src|href)=["']([^"']+)["']/g)]
+      .map((match) => match[1])
+      .filter((assetPath) => assetPath.startsWith("/_next/static/"));
+    for (const assetPath of routeAssets) {
+      assetsToCache.add(assetPath);
+    }
+  }
+
+  for (const assetPath of assetsToCache) {
     if (assetPath.endsWith(".css")) {
       const stylesheetResponse = await clientAxios.get<string>(assetPath, { responseType: "text", headers: { "Cache-Control": "no-store" } });
       const stylesheetAssets = [...stylesheetResponse.data.matchAll(/url\(["']?([^"')]+)["']?\)/g)]
