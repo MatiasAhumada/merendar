@@ -10,10 +10,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DASHBOARD_METRICS } from "@/constants/dashboard.constant";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { resolveOfflineData, type OfflineDataSource } from "@/services/offline-data.service";
+import { getDashboardSummary } from "@/services/client/dashboard-data.service";
+import type { OfflineDataSource } from "@/services/client/offline-snapshot.service";
 import type { DashboardSummaryResult } from "@/types/dashboard";
-import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
-import clientAxios from "@/utils/clientAxios.util";
 
 function formatLastUpdated(value: string) {
   return new Intl.DateTimeFormat("es-AR", {
@@ -32,13 +31,7 @@ export function DashboardSummaryPanel({ userId, initialSummary }: { userId: stri
 
   useEffect(() => {
     let cancelled = false;
-    void resolveOfflineData({
-      userId,
-      route: "/",
-      isOnline,
-      schema: dashboardSummaryResponseSchema,
-      loadFromApi: async () => (await clientAxios.get<unknown>("/api/dashboard", { headers: { "Cache-Control": "no-store" } })).data,
-    }).then((result) => {
+    void getDashboardSummary(userId, isOnline).then((result) => {
       if (!cancelled) {
         setSummaryResult(result.data);
         setSource(result.source);

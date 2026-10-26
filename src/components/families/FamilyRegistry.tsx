@@ -53,8 +53,8 @@ import type { OfflineOperation } from "@/types/offline-operation";
 import { familyCollectionSchema, familyDeactivationTargetSchema, familyMemberChangeSchema, familyMemberInputSchema, familyPayloadSchema, newFamilyMemberChangeSchema, newFamilyMemberInputSchema, newFamilyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
 import { z } from "zod";
 import clientAxios from "@/utils/clientAxios.util";
-import { resolveOfflineData } from "@/services/offline-data.service";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import { getFamilyCollection } from "@/services/client/family-data.service";
 
 interface FamilyRegistryProps {
   initialFamilies: FamilyRecord[];
@@ -524,13 +524,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     }
   }, [userId]);
   const refreshFamilies = useCallback(async () => {
-    const result = await resolveOfflineData({
-      userId,
-      route: "/familias",
-      isOnline,
-      schema: familyCollectionSchema,
-      loadFromApi: async () => (await clientAxios.get<unknown>("/api/families", { headers: { "Cache-Control": "no-store" } })).data,
-    });
+    const result = await getFamilyCollection(userId, isOnline);
     setFamilies(result.data.families);
   }, [isOnline, userId]);
   const localFamilies = useMemo(() => offlineOperations.filter((operation) => operation.operation === "create").flatMap((operation) => {

@@ -17,12 +17,11 @@ import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue
 import type { OfflineOperation } from "@/types/offline-operation";
 import { createLocalBeneficiarySheetPdf } from "@/services/local-beneficiary-sheet.service";
 import { readOfflinePreparedDocuments, removeOfflinePreparedDocument, saveOfflinePreparedDocument, type OfflinePreparedDocument } from "@/services/offline-preparation.service";
-import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema, recordsCollectionSchema, type RecordsCollection } from "@/validations/record.validation";
+import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema, type RecordsCollection } from "@/validations/record.validation";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import type { JsonValue } from "@/types/json-value";
 import { BRAND } from "@/constants/brand.constant";
-import clientAxios from "@/utils/clientAxios.util";
-import { resolveOfflineData } from "@/services/offline-data.service";
+import { getDeliveryCollection } from "@/services/client/delivery-data.service";
 
 type WorkbenchData = RecordsCollection;
 
@@ -77,13 +76,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
   const [isSynchronizing, setIsSynchronizing] = useState(false);
 
   const fetchData = useCallback(async () => {
-    const result = await resolveOfflineData({
-      userId,
-      route: "/entrega",
-      isOnline,
-      schema: recordsCollectionSchema,
-      loadFromApi: async () => (await clientAxios.get<unknown>("/api/records?includePeriodDetails=true", { headers: { "Cache-Control": "no-store" } })).data,
-    });
+    const result = await getDeliveryCollection(userId, isOnline);
     setData(result.data);
     setHasLoadedData(true);
     setLoadFailed(false);

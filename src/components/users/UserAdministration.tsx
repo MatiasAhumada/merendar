@@ -12,11 +12,8 @@ import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import { clientErrorHandler } from "@/utils/handlers/clientHandler";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { resolveOfflineData } from "@/services/offline-data.service";
-import { z } from "zod";
-
-interface ManagedUser { id: string; name: string; email: string | null; role: UserRole | null; isActive: boolean }
-const managedUsersSchema = z.object({ users: z.array(z.object({ id: z.string(), name: z.string(), email: z.string().nullable(), role: z.nativeEnum(UserRole).nullable(), isActive: z.boolean() })) });
+import { getManagedUsers } from "@/services/client/user-administration-data.service";
+import type { ManagedUser } from "@/validations/user-administration.validation";
 
 export function UserAdministration({ userId }: { userId: string }) {
   const isOnline = useNetworkStatus();
@@ -30,14 +27,7 @@ export function UserAdministration({ userId }: { userId: string }) {
   const loadUsers = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await resolveOfflineData({
-        userId,
-        route: "/usuarios",
-        isOnline,
-        schema: managedUsersSchema,
-        loadFromApi: async () => (await clientAxios.get<unknown>(API_ROUTES.USERS, { params: { search } })).data,
-        persistToSnapshot: search.trim().length === 0,
-      });
+      const result = await getManagedUsers(userId, isOnline, search);
       setUsers(result.data.users);
       setError("");
     } catch (cause) {

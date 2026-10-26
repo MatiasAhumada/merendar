@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AccessCapability, UserRole } from "@prisma/client";
-import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +13,8 @@ import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import clientAxios from "@/utils/clientAxios.util";
 import { clientErrorHandler } from "@/utils/handlers/clientHandler";
-import { resolveOfflineData } from "@/services/offline-data.service";
+import { getAccessPolicySnapshot } from "@/services/client/access-policy-data.service";
+import type { PolicySnapshot } from "@/validations/access-policy-snapshot.validation";
 
 interface PolicyRecord {
   role: UserRole;
@@ -22,43 +22,10 @@ interface PolicyRecord {
   enabled: boolean;
 }
 
-interface AffectedUser {
-  id: string;
-  name: string;
-  email: string | null;
-  isActive: boolean;
-}
-
-interface PolicyUsers {
-  role: UserRole;
-  users: AffectedUser[];
-}
-
-interface PolicyChange {
-  role: UserRole;
-  capabilityKey: string;
-  previousValue: boolean;
-  newValue: boolean;
-  actorName: string;
-  createdAt: string;
-}
-
-interface PolicySnapshot {
-  policies: PolicyRecord[];
-  usersByRole: PolicyUsers[];
-  history: PolicyChange[];
-}
-
 interface RolePolicy {
   role: UserRole;
   capabilities: AccessCapability[];
 }
-
-const policySnapshotSchema = z.object({
-  policies: z.array(z.object({ role: z.nativeEnum(UserRole), capability: z.nativeEnum(AccessCapability), enabled: z.boolean() })),
-  usersByRole: z.array(z.object({ role: z.nativeEnum(UserRole), users: z.array(z.object({ id: z.string(), name: z.string(), email: z.string().nullable(), isActive: z.boolean() })) })),
-  history: z.array(z.object({ role: z.nativeEnum(UserRole), capabilityKey: z.string(), previousValue: z.boolean(), newValue: z.boolean(), actorName: z.string(), createdAt: z.string() })),
-});
 
 function buildRolePolicies(records: PolicyRecord[]) {
   return Object.values(UserRole).map((role) => ({
@@ -83,13 +50,7 @@ export function AccessPolicyAdministration({ userId }: { userId: string }) {
   const loadPolicy = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await resolveOfflineData({
-        userId,
-        route: "/permisos",
-        isOnline,
-        schema: policySnapshotSchema,
-        loadFromApi: async () => (await clientAxios.get<unknown>(API_ROUTES.ACCESS_POLICY)).data,
-      });
+      const response = await getAccessPolicySnapshot(userId, isOnline);
       setSnapshot(response.data);
       setDraft(buildRolePolicies(response.data.policies));
       setError("");
