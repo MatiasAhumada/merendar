@@ -1,6 +1,6 @@
 import { z } from "zod";
 import axios from "axios";
-import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
+import { OFFLINE_PREPARATION, type OfflinePreparedRoute } from "@/constants/offline.constant";
 import clientAxios from "@/utils/clientAxios.util";
 import type { JsonValue } from "@/types/json-value";
 import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
@@ -519,6 +519,60 @@ export async function readOfflinePreparation(userId: string): Promise<OfflinePre
     await clearOfflinePreparation(userId);
   }
   return null;
+}
+
+export async function updateOfflinePreparedSnapshot(userId: string, route: OfflinePreparedRoute, data: unknown) {
+  const parsedData = z.json().safeParse(data);
+  if (!parsedData.success || !globalThis.indexedDB) {
+    return false;
+  }
+
+  const database = await openDatabase(userId);
+
+  try {
+    return await new Promise<boolean>((resolve, reject) => {
+      const transaction = database.transaction(OFFLINE_PREPARATION.STORE, "readwrite");
+      const store = transaction.objectStore(OFFLINE_PREPARATION.STORE);
+      const request = store.get(OFFLINE_PREPARATION.KEY);
+      let snapshotUpdated = false;
+
+      request.onsuccess = () => {
+        const storedPreparation = normalizeStoredOfflinePreparation(request.result).preparation;
+        if (!storedPreparation || storedPreparation.userId !== userId || !storedPreparation.snapshots[route]) {
+          return;
+        }
+
+        const expiresAt = Date.parse(storedPreparation.expiresAt);
+        const sessionExpiresAt = Date.parse(storedPreparation.sessionExpiresAt);
+        if (Date.now() >= expiresAt || Date.now() >= sessionExpiresAt) {
+          return;
+        }
+
+        const capturedAt = new Date().toISOString();
+        store.put({
+          key: OFFLINE_PREPARATION.KEY,
+          ...storedPreparation,
+          snapshots: {
+            ...storedPreparation.snapshots,
+            [route]: {
+              schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
+              capturedAt,
+              data: parsedData.data,
+            },
+          },
+        });
+        snapshotUpdated = true;
+      };
+      request.onerror = () => {
+        reject(new OfflinePreparationError("No se pudo actualizar la vista preparada en este dispositivo."));
+      };
+      transaction.oncomplete = () => resolve(snapshotUpdated);
+      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo actualizar la vista preparada en este dispositivo."));
+      transaction.onabort = () => reject(new OfflinePreparationError("No se pudo actualizar la vista preparada en este dispositivo."));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function readOfflinePreparedDocuments(userId: string): Promise<OfflinePreparedDocument[]> {

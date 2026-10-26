@@ -12,5 +12,5 @@ export default async function AccessPolicyPage() {
     redirect(ROUTES.HOME);
   }
 
-  return <AccessPolicyAdministration />;
+  return <AccessPolicyAdministration userId={session.user.id} />;
 }

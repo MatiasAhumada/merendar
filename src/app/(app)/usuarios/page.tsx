@@ -8,5 +8,5 @@ export default async function UsersPage() {
   const session = await requireSession();
   const canManageUsers = await hasEffectiveCapability(session.user.role, "users.manage");
   if (!canManageUsers) redirect(ROUTES.HOME);
-  return <UserAdministration />;
+  return <UserAdministration userId={session.user.id} />;
 }

@@ -29,7 +29,6 @@ import { clientErrorHandler } from "@/utils/handlers/clientHandler";
 import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
 import { OfflineAccessNotice } from "@/components/shared/OfflineAccessNotice";
 import { OfflineSyncStatus } from "@/components/shared/OfflineSyncStatus";
-import { OfflineScreen } from "@/components/offline/OfflineScreen";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { clearOfflineQueue } from "@/services/offline-queue.service";
 import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
@@ -143,24 +142,20 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
     return item.capabilities.some((capability) => capabilities.includes(capability));
   });
   const bottomNavigation = navigation.filter((item) => item.href !== ROUTES.USERS && item.href !== ROUTES.ACCESS_POLICY);
-  const offlineCapabilityByRoute: Record<string, string> = {
-    [ROUTES.FAMILIES]: "families.write",
-    [ROUTES.DELIVERY]: "delivery.write",
-    [ROUTES.GOODS]: "merchandise.write",
+  const offlineCapabilitiesByRoute: Partial<Record<string, string[]>> = {
+    [ROUTES.FAMILIES]: ["families.read"],
+    [ROUTES.DELIVERY]: ["delivery.read"],
+    [ROUTES.GOODS]: ["merchandise.read", "renditions.read"],
+    [ROUTES.USERS]: ["users.manage"],
+    [ROUTES.ACCESS_POLICY]: ["access-policy.manage"],
   };
-  const offlineCapability = offlineCapabilityByRoute[pathname];
-  let canCaptureOffline = false;
-  if (offlineCapability) {
-    canCaptureOffline = capabilities.includes(offlineCapability) && Date.now() < Date.parse(sessionExpiresAt);
-  }
+  const offlineCapabilities = offlineCapabilitiesByRoute[pathname];
+  const hasOfflineReadAccess = !offlineCapabilities || offlineCapabilities.some((capability) => capabilities.includes(capability));
+  const canReadOffline = hasOfflinePreparation && hasOfflineReadAccess && Date.now() < Date.parse(sessionExpiresAt);
   let pageContent = children;
 
-  if (!isOnline && !canCaptureOffline) {
-    if (pathname === ROUTES.HOME) {
-      pageContent = <OfflineScreen />;
-    } else {
-      pageContent = <OfflineAccessNotice />;
-    }
+  if (!isOnline && !canReadOffline) {
+    pageContent = <OfflineAccessNotice />;
   }
 
   const onQueueStatusChange = useCallback((count: number, loaded: boolean, readError: boolean) => {

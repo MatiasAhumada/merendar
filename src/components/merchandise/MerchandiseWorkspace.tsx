@@ -52,6 +52,7 @@ import { merchandiseCancellationPayloadSchema, merchandiseOperationPayloadSchema
 import { z } from "zod";
 import { RENDITION_LIMITS } from "@/constants/rendition.constant";
 import clientAxios from "@/utils/clientAxios.util";
+import { resolveOfflineData } from "@/services/offline-data.service";
 
 interface MerchandiseWorkspaceProps {
   userId: string;
@@ -608,26 +609,22 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
     }
 
     try {
-      const response = await clientAxios.get<unknown>("/api/merchandise", { headers: { "Cache-Control": "no-cache" } });
-      const body: unknown = response.data;
-      const parsed = merchandiseResponseSchema.safeParse(body);
+      const result = await resolveOfflineData({
+        userId,
+        route: "/mercaderia",
+        isOnline,
+        schema: merchandiseResponseSchema,
+        loadFromApi: async () => (await clientAxios.get<unknown>("/api/merchandise", { headers: { "Cache-Control": "no-cache" } })).data,
+      });
 
-      if (!parsed.success) {
-        throw new Error("El servidor devolvió datos de mercadería que esta versión no reconoce.");
-      }
-
-      setPeriods(parsed.data.periods);
+      setPeriods(result.data.periods);
       setLoadError("");
     } catch (error) {
-      if (isOnline) {
-        setLoadError(errorMessage(error));
-      } else {
-        setLoadError("Sin conexión. Se muestran los períodos y las planillas que ya estaban cargados en esta vista.");
-      }
+      setLoadError(errorMessage(error));
     } finally {
       setLoading(false);
     }
-  }, [isOnline, offlineMode]);
+  }, [isOnline, offlineMode, userId]);
 
   const refreshServerData = useCallback(() => loadMerchandise(true), [loadMerchandise]);
 

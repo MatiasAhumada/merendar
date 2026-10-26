@@ -115,7 +115,7 @@ test("prepares private views automatically from a deep route, keeps them availab
       const cacheNames = await caches.keys();
       const publicCacheName = cacheNames.find((cacheName) => cacheName.startsWith("merendar-public-"));
       if (!publicCacheName) {
-        return { cacheNames, privateApiCached: false, privateHtmlCached: false, privatePdfCached: false };
+        return { cacheNames, privateApiCached: false, privateRouteCached: false, cachedPaths: [] as string[] };
       }
       const publicCache = await caches.open(publicCacheName);
       const cachedRequests = await publicCache.keys();
@@ -179,6 +179,81 @@ test("prepares private views automatically from a deep route, keeps them availab
     if (secretary) {
       await removeBrowserIdentity(secretary);
     }
+    await prisma.$disconnect();
+  }
+});
+
+test("keeps the canonical family view and URL when connectivity drops", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+
+  try {
+    await setBrowserIdentity(context, president);
+    await page.goto("/familias");
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+
+    await context.setOffline(true);
+    await expect(page.getByRole("status", { name: "Sin conexión" })).toBeVisible();
+    await expect(page).toHaveURL(/\/familias$/);
+    await expect(page.getByRole("heading", { name: "Padrón de familias" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Acceso sin conexión" })).toHaveCount(0);
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("keeps the canonical dashboard and prepared metrics when connectivity drops", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+
+  try {
+    await setBrowserIdentity(context, president);
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Hola, Browser PRESIDENTE" })).toBeVisible();
+    await expect(page.getByText("Resumen del padrón y cupos", { exact: true })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+
+    await context.setOffline(true);
+    await expect(page.getByRole("status", { name: "Sin conexión" })).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { name: "Hola, Browser PRESIDENTE" })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "Resumen guardado para consulta" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Acceso sin conexión" })).toHaveCount(0);
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserIdentity(president);
+    await prisma.$disconnect();
+  }
+});
+
+test("keeps authorized user and access-policy reads offline while disabling writes", async ({ context, page }) => {
+  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
+
+  try {
+    await setBrowserIdentity(context, president);
+    await page.goto("/usuarios");
+    await expect(page.getByRole("heading", { name: "Administración de usuarios" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await context.setOffline(true);
+    await expect(page.getByRole("status", { name: "Sin conexión" })).toBeVisible();
+    await expect(page).toHaveURL(/\/usuarios$/);
+    await expect(page.getByRole("heading", { name: "Administración de usuarios" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Crear usuario" })).toBeDisabled();
+
+    await context.setOffline(false);
+    await page.goto("/permisos");
+    await expect(page.getByRole("heading", { name: "Permisos por rol" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
+    await context.setOffline(true);
+    await expect(page.getByRole("status", { name: "Sin conexión" })).toBeVisible();
+    await expect(page).toHaveURL(/\/permisos$/);
+    await expect(page.getByRole("heading", { name: "Permisos por rol" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Revisar y guardar/ })).toBeDisabled();
+    await expect(page.getByRole("checkbox").first()).toBeDisabled();
+  } finally {
+    await context.setOffline(false);
+    await removeBrowserIdentity(president);
     await prisma.$disconnect();
   }
 });

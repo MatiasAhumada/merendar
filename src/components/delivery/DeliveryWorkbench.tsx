@@ -21,6 +21,8 @@ import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema, recordsCo
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import type { JsonValue } from "@/types/json-value";
 import { BRAND } from "@/constants/brand.constant";
+import clientAxios from "@/utils/clientAxios.util";
+import { resolveOfflineData } from "@/services/offline-data.service";
 
 type WorkbenchData = RecordsCollection;
 
@@ -73,32 +75,27 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
   const [offlineDocuments, setOfflineDocuments] = useState(preparedDocuments);
   const [isSynchronizing, setIsSynchronizing] = useState(false);
 
-  const fetchData = useCallback(async (selectedPeriodId?: string) => {
-    const query = selectedPeriodId ? `?periodId=${encodeURIComponent(selectedPeriodId)}` : "";
-    const response = await fetch(`/api/records${query}`, { cache: "no-store" });
-
-    if (!response.ok) {
-      throw new Error("No pudimos cargar los períodos y el padrón. Conectate para actualizar los datos.");
-    }
-
-    const parsedResult = recordsCollectionSchema.safeParse(await response.json());
-    if (!parsedResult.success) {
-      throw new Error("El servidor devolvió datos de Registro con un formato inesperado.");
-    }
-    const result = parsedResult.data;
-    setData((current) => ({ ...result, records: selectedPeriodId ? result.records : current.records, sheets: selectedPeriodId ? result.sheets : current.sheets }));
+  const fetchData = useCallback(async () => {
+    const result = await resolveOfflineData({
+      userId,
+      route: "/entrega",
+      isOnline,
+      schema: recordsCollectionSchema,
+      loadFromApi: async () => (await clientAxios.get<unknown>("/api/records?includePeriodDetails=true", { headers: { "Cache-Control": "no-store" } })).data,
+    });
+    setData(result.data);
     setHasLoadedData(true);
     setLoadFailed(false);
 
-    if (!selectedPeriodId && !periodId && result.periods[0]) {
-      setPeriodId(result.periods[0].id);
+    if (!periodId && result.data.periods[0]) {
+      setPeriodId(result.data.periods[0].id);
     }
-  }, [periodId]);
+  }, [isOnline, periodId, userId]);
 
   useEffect(() => {
     let cancelled = false;
 
-    if (offlineMode || !isOnline) {
+    if (offlineMode) {
       setIsLoading(false);
       return () => {
         cancelled = true;
@@ -108,7 +105,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
     setIsLoading(true);
     setError("");
     setLoadFailed(false);
-    fetchData(periodId || undefined)
+    fetchData()
       .catch((loadError: unknown) => {
         if (!cancelled) {
           setLoadFailed(true);
@@ -124,7 +121,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
     return () => {
       cancelled = true;
     };
-  }, [fetchData, isOnline, offlineMode, periodId]);
+  }, [fetchData, offlineMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -195,7 +192,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
     setError("");
 
     try {
-      await fetchData(periodId || undefined);
+      await fetchData();
     } catch (loadError) {
       setLoadFailed(true);
       setError(loadError instanceof Error ? loadError.message : "No se pudo cargar el registro.");
@@ -269,7 +266,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
         setPhysicalDniChecked(false);
         setDocumentsChecked(false);
         try {
-          await fetchData(periodId);
+          await fetchData();
         } catch {
           setNotice("Registro guardado en el servidor. No se pudo actualizar la lista; reintentá la carga sin volver a confirmar.");
           setLoadFailed(true);
@@ -411,7 +408,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
         setError(`La planilla versión ${result.sheet.version} quedó emitida, pero no se pudo descargar. Reintentá desde Versiones sin volver a emitir.`);
       }
       try {
-        await fetchData(periodId);
+        await fetchData();
       } catch {
         setError(`La planilla versión ${result.sheet.version} quedó emitida, pero no se pudo actualizar la lista. Reintentá la carga sin volver a emitir.`);
       }
@@ -428,7 +425,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
     try {
       await synchronizeOfflineQueue(userId);
       setOfflineOperations(await listOfflineOperations(userId));
-      await fetchData(periodId);
+      await fetchData();
       setNotice("Se revisaron los cambios pendientes. Las planillas locales mantienen su contenido y su estado de borrador.");
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : "No se pudieron sincronizar los cambios pendientes.");
