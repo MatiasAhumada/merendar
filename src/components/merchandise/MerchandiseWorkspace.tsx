@@ -592,7 +592,9 @@ function SaveSheet({
   );
 }
 
-export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchandise, canWriteMerchandise, canReadRenditions, canWriteRenditions, canReviewRenditions, offlineMode = false, initialPeriods = [], preparedDocuments = [] }: MerchandiseWorkspaceProps) {
+export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchandise, canWriteMerchandise, canReadRenditions, canWriteRenditions, canReviewRenditions, initialPeriods = [], preparedDocuments = [] }: MerchandiseWorkspaceProps) {
+  const isOnline = useNetworkStatus();
+  const offlineMode = !isOnline;
   const [periods, setPeriods] = useState<MerchandisePeriodRecord[]>(initialPeriods);
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
   const [loading, setLoading] = useState(!offlineMode);
@@ -600,7 +602,6 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
   const [syncMessage, setSyncMessage] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
   const synchronizingRef = useRef(false);
-  const isOnline = useNetworkStatus();
 
   const loadMerchandise = useCallback(async (forceRefresh = false) => {
     if (offlineMode && !forceRefresh) {

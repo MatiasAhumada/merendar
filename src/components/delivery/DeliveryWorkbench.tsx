@@ -50,8 +50,9 @@ function personLabel(person: WorkbenchData["families"][number]["members"][number
   return `${person.firstName} ${person.lastName}`;
 }
 
-export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreateFamilies, canCreatePeriods, offlineMode = false, initialOfflineData, preparedDocuments = [] }: DeliveryWorkbenchProps) {
+export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreateFamilies, canCreatePeriods, initialOfflineData, preparedDocuments = [] }: DeliveryWorkbenchProps) {
   const isOnline = useNetworkStatus();
+  const offlineMode = !isOnline;
   const [data, setData] = useState<WorkbenchData>(initialOfflineData ?? emptyData);
   const [periodId, setPeriodId] = useState(initialOfflineData?.periods[0]?.id ?? "");
   const [familyId, setFamilyId] = useState("");

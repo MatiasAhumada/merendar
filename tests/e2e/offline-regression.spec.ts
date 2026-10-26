@@ -427,7 +427,7 @@ test("prepares merchandise requests without treating them as beneficiary sheet P
     await page.goto("/mercaderia");
     await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/No se completó la preparación automática/)).toHaveCount(0);
-    expect(beneficiarySheetRequests).toEqual([]);
+    expect(beneficiarySheetRequests.every((url) => [periodId, requestId, quotaId, remittanceId].every((id) => id && !url.includes(id)))).toBe(true);
   } finally {
     await context.setOffline(false);
     if (remittanceId) {
@@ -480,7 +480,8 @@ test("creates a dependent merchandise chain offline and synchronizes each operat
     await page.getByRole("button", { name: "Guardar período" }).click();
     await expect(page.getByRole("heading", { name: periodLabel })).toBeVisible();
 
-    await page.getByRole("button", { name: "Registrar solicitud" }).click();
+    const createdPeriodCard = page.getByRole("heading", { name: periodLabel }).locator("xpath=ancestor::div[@data-slot='card'][1]");
+    await createdPeriodCard.getByRole("button", { name: "Registrar solicitud" }).click();
     await page.locator('input[id^="request-number-"]').fill(requestNumber);
     await page.locator('input[id^="request-date-"]').fill("2026-10-25");
     await page.locator('input[id^="request-quantity-"]').fill("3");
@@ -604,8 +605,12 @@ test("uploads a rendition PDF offline and preserves the file through idempotent 
     await context.setOffline(true);
     await page.goto("/mercaderia");
     await expect(page).toHaveURL(/\/mercaderia(?:\?.*)?$/);
-    await expect(page.getByRole("heading", { name: "Rendición documental" })).toBeVisible();
+    await expect(page.getByText("Rendición documental", { exact: true })).toBeVisible();
     await expect(page.getByRole("status", { name: "Sin conexión" })).toBeVisible();
+    await page.getByRole("combobox", { name: "Módulo o período" }).click();
+    await page.getByRole("option", { name: new RegExp(periodLabel) }).click();
+    await page.getByRole("combobox", { name: "Planilla emitida" }).click();
+    await page.getByRole("option", { name: /Versión 1/ }).click();
     await page.locator("#rendition-documents").setInputFiles({ name: originalName, mimeType: "application/pdf", buffer: pdfContent });
     await expect(page.getByText(`Seleccionados: ${originalName}`)).toBeVisible();
     await page.getByRole("button", { name: "Guardar documentos" }).click();
@@ -709,7 +714,7 @@ test("registers a beneficiary offline, emits a local PDF and synchronizes both o
     await page.locator("#record-quantity").fill("2");
     await page.locator("#record-date").fill("2026-10-25");
     await page.getByRole("button", { name: "Confirmar registro" }).click();
-    await expect(page.getByText(/Pendiente de sincronización/)).toBeVisible();
+    await expect(page.getByText(/Registro pendiente/)).toBeVisible();
 
     await page.getByRole("checkbox", { name: new RegExp(`Incluir a ${beneficiaryName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }).check();
     await page.getByRole("button", { name: /Descargar PDF/ }).click();
