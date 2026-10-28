@@ -1,3 +1,6 @@
+import { API_ROUTES, OFFLINE_PREPARED_ROUTES, ROUTES } from "@/constants/routes.constant";
+import { HTTP_CONTENT_TYPES, HTTP_HEADERS } from "@/constants/http.constant";
+
 export const OFFLINE_STORAGE = {
   DATABASE_PREFIX: "merendar-offline",
   DATABASE_VERSION: 1,
@@ -25,14 +28,14 @@ export const OFFLINE_PREPARATION = {
   MAX_DOCUMENT_BYTES: 512 * 1024,
   MAX_DOCUMENTS_TOTAL_BYTES: 20 * 1024 * 1024,
   STORAGE_RESERVE_BYTES: 2_000_000,
-  ROUTES: ["/", "/familias", "/mercaderia", "/entrega", "/usuarios", "/permisos"] as const,
+  ROUTES: OFFLINE_PREPARED_ROUTES,
   ROUTE_CAPABILITIES: {
-    "/": ["dashboard.metrics.read"],
-    "/familias": ["families.read"],
-    "/mercaderia": ["merchandise.read", "renditions.read"],
-    "/entrega": ["delivery.read"],
-    "/usuarios": ["users.manage"],
-    "/permisos": ["access-policy.manage"],
+    [ROUTES.HOME]: ["dashboard.metrics.read"],
+    [ROUTES.FAMILIES]: ["families.read"],
+    [ROUTES.GOODS]: ["merchandise.read", "renditions.read"],
+    [ROUTES.DELIVERY]: ["delivery.read"],
+    [ROUTES.USERS]: ["users.manage"],
+    [ROUTES.ACCESS_POLICY]: ["access-policy.manage"],
   },
   MESSAGES: {
     NOT_PREPARED: "Esta vista todavía no está preparada para usarse sin conexión.",
@@ -42,10 +45,35 @@ export const OFFLINE_PREPARATION = {
   },
 } as const;
 
-export type OfflinePreparedRoute = "/" | "/familias" | "/mercaderia" | "/entrega" | "/usuarios" | "/permisos";
+export const OFFLINE_SERVICE_WORKER = {
+  CACHE_NAME: "merendar-public-v6",
+  CANONICAL_ROUTES: OFFLINE_PREPARATION.ROUTES,
+  PUBLIC_ASSETS: [
+    "/icon-192.png",
+    "/icon-512.png",
+    "/icon-maskable-512.png",
+    "/apple-icon.png",
+    "/merendar-logo.png",
+    "/brand/merendar-isotipo.png",
+    "/brand/ministerio-desarrollo-social-tucuman.png",
+  ] as const,
+  STATIC_ASSET_PREFIX: "/_next/static/",
+  PUBLIC_CACHE_PREFIX: "merendar-public-",
+  HTTP_POLICY: {
+    CACHE_CONTROL_HEADER: HTTP_HEADERS.CACHE_CONTROL.toLowerCase(),
+    CONTENT_TYPE_HEADER: HTTP_HEADERS.CONTENT_TYPE.toLowerCase(),
+    PRIVATE_CACHE_MARKER: "private",
+    NO_STORE_CACHE_MARKER: "no-store",
+    GET_METHOD: "GET",
+    NAVIGATE_MODE: "navigate",
+    HTML_CONTENT_TYPE: HTTP_CONTENT_TYPES.HTML,
+  },
+} as const;
+
+export type OfflinePreparedRoute = (typeof OFFLINE_PREPARED_ROUTES)[number];
 
 export const SYNC_ROUTES = {
-  OPERATIONS: "/api/synchronizations",
+  OPERATIONS: API_ROUTES.SYNCHRONIZATIONS,
 } as const;
 
 export const SYNC_MESSAGES = {
@@ -53,4 +81,103 @@ export const SYNC_MESSAGES = {
   ACCOUNT_CHANGED: "Esta operación pertenece a otra cuenta y no se enviará con el usuario actual.",
   PERMISSION_REVOKED: "La cuenta ya no tiene permiso para enviar este cambio. Los datos siguen guardados en este dispositivo.",
   STORAGE_FULL: "No hay espacio suficiente para guardar el cambio sin conexión. Liberá espacio o conectate antes de volver a intentarlo.",
+} as const;
+
+export const OFFLINE_OPERATION_MESSAGES = {
+  UNSUPPORTED_STORAGE: "Este navegador no admite almacenamiento offline.",
+  QUEUE_OPEN_FAILED: "No se pudo abrir la cola offline.",
+  QUEUE_UPDATE_TABS: "Cerrá las otras pestañas de Merendar para actualizar la cola offline.",
+  OPERATION_TOO_LARGE: "El cambio supera el tamaño máximo permitido para guardarse offline.",
+  OPERATION_UNAVAILABLE: "Esta acción todavía no está habilitada para guardarse offline en este módulo.",
+  PARENT_OPERATION_MISSING: "No encontramos un cambio padre necesario para guardar este registro.",
+  QUEUE_FORMAT_UNRECOGNIZED: "La cola offline tiene un formato que esta versión no reconoce.",
+  QUEUE_READ_FAILED: "No se pudo leer la cola offline.",
+  HISTORY_CLEANUP_FAILED: "No se pudo limpiar el historial sincronizado.",
+  QUEUE_UPDATE_FAILED: "No se pudo actualizar la cola offline.",
+  SYNC_PREPARATION_FAILED: "No se pudo preparar la sincronización.",
+  CONTACT_SERVER_FAILED: "No se pudo contactar al servidor. El cambio sigue guardado en este dispositivo.",
+  SYNC_FAILED: "No se pudo sincronizar este cambio. El borrador permanece guardado.",
+  SYNC_UNCONFIRMED: "El servidor respondió sin confirmar el resultado del cambio.",
+  OPERATION_NOT_FOUND: "No encontramos el cambio que querés reintentar.",
+  RETRY_ONLY_ERROR: "Solo se pueden reintentar cambios con error.",
+  RESOLVE_ONLY_ERROR_OR_CONFLICT: "Solo se pueden corregir cambios con error o conflicto.",
+  CONFLICT_NOT_FOUND: "No encontramos el conflicto que querés resolver.",
+  REMOTE_VERSION_MISSING: "No recibimos la versión actual del servidor. Actualizá los datos antes de resolver el conflicto.",
+  DEPENDENCY_UPDATE_FAILED: "No se pudo actualizar las dependencias del cambio.",
+  CONFLICT_RESOLUTION_FAILED: "No se pudo guardar la resolución del conflicto.",
+  ACCOUNT_LOCAL_CLEANUP_FAILED: "No se pudo limpiar la información local de esta cuenta.",
+  ACCOUNT_CLEANUP_TABS: "Cerrá las otras pestañas de Merendar para limpiar la información local.",
+  LA_SOLICITUD_NO_PERTENECE_A_ESTE_SITIO: "La solicitud no pertenece a este sitio.",
+  LA_SESION_VENCIO_INICIA_SESION_PARA_SINCRONIZAR_LOS_CAMBIOS_PENDIENTES: "La sesión venció. Iniciá sesión para sincronizar los cambios pendientes.",
+  EL_CUERPO_DE_LA_OPERACION_NO_ES_VALIDO: "El cuerpo de la operación no es válido.",
+  REVISA_LOS_DATOS_DEL_CAMBIO_PENDIENTE: "Revisá los datos del cambio pendiente.",
+  EL_CAMBIO_PERTENECE_A_OTRA_CUENTA_Y_NO_SE_ENVIARA_CON_ESTE_USUARIO: "El cambio pertenece a otra cuenta y no se enviará con este usuario.",
+  EL_ALTA_DE_FAMILIA_NO_TIENE_UNA_VERSION_BASE_VALIDA: "El alta de familia no tiene una versión base válida.",
+  REVISA_LOS_DATOS_DE_LA_FAMILIA_ANTES_DE_SINCRONIZAR: "Revisá los datos de la familia antes de sincronizar.",
+  REVISA_LOS_DATOS_DEL_INTEGRANTE_ANTES_DE_SINCRONIZAR: "Revisá los datos del integrante antes de sincronizar.",
+  REVISA_EL_DESTINO_DE_LA_BAJA_FAMILIAR_PENDIENTE: "Revisá el destino de la baja familiar pendiente.",
+  EL_PADRON_SOLO_PERMITE_ALTAS_O_CAMBIOS_DE_INTEGRANTES: "El padrón solo permite altas o cambios de integrantes.",
+  REVISA_LOS_DATOS_DE_LA_RECEPCION_PENDIENTE: "Revisá los datos de la recepción pendiente.",
+  REVISA_LOS_DATOS_DE_LA_CORRECCION_PENDIENTE: "Revisá los datos de la corrección pendiente.",
+  REVISA_LOS_DATOS_DE_LA_ANULACION_PENDIENTE: "Revisá los datos de la anulación pendiente.",
+  EL_CAMBIO_DE_MERCADERIA_NO_TIENE_UNA_OPERACION_O_VERSION_BASE_VALIDA: "El cambio de mercadería no tiene una operación o versión base válida.",
+  EL_IDENTIFICADOR_DEL_BORRADOR_NO_COINCIDE_CON_LOS_DATOS_GUARDADOS: "El identificador del borrador no coincide con los datos guardados.",
+  REVISA_EL_REGISTRO_O_LA_PLANILLA_LOCAL_ANTES_DE_SINCRONIZAR: "Revisá el registro o la planilla local antes de sincronizar.",
+  LOS_REGISTROS_Y_LAS_PLANILLAS_LOCALES_SOLO_ADMITEN_ALTAS_NUEVAS: "Los registros y las planillas locales solo admiten altas nuevas.",
+  REVISA_LOS_ARCHIVOS_O_LA_REVISION_PENDIENTE_ANTES_DE_SINCRONIZAR: "Revisá los archivos o la revisión pendiente antes de sincronizar.",
+  LOS_CAMBIOS_DE_RENDICION_SOLO_ADMITEN_NUEVAS_CARGAS_O_REVISIONES: "Los cambios de rendición solo admiten nuevas cargas o revisiones.",
+  LA_VISTA_TODAVIA_NO_HABILITO_LA_SINCRONIZACION_DE_ESTE_TIPO_DE_CAMBIO: "La vista todavía no habilitó la sincronización de este tipo de cambio.",
+  LA_CUENTA_YA_NO_TIENE_PERMISO_PARA_SINCRONIZAR_ESTE_CAMBIO: "La cuenta ya no tiene permiso para sincronizar este cambio.",
+  NO_SE_PUDO_GUARDAR_EL_CAMBIO_EN_EL_SERVIDOR: "No se pudo guardar el cambio en el servidor.",
+  PREPARANDO_AUTOMATICAMENTE_LAS_VISTAS_HABILITADAS: "Preparando automáticamente las vistas habilitadas…",
+  COMPROBANDO_LA_PREPARACION_GUARDADA_PARA_ESTE_DISPOSITIVO: "Comprobando la preparación guardada para este dispositivo…",
+  CONECTATE_PARA_PREPARAR_LAS_VISTAS_AUTORIZADAS_PARA_USO_SIN_CONEXION: "Conectate para preparar las vistas autorizadas para uso sin conexión.",
+  EL_CAMBIO_ESPERA_A_QUE_SE_SINCRONICE_PRIMERO_UN_REGISTRO_RELACIONADO: "El cambio espera a que se sincronice primero un registro relacionado.",
+  ESTE_BENEFICIARIO_YA_TIENE_UN_REGISTRO_CONFIRMADO_EN_EL_PERIODO_REVISA_LOS: "Este beneficiario ya tiene un registro confirmado en el período. Revisá los registros antes de volver a intentar.",
+  UNA_PERSONA_SELECCIONADA: "Una persona seleccionada",
+  ESTA_VISTA_TODAVIA_NO_TIENE_DATOS_PREPARADOS_PARA_ESTA_CUENTA: "Esta vista todavía no tiene datos preparados para esta cuenta.",
+} as const;
+
+export const OFFLINE_PREPARATION_MESSAGES = {
+  UNSUPPORTED_BROWSER: "Este navegador no admite preparación offline.",
+  OPEN_FAILED: "No se pudo abrir la preparación offline.",
+  UPDATE_TABS: "Cerrá las otras pestañas de Merendar para actualizar la preparación offline.",
+  ACTIVE_ACCOUNT_UPDATE_FAILED: "No se pudo actualizar la cuenta activa del dispositivo.",
+  ACTIVE_ACCOUNT_READ_FAILED: "No se pudo leer la cuenta activa del dispositivo.",
+  ACTIVE_ACCOUNT_CLEANUP_FAILED: "No se pudo limpiar la cuenta activa del dispositivo.",
+  PUBLIC_ROUTE_PREPARATION_FAILED: (route: string) => `No se pudo preparar la ruta pública ${route} para continuar sin conexión.`,
+  INVALID_SHEETS_RESPONSE: "El servidor devolvió planillas con un formato que no se puede preparar.",
+  DOCUMENT_TOO_LARGE: (documentName: string) => `El documento ${documentName} supera el tamaño permitido para preparación offline.`,
+  DOCUMENTS_OVER_CAPACITY: "Los documentos autorizados superan el espacio disponible para la preparación offline.",
+  STORAGE_CAPACITY_INSUFFICIENT: "No hay espacio suficiente para guardar las vistas y documentos privados sin conexión.",
+  LOCAL_SHEETS_PRESERVATION_FAILED: "No se pudieron conservar las planillas locales pendientes.",
+  SAVE_FAILED: "No se pudo guardar la preparación offline.",
+  INVALID_LOCAL_SHEET: "La planilla local no tiene un formato o tamaño permitido.",
+  PDF_STORAGE_INSUFFICIENT: "No hay espacio suficiente para guardar el PDF en este dispositivo.",
+  SAVE_LOCAL_SHEET_FAILED: "No se pudo guardar la planilla local.",
+  REMOVE_INCOMPLETE_LOCAL_SHEET_FAILED: "No se pudo retirar el borrador local incompleto.",
+  UPDATE_SCHEMA_FAILED: "No se pudo actualizar el formato de la preparación offline.",
+  READ_FAILED: "No se pudo leer la preparación offline.",
+  UPDATE_PREPARED_VIEW_FAILED: "No se pudo actualizar la vista preparada en este dispositivo.",
+  READ_DOCUMENTS_FAILED: "No se pudieron leer los documentos preparados.",
+  DOCUMENT_FORMAT_UNRECOGNIZED: "Los documentos preparados tienen un formato que esta versión no reconoce.",
+  RETRIES_EXHAUSTED: "No se pudo completar la preparación automática después de varios intentos.",
+  SESSION_EXPIRED: "La sesión venció. Conectate de nuevo para preparar el acceso offline.",
+  DASHBOARD_METRICS_INVALID: "No se pudieron validar las métricas autorizadas para el inicio.",
+  SNAPSHOT_INVALID: "El servidor devolvió datos que no se pudieron guardar de forma segura.",
+  ACCOUNT_PREPARATION_CLEANUP_FAILED: "No se pudo limpiar la preparación local de esta cuenta.",
+  ACCOUNT_CLEANUP_TABS: "Cerrá las otras pestañas de Merendar para limpiar la preparación local.",
+} as const;
+
+export const SYNC_SERVER_MESSAGES = {
+  NO_SE_PUDO_CONFIRMAR_LA_SINCRONIZACION_DESPUES_DE_VARIOS_INTENTOS: "No se pudo confirmar la sincronización después de varios intentos.",
+  NO_SE_PUDO_COMPLETAR_LA_PREPARACION_AUTOMATICA: "No se pudo completar la preparación automática.",
+  P2002: "P2002",
+  P2034: "P2034",
+  LA_CLAVE_DE_OPERACION_YA_SE_USO_CON_OTRA_CUENTA_O_CON_OTROS_DATOS: "La clave de operación ya se usó con otra cuenta o con otros datos.",
+  EL_REGISTRO_CAMBIO_EN_OTRO_DISPOSITIVO: "El registro cambió en otro dispositivo.",
+  EL_PERIODO_YA_NO_ESTA_DISPONIBLE_CONECTATE_Y_ELEGI_OTRO_PERIODO_ANTES_DE_E: "El período ya no está disponible. Conectate y elegí otro período antes de emitir la planilla.",
+  UNA_PERSONA_SELECCIONADA_YA_NO_PERTENECE_AL_PADRON_ACTUALIZA_LOS_DATOS_ANT: "Una persona seleccionada ya no pertenece al padrón. Actualizá los datos antes de volver a emitir.",
+  EL_PERIODO_O_BENEFICIARIO_YA_NO_ESTA_DISPONIBLE_EN_EL_PADRON: "El período o beneficiario ya no está disponible en el padrón.",
+  LOS_DATOS_PREPARADOS_NO_COINCIDEN_CON_EL_FORMATO_DE_ESTA_VISTA_CONECTATE_P: "Los datos preparados no coinciden con el formato de esta vista. Conectate para actualizarlos.",
 } as const;

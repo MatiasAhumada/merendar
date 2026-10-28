@@ -24,6 +24,7 @@ interface WorkerHarness {
 
 async function createWorkerHarness(networkFetch: (request: ServiceWorkerRequest) => Promise<Response>) {
   const serviceWorkerSource = await readFile(new URL("../public/sw.js", import.meta.url), "utf8");
+  const serviceWorkerConfigurationSource = await readFile(new URL("../public/sw-config.js", import.meta.url), "utf8");
   const listeners: Record<string, FetchListener> = {};
   const cacheEntries = new Map<string, Response>();
   cacheEntries.set("/familias", new Response("offline shell", { status: 200 }));
@@ -55,12 +56,15 @@ async function createWorkerHarness(networkFetch: (request: ServiceWorkerRequest)
     clients: { claim: async () => undefined },
   };
 
+  runInNewContext(serviceWorkerConfigurationSource, { self: serviceWorkerGlobal });
+
   runInNewContext(serviceWorkerSource, {
     self: serviceWorkerGlobal,
     caches: cacheStorage,
     fetch: networkFetch,
     URL,
     Response,
+    importScripts: () => undefined,
   });
 
   return {

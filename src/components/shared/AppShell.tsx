@@ -1,8 +1,10 @@
 "use client";
 
+import { OFFLINE_OPERATION_MESSAGES, OFFLINE_PREPARATION, SYNC_SERVER_MESSAGES } from "@/constants/offline.constant";
+import { APPLICATION_ERROR_MESSAGES } from "@/constants/error-messages.constant";
+import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
+import { APPLICATION_CONFIG } from "@/config/application.config";
 import { useCallback, useEffect, useState } from "react";
-import Image from "next/image";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Logout01Icon, Menu01Icon } from "@hugeicons/core-free-icons";
@@ -10,6 +12,18 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
+import { BRAND } from "@/constants/brand.constant";
+import { ROUTES, API_ROUTES } from "@/constants/routes.constant";
+import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
+import { clientErrorHandler } from "@/utils/handlers/clientHandler";
+import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
+import { OfflineSyncStatus } from "@/components/shared/OfflineSyncStatus";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import { clearOfflineQueue } from "@/services/offline-queue.service";
+import Image from "next/image";
+import Link from "next/link";
+
 import {
   Sheet,
   SheetContent,
@@ -18,19 +32,11 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
-import { BRAND } from "@/constants/brand.constant";
-import { ROUTES } from "@/constants/routes";
+
 import type { AuthenticatedUser } from "@/server/services/auth.service";
-import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
+
 import clientAxios from "@/utils/clientAxios.util";
-import { API_ROUTES } from "@/constants/routes";
-import { clientErrorHandler } from "@/utils/handlers/clientHandler";
-import { ConnectionStatus } from "@/components/shared/ConnectionStatus";
-import { OfflineSyncStatus } from "@/components/shared/OfflineSyncStatus";
-import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { clearOfflineQueue } from "@/services/offline-queue.service";
-import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
+
 import {
   clearActiveOfflineAccount,
   clearOfflinePreparation,
@@ -71,7 +77,7 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
     let isMounted = true;
     let preparationDebounceTimer = 0;
     setPreparationError("");
-    setPreparationMessage(isOnline ? "Preparando automáticamente las vistas habilitadas…" : "Comprobando la preparación guardada para este dispositivo…");
+    setPreparationMessage(isOnline ? OFFLINE_OPERATION_MESSAGES.PREPARANDO_AUTOMATICAMENTE_LAS_VISTAS_HABILITADAS : OFFLINE_OPERATION_MESSAGES.COMPROBANDO_LA_PREPARACION_GUARDADA_PARA_ESTE_DISPOSITIVO);
 
     async function prepareAuthorizedWorkspace(forceRefresh = false) {
       try {
@@ -85,13 +91,13 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
 
         if (!isOnline) {
           setPreparationMessage(currentPreparation
-            ? `Preparación disponible hasta ${new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(currentPreparation.expiresAt))}.`
-            : "Conectate para preparar las vistas autorizadas para uso sin conexión.");
+            ? APPLICATION_UI_TEXT.PREPARATION_AVAILABLE_UNTIL(new Intl.DateTimeFormat(APPLICATION_CONFIG.DATE_FORMAT_LOCALE, { dateStyle: "short", timeStyle: "short" }).format(new Date(currentPreparation.expiresAt)))
+            : OFFLINE_OPERATION_MESSAGES.CONECTATE_PARA_PREPARAR_LAS_VISTAS_AUTORIZADAS_PARA_USO_SIN_CONEXION);
           return;
         }
 
         if (!("serviceWorker" in navigator)) {
-          throw new Error("Este navegador no admite preparación automática para uso sin conexión.");
+          throw new Error(APPLICATION_ERROR_MESSAGES.ESTE_NAVEGADOR_NO_ADMITE_PREPARACION_AUTOMATICA_PARA_USO_SIN_CONEXION);
         }
 
         await navigator.serviceWorker.ready;
@@ -105,11 +111,11 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
         );
         if (isMounted) {
           setHasOfflinePreparation(true);
-          setPreparationMessage(`Vistas autorizadas listas. Última actualización: ${new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(preparation.preparedAt))}.`);
+          setPreparationMessage(APPLICATION_UI_TEXT.PREPARATION_UPDATED(new Intl.DateTimeFormat(APPLICATION_CONFIG.DATE_FORMAT_LOCALE, { dateStyle: "short", timeStyle: "short" }).format(new Date(preparation.preparedAt))));
         }
       } catch (error) {
         if (isMounted) {
-          const message = error instanceof Error ? error.message : "No se pudo completar la preparación automática.";
+          const message = error instanceof Error ? error.message : SYNC_SERVER_MESSAGES.NO_SE_PUDO_COMPLETAR_LA_PREPARACION_AUTOMATICA;
           setPreparationError(message);
           setPreparationMessage("");
           clientErrorHandler(error, () => {}, { logToConsole: false, showToast: false });
@@ -224,7 +230,7 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
         <div className="flex shrink-0 items-center gap-3 border-b border-sidebar-border px-5 py-6">
           <Image src={BRAND.wordmarkPath} alt={BRAND.name} width={180} height={82} className="h-12 w-auto" priority unoptimized />
         </div>
-        <nav aria-label="Navegación principal" className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain p-3">
+        <nav aria-label={APPLICATION_UI_TEXT.NAVEGACION_PRINCIPAL} className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain p-3">
           {navigation.map((item) => (
             <Button
               asChild
@@ -242,8 +248,8 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
         <div className="shrink-0 border-t border-sidebar-border p-5">
           <div className="flex items-center gap-3">
             <Avatar size="lg">
-              <AvatarImage src="/images/profile.jpg" alt="María González" />
-              <AvatarFallback>MG</AvatarFallback>
+              <AvatarImage src="/images/profile.jpg" alt={APPLICATION_UI_TEXT.MARIA_GONZALEZ} />
+              <AvatarFallback>{APPLICATION_UI_TEXT.MG}</AvatarFallback>
             </Avatar>
             <div>
               <p className="max-w-36 truncate font-semibold">{user.name}</p>
@@ -252,8 +258,7 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
           </div>
           <Button variant="ghost" className="mt-4 w-full justify-start" onClick={signOut} disabled={isSigningOut || !isOnline || !queueLoaded}>
             <HugeiconsIcon icon={Logout01Icon} strokeWidth={1.8} data-icon="inline-start" />
-            Cerrar sesión
-          </Button>
+            {APPLICATION_UI_TEXT.CERRAR_SESION}</Button>
         </div>
       </aside>
 
@@ -263,16 +268,16 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
             <div className="flex min-w-0 items-center gap-2">
               <Sheet key={pathname}>
                 <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon" aria-label="Abrir menú" className="lg:hidden">
+                  <Button variant="ghost" size="icon" aria-label={APPLICATION_UI_TEXT.ABRIR_MENU} className="lg:hidden">
                     <HugeiconsIcon icon={Menu01Icon} strokeWidth={1.8} />
                   </Button>
                 </SheetTrigger>
                 <SheetContent side="left">
                   <SheetHeader>
                     <SheetTitle>{BRAND.name}</SheetTitle>
-                    <SheetDescription>Gestión comunitaria</SheetDescription>
+                    <SheetDescription>{APPLICATION_UI_TEXT.GESTION_COMUNITARIA}</SheetDescription>
                   </SheetHeader>
-                  <nav aria-label="Menú principal" className="flex flex-col gap-1 px-4">
+                  <nav aria-label={APPLICATION_UI_TEXT.MENU_PRINCIPAL} className="flex flex-col gap-1 px-4">
                     {navigation.map((item) => (
                       <Button
                         asChild
@@ -288,12 +293,11 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
                     ))}
                     <Button variant="ghost" className="w-full justify-start" onClick={signOut} disabled={isSigningOut || !isOnline || !queueLoaded}>
                       <HugeiconsIcon icon={Logout01Icon} strokeWidth={1.8} data-icon="inline-start" />
-                      Cerrar sesión
-                    </Button>
+                      {APPLICATION_UI_TEXT.CERRAR_SESION}</Button>
                   </nav>
                 </SheetContent>
               </Sheet>
-              <Image src={BRAND.logoPath} alt="" width={40} height={40} className="lg:hidden" priority unoptimized />
+              <Image src={BRAND.logoPath} alt={APPLICATION_UI_TEXT.TEXT_3} width={40} height={40} className="lg:hidden" priority unoptimized />
               <div className="min-w-0">
                 <p className="truncate font-display text-base font-semibold leading-tight">
                   {currentPage?.label ?? BRAND.shortName}
@@ -320,8 +324,8 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
         {preparationError ? (
           <div className="mx-auto w-full max-w-7xl px-4 pt-3 sm:px-6 lg:px-8">
             <Alert variant="destructive" role="status">
-              <AlertTitle>No se completó la preparación automática</AlertTitle>
-              <AlertDescription>{preparationError}{hasOfflinePreparation ? " Se conserva la última preparación válida." : " Conectate para volver a intentarlo."}</AlertDescription>
+              <AlertTitle>{APPLICATION_UI_TEXT.NO_SE_COMPLETO_LA_PREPARACION_AUTOMATICA}</AlertTitle>
+              <AlertDescription>{preparationError}{hasOfflinePreparation ? APPLICATION_UI_TEXT.SE_CONSERVA_LA_ULTIMA_PREPARACION_VALIDA : APPLICATION_UI_TEXT.CONECTATE_PARA_VOLVER_A_INTENTARLO}</AlertDescription>
             </Alert>
           </div>
         ) : preparationMessage ? (
@@ -335,7 +339,7 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
         </main>
 
         <nav
-          aria-label="Navegación inferior"
+          aria-label={APPLICATION_UI_TEXT.NAVEGACION_INFERIOR}
           className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-[repeat(auto-fit,minmax(0,1fr))] border-t border-border bg-card/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-lg backdrop-blur lg:hidden"
         >
           {bottomNavigation.map((item) => (
@@ -356,17 +360,17 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
       <Dialog open={isLogoutConfirmationOpen} onOpenChange={setIsLogoutConfirmationOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>¿Cerrar sesión y borrar cambios pendientes?</DialogTitle>
+            <DialogTitle>{APPLICATION_UI_TEXT.CERRAR_SESION_Y_BORRAR_CAMBIOS_PENDIENTES}</DialogTitle>
             <DialogDescription>
               {queueReadFailed
-                ? "No pudimos leer la cola local. Cerrar sesión elimina los borradores y las vistas preparadas de esta cuenta en este dispositivo."
-                : `Hay ${pendingOperationsCount} cambio(s) todavía sin sincronizar. Cerrar sesión elimina los borradores y las vistas preparadas de esta cuenta en este dispositivo.`}
+                ? APPLICATION_UI_TEXT.NO_PUDIMOS_LEER_LA_COLA_LOCAL_CERRAR_SESION_ELIMINA_LOS_BORRADORES_Y_LAS_V
+                : APPLICATION_UI_TEXT.PENDING_SIGNOUT_CONFIRMATION(pendingOperationsCount)}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsLogoutConfirmationOpen(false)} disabled={isSigningOut}>Volver</Button>
+            <Button variant="outline" onClick={() => setIsLogoutConfirmationOpen(false)} disabled={isSigningOut}>{APPLICATION_UI_TEXT.VOLVER}</Button>
             <Button variant="destructive" onClick={() => void completeSignOut()} disabled={isSigningOut || !isOnline || !queueLoaded}>
-              {isSigningOut ? "Cerrando sesión…" : "Cerrar sesión y borrar"}
+              {isSigningOut ? APPLICATION_UI_TEXT.CERRANDO_SESION : APPLICATION_UI_TEXT.CERRAR_SESION_Y_BORRAR}
             </Button>
           </DialogFooter>
         </DialogContent>

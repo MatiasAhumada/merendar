@@ -1,13 +1,18 @@
+
+
+import { PRIVATE_RESPONSE_HEADERS, HTTP_CACHE_CONTROL, HTTP_HEADERS } from "@/constants/http.constant";
+import { DELIVERY_ERROR_MESSAGES } from "@/constants/delivery.constant";
 import { NextRequest, NextResponse } from "next/server";
-import type { Prisma } from "@prisma/client";
 import { AUTH } from "@/constants/auth.constant";
 import { prisma } from "@/lib/prisma";
 import { familyRepository } from "@/server/repository/family.repository";
 import { requireRecordReadAccess } from "@/server/services/record-access";
 import { ApiError } from "@/utils/handlers/apiError.handler";
+import type { Prisma } from "@prisma/client";
+
 import apiErrorHandler from "@/utils/handlers/apiError.handler";
 
-const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
+const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +21,7 @@ export async function GET(request: NextRequest) {
     const includePeriodDetails = request.nextUrl.searchParams.get("includePeriodDetails") === "true";
 
     if (periodId && periodId.length > 80) {
-      throw new ApiError({ status: 400, message: "El período seleccionado no es válido." });
+      throw new ApiError({ status: 400, message: DELIVERY_ERROR_MESSAGES.EL_PERIODO_SELECCIONADO_NO_ES_VALIDO });
     }
 
     const recordWhere: Prisma.DistributionRecordWhereInput = {};
@@ -59,9 +64,9 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     const apiError = error instanceof ApiError
       ? error
-      : new ApiError({ status: 500, message: "No se pudo consultar el registro de módulos", isOperational: false });
-    const response = apiErrorHandler({ error: apiError, request, fallbackMessage: "No se pudo consultar el registro de módulos" });
-    response.headers.set("Cache-Control", privateHeaders["Cache-Control"]);
+      : new ApiError({ status: 500, message: DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_CONSULTAR_EL_REGISTRO_DE_MODULOS, isOperational: false });
+    const response = apiErrorHandler({ error: apiError, request, fallbackMessage: DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_CONSULTAR_EL_REGISTRO_DE_MODULOS });
+    response.headers.set(HTTP_HEADERS.CACHE_CONTROL, HTTP_CACHE_CONTROL.PRIVATE_NO_STORE);
     return response;
   }
 }

@@ -1,3 +1,7 @@
+
+
+import { HTTP_CACHE_CONTROL, HTTP_HEADERS, HTTP_CONTENT_TYPES, PRIVATE_DOCUMENT_RESPONSE_HEADERS } from "@/constants/http.constant";
+import { DELIVERY_ERROR_MESSAGES } from "@/constants/delivery.constant";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { prisma } from "@/lib/prisma";
@@ -13,7 +17,7 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/reco
     const sheet = await prisma.beneficiarySheet.findUnique({ where: { id }, include: { period: { select: { label: true } } } });
 
     if (!sheet) {
-      throw new ApiError({ status: 404, message: "No encontramos esa planilla" });
+      throw new ApiError({ status: 404, message: DELIVERY_ERROR_MESSAGES.NO_ENCONTRAMOS_ESA_PLANILLA });
     }
 
     const pdf = await createBeneficiarySheetPdf(sheet.snapshot);
@@ -22,18 +26,17 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/reco
     return new NextResponse(Buffer.from(pdf), {
       status: 200,
       headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="planilla-${fileName}-v${sheet.version}.pdf"`,
-        "Cache-Control": "private, no-store, max-age=0",
-        "X-Content-Type-Options": "nosniff",
+        ...PRIVATE_DOCUMENT_RESPONSE_HEADERS,
+        [HTTP_HEADERS.CONTENT_TYPE]: HTTP_CONTENT_TYPES.PDF,
+        [HTTP_HEADERS.CONTENT_DISPOSITION]: `attachment; filename="planilla-${fileName}-v${sheet.version}.pdf"`,
       },
     });
   } catch (error) {
     const apiError = error instanceof ApiError
       ? error
-      : new ApiError({ status: 500, message: "No se pudo descargar la planilla", isOperational: false });
-    const response = apiErrorHandler({ error: apiError, request, fallbackMessage: "No se pudo descargar la planilla" });
-    response.headers.set("Cache-Control", "private, no-store, max-age=0");
+      : new ApiError({ status: 500, message: DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_DESCARGAR_LA_PLANILLA, isOperational: false });
+    const response = apiErrorHandler({ error: apiError, request, fallbackMessage: DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_DESCARGAR_LA_PLANILLA });
+    response.headers.set(HTTP_HEADERS.CACHE_CONTROL, HTTP_CACHE_CONTROL.PRIVATE_NO_STORE);
     return response;
   }
 }

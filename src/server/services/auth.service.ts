@@ -1,8 +1,10 @@
+
+
 import { createHash, randomBytes, scrypt as scryptCallback, scryptSync, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import type { UserRole } from "@prisma/client";
 import { AUTH } from "@/constants/auth.constant";
 import { authRepository } from "@/server/repository/auth.repository";
+import type { UserRole } from "@prisma/client";
 
 const scrypt = promisify(scryptCallback);
 const DUMMY_SALT = "merendar-auth-dummy-salt";

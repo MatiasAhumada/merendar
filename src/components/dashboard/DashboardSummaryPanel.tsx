@@ -1,16 +1,17 @@
 "use client";
 
+import { DASHBOARD_ERROR_MESSAGES, DASHBOARD_UI_TEXT, DASHBOARD_METRICS } from "@/constants/dashboard.constant";
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowRight01Icon, CloudOffIcon, RefreshIcon } from "@hugeicons/core-free-icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { DASHBOARD_METRICS } from "@/constants/dashboard.constant";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { getDashboardSummary } from "@/services/client/dashboard-data.service";
+import Link from "next/link";
+
 import type { OfflineDataSource } from "@/services/client/offline-snapshot.service";
 import type { DashboardSummaryResult } from "@/types/dashboard";
 
@@ -40,7 +41,7 @@ export function DashboardSummaryPanel({ userId, initialSummary }: { userId: stri
       }
     }).catch((cause: unknown) => {
       if (!cancelled) {
-        setError(cause instanceof Error ? cause.message : "No se pudieron cargar las métricas del inicio.");
+        setError(cause instanceof Error ? cause.message : DASHBOARD_ERROR_MESSAGES.NO_SE_PUDIERON_CARGAR_LAS_METRICAS_DEL_INICIO);
       }
     });
 
@@ -48,67 +49,67 @@ export function DashboardSummaryPanel({ userId, initialSummary }: { userId: stri
   }, [isOnline, userId]);
 
   const authorizedSummary = summaryResult?.authorized ? summaryResult.summary : null;
-  let periodHeading = authorizedSummary?.activePeriodLabel ?? "Gestión comunitaria";
-  let periodDescription = authorizedSummary?.activePeriodLabel ? "Período operativo vigente" : "Consultá los módulos habilitados para tu rol.";
+  let periodHeading = authorizedSummary?.activePeriodLabel ?? DASHBOARD_UI_TEXT.GESTION_COMUNITARIA;
+  let periodDescription: string = authorizedSummary?.activePeriodLabel ? DASHBOARD_UI_TEXT.PERIODO_OPERATIVO_VIGENTE : DASHBOARD_UI_TEXT.CONSULTA_LOS_MODULOS_HABILITADOS_PARA_TU_ROL;
   let sourceBadge = source === "indexeddb" ? "Captura local" : "Datos del servidor";
   let sourceBadgeVariant: "success" | "secondary" | "destructive" = source === "indexeddb" ? "secondary" : "success";
 
   if (error && !(source === "indexeddb" && authorizedSummary)) {
-    sourceBadge = "Datos no disponibles";
+    sourceBadge = DASHBOARD_UI_TEXT.DATOS_NO_DISPONIBLES;
     sourceBadgeVariant = "destructive";
   }
 
   if (!summaryResult?.authorized && !error) {
-    sourceBadge = "Panel informativo";
+    sourceBadge = DASHBOARD_UI_TEXT.PANEL_INFORMATIVO;
     sourceBadgeVariant = "secondary";
   }
 
   if (source === "indexeddb") {
     periodDescription = capturedAt
-      ? `Consulta local capturada el ${formatLastUpdated(capturedAt)}. Puede estar desactualizada.`
-      : "Consulta local preparada para esta cuenta.";
+      ? DASHBOARD_UI_TEXT.CONSULTA_LOCAL_CAPTURADA(formatLastUpdated(capturedAt))
+      : DASHBOARD_UI_TEXT.CONSULTA_LOCAL_PREPARADA_PARA_ESTA_CUENTA;
   }
 
   if (!authorizedSummary) {
-    periodHeading = "Gestión comunitaria";
+    periodHeading = DASHBOARD_UI_TEXT.GESTION_COMUNITARIA;
   }
 
   return <div className="flex flex-col gap-5">
-    {error && !(source === "indexeddb" && authorizedSummary) ? <Alert variant="destructive"><HugeiconsIcon icon={RefreshIcon} strokeWidth={1.8} /><AlertTitle>No pudimos cargar los datos del inicio</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
-    {!isOnline && source === "indexeddb" ? <Alert variant="info"><HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} /><AlertTitle>Resumen guardado para consulta</AlertTitle><AlertDescription>Las cifras son una lectura confirmada al momento de la captura y no incluyen cambios pendientes.</AlertDescription></Alert> : null}
-    {!isOnline && source !== "indexeddb" && !error ? <Alert variant="info"><HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} /><AlertTitle>Resumen no preparado</AlertTitle><AlertDescription>Conectate para cargar las métricas autorizadas de esta cuenta.</AlertDescription></Alert> : null}
+    {error && !(source === "indexeddb" && authorizedSummary) ? <Alert variant="destructive"><HugeiconsIcon icon={RefreshIcon} strokeWidth={1.8} /><AlertTitle>{DASHBOARD_UI_TEXT.NO_PUDIMOS_CARGAR_LOS_DATOS_DEL_INICIO}</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
+    {!isOnline && source === "indexeddb" ? <Alert variant="info"><HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} /><AlertTitle>{DASHBOARD_UI_TEXT.RESUMEN_GUARDADO_PARA_CONSULTA}</AlertTitle><AlertDescription>{DASHBOARD_UI_TEXT.LAS_CIFRAS_SON_UNA_LECTURA_CONFIRMADA_AL_MOMENTO_DE_LA_CAPTURA_Y_NO_INCL}</AlertDescription></Alert> : null}
+    {!isOnline && source !== "indexeddb" && !error ? <Alert variant="info"><HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} /><AlertTitle>{DASHBOARD_UI_TEXT.RESUMEN_NO_PREPARADO}</AlertTitle><AlertDescription>{DASHBOARD_UI_TEXT.CONECTATE_PARA_CARGAR_LAS_METRICAS_AUTORIZADAS_DE_ESTA_CUENTA}</AlertDescription></Alert> : null}
 
     <div className="flex flex-col gap-5">
         <Card variant="hero" className="relative overflow-hidden">
           <div aria-hidden="true" className="pointer-events-none absolute -bottom-20 -right-12 size-60 rounded-full bg-primary-foreground/5" />
           <CardHeader className="relative"><Badge variant={sourceBadgeVariant} className="w-fit">{sourceBadge.toUpperCase()}</Badge><CardTitle><h2 className="font-display text-xl font-semibold">{periodHeading}</h2></CardTitle><CardDescription>{periodDescription}</CardDescription></CardHeader>
-          <CardContent className="relative"><Button asChild variant="inverse" className="w-full"><Link href="#acciones">Ver acciones disponibles<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" /></Link></Button></CardContent>
+          <CardContent className="relative"><Button asChild variant="inverse" className="w-full"><Link href="#acciones">{DASHBOARD_UI_TEXT.VER_ACCIONES_DISPONIBLES}<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" /></Link></Button></CardContent>
         </Card>
 
         <section aria-labelledby="metrics-title" className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="metrics-title" className="font-display text-lg font-semibold">Resumen del padrón y cupos</h2>{authorizedSummary?.lastUpdatedAt ? <span className="text-xs text-muted-foreground">Datos actualizados: {formatLastUpdated(authorizedSummary.lastUpdatedAt)}</span> : null}</div>
+          <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="metrics-title" className="font-display text-lg font-semibold">{DASHBOARD_UI_TEXT.RESUMEN_DEL_PADRON_Y_CUPOS}</h2>{authorizedSummary?.lastUpdatedAt ? <span className="text-xs text-muted-foreground">{DASHBOARD_UI_TEXT.DATOS_ACTUALIZADOS}{formatLastUpdated(authorizedSummary.lastUpdatedAt)}</span> : null}</div>
           {authorizedSummary ? <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-3">{DASHBOARD_METRICS.map((metric) => {
             let metricValue = "—";
-            let metricDescription = "No disponible";
+            let metricDescription: string = DASHBOARD_UI_TEXT.NO_DISPONIBLE;
             if (metric.label === "Familias") {
               metricValue = String(authorizedSummary.familyCount);
-              metricDescription = authorizedSummary.familyCount ? metric.description : "Todavía no hay familias";
+              metricDescription = authorizedSummary.familyCount ? metric.description : DASHBOARD_UI_TEXT.TODAVIA_NO_HAY_FAMILIAS;
             }
             if (metric.label === "Personas") {
               metricValue = String(authorizedSummary.personCount);
-              metricDescription = authorizedSummary.personCount ? metric.description : "Todavía no hay personas";
+              metricDescription = authorizedSummary.personCount ? metric.description : DASHBOARD_UI_TEXT.TODAVIA_NO_HAY_PERSONAS;
             }
-            if (metric.label === "Cupos aprobados") {
+            if (metric.label === DASHBOARD_UI_TEXT.CUPOS_APROBADOS) {
               if (!authorizedSummary.activePeriodLabel) {
-                metricDescription = "No hay un período vigente";
+                metricDescription = DASHBOARD_UI_TEXT.NO_HAY_UN_PERIODO_VIGENTE;
               } else {
                 metricValue = String(authorizedSummary.approvedQuotaCount ?? 0);
-                metricDescription = authorizedSummary.approvedQuotaCount ? metric.description : "Sin cupos aprobados en el período";
+                metricDescription = authorizedSummary.approvedQuotaCount ? metric.description : DASHBOARD_UI_TEXT.SIN_CUPOS_APROBADOS_EN_EL_PERIODO;
               }
             }
             return <Card key={metric.label} size="sm"><CardContent className="flex flex-col gap-2"><div className="flex items-center justify-between gap-2"><span className="text-xs font-medium">{metric.label}</span><span className="flex size-8 items-center justify-center rounded-full bg-accent text-accent-foreground"><HugeiconsIcon icon={metric.icon} strokeWidth={1.8} /></span></div><p className="font-display text-3xl font-bold tabular-nums">{metricValue}</p><p className="text-xs text-muted-foreground">{metricDescription}</p></CardContent></Card>;
-          })}</div> : <Card><CardContent className="py-5 text-sm text-muted-foreground">{error ? "Las métricas aparecerán al recuperar conexión." : "Este resumen no muestra datos de otros roles."}</CardContent></Card>}
-          {source === "indexeddb" && capturedAt ? <p className="flex items-center gap-1 text-xs text-muted-foreground"><HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} />Captura del {formatLastUpdated(capturedAt)}. Los cambios pendientes se muestran por separado.</p> : null}
+          })}</div> : <Card><CardContent className="py-5 text-sm text-muted-foreground">{error ? DASHBOARD_UI_TEXT.LAS_METRICAS_APARECERAN_AL_RECUPERAR_CONEXION : DASHBOARD_UI_TEXT.ESTE_RESUMEN_NO_MUESTRA_DATOS_DE_OTROS_ROLES}</CardContent></Card>}
+          {source === "indexeddb" && capturedAt ? <p className="flex items-center gap-1 text-xs text-muted-foreground"><HugeiconsIcon icon={CloudOffIcon} strokeWidth={1.8} />{DASHBOARD_UI_TEXT.CAPTURA_DEL}{formatLastUpdated(capturedAt)}{DASHBOARD_UI_TEXT.LOS_CAMBIOS_PENDIENTES_SE_MUESTRAN_POR_SEPARADO}</p> : null}
         </section>
     </div>
   </div>;

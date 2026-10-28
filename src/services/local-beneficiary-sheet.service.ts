@@ -1,12 +1,10 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
-import { BENEFICIARY_SHEET_COLUMN_HEADERS, type BeneficiarySheetDraft } from "@/validations/record.validation";
 
-const tableBounds = [52, 73, 205, 263, 362, 414, 466, 543] as const;
-const title = "ENTREGA DE MODULOS DE MERCADERIA A FAMILIAS EN SITUACION DE RIESGO SOCIAL";
-const tableHeaderHeight = 27;
-const minimumRowHeight = 15.5;
-const rowLineHeight = 8;
-const pageBottom = 48;
+
+import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
+import { BENEFICIARY_SHEET_COLUMN_HEADERS, BENEFICIARY_SHEET_PDF } from "@/constants/delivery.constant";
+import type { BeneficiarySheetDraft } from "@/validations/record.validation";
+
+const { TABLE_BOUNDS: tableBounds, TITLE: title, TABLE_HEADER_HEIGHT: tableHeaderHeight, MINIMUM_ROW_HEIGHT: minimumRowHeight, ROW_LINE_HEIGHT: rowLineHeight, PAGE_BOTTOM: pageBottom } = BENEFICIARY_SHEET_PDF;
 
 type PrintableRow = {
   beneficiary: BeneficiarySheetDraft["beneficiaries"][number];

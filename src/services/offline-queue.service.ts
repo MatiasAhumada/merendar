@@ -1,10 +1,13 @@
-import { OFFLINE_STORAGE, SYNC_MESSAGES, SYNC_ROUTES } from "@/constants/offline.constant";
+
+
+import { NO_CACHE_REQUEST_HEADERS } from "@/constants/http.constant";
+import { OFFLINE_OPERATION_MESSAGES, OFFLINE_STORAGE, SYNC_MESSAGES, SYNC_ROUTES } from "@/constants/offline.constant";
 import { isOfflineOperationEnabled } from "@/constants/offline-contract.constant";
+import { z } from "zod";
 import type { JsonValue } from "@/types/json-value";
 import type { OfflineOperation, OfflineOperationInput, SynchronizationResult } from "@/types/offline-operation";
 import axios from "axios";
 import clientAxios from "@/utils/clientAxios.util";
-import { z } from "zod";
 
 const synchronizationResultSchema = z.object({
   operationId: z.uuid(),
@@ -54,7 +57,7 @@ function databaseName(userId: string) {
 
 function openDatabase(userId: string): Promise<IDBDatabase> {
   if (!globalThis.indexedDB) {
-    return Promise.reject(new OfflineQueueError("Este navegador no admite almacenamiento offline."));
+    return Promise.reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.UNSUPPORTED_STORAGE));
   }
 
   return new Promise((resolve, reject) => {
@@ -73,8 +76,8 @@ function openDatabase(userId: string): Promise<IDBDatabase> {
       request.result.onversionchange = () => request.result.close();
       resolve(request.result);
     };
-    request.onerror = () => reject(new OfflineQueueError("No se pudo abrir la cola offline."));
-    request.onblocked = () => reject(new OfflineQueueError("Cerrá las otras pestañas de Merendar para actualizar la cola offline."));
+    request.onerror = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_OPEN_FAILED));
+    request.onblocked = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_UPDATE_TABS));
   });
 }
 
@@ -95,7 +98,7 @@ async function ensureStorageCapacity(operation: OfflineOperationInput) {
   }
 
   if (requiredBytes - OFFLINE_STORAGE.STORAGE_RESERVE_BYTES > OFFLINE_STORAGE.MAX_OPERATION_BYTES) {
-    throw new OfflineQueueError("El cambio supera el tamaño máximo permitido para guardarse offline.");
+    throw new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.OPERATION_TOO_LARGE);
   }
 }
 
@@ -109,7 +112,7 @@ export async function enqueueOfflineOperation(
   }
 
   if (!isOfflineOperationEnabled(input.resource, input.operation)) {
-    throw new OfflineQueueError("Esta acción todavía no está habilitada para guardarse offline en este módulo.");
+    throw new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.OPERATION_UNAVAILABLE);
   }
 
   const existingOperations = await listOfflineOperations(userId);
@@ -118,7 +121,7 @@ export async function enqueueOfflineOperation(
   );
 
   if (unresolvedDependency) {
-    throw new OfflineQueueError("No encontramos un cambio padre necesario para guardar este registro.");
+    throw new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.PARENT_OPERATION_MISSING);
   }
 
   await pruneCompletedOperations(userId);
@@ -175,13 +178,13 @@ export async function listOfflineOperations(userId: string): Promise<OfflineOper
         const parsedOperations = z.array(offlineOperationSchema).safeParse(request.result);
 
         if (!parsedOperations.success) {
-          reject(new OfflineQueueError("La cola offline tiene un formato que esta versión no reconoce."));
+          reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_FORMAT_UNRECOGNIZED));
           return;
         }
 
         resolve(parsedOperations.data.sort((left, right) => left.createdAt.localeCompare(right.createdAt)));
       };
-      request.onerror = () => reject(new OfflineQueueError("No se pudo leer la cola offline."));
+      request.onerror = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_READ_FAILED));
     });
   } finally {
     database.close();
@@ -200,7 +203,7 @@ async function pruneCompletedOperations(userId: string) {
         const parsedOperations = z.array(offlineOperationSchema).safeParse(request.result);
 
         if (!parsedOperations.success) {
-          reject(new OfflineQueueError("La cola offline tiene un formato que esta versión no reconoce."));
+          reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_FORMAT_UNRECOGNIZED));
           transaction.abort();
           return;
         }
@@ -224,9 +227,9 @@ async function pruneCompletedOperations(userId: string) {
           }
         }
       };
-      request.onerror = () => reject(new OfflineQueueError("No se pudo limpiar el historial sincronizado."));
+      request.onerror = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.HISTORY_CLEANUP_FAILED));
       transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(new OfflineQueueError("No se pudo limpiar el historial sincronizado."));
+      transaction.onerror = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.HISTORY_CLEANUP_FAILED));
     });
   } finally {
     database.close();
@@ -246,7 +249,7 @@ async function updateOperation(userId: string, operationId: string, update: (ope
           const parsedOperation = offlineOperationSchema.safeParse(request.result);
 
           if (!parsedOperation.success) {
-            reject(new OfflineQueueError("La cola offline tiene un formato que esta versión no reconoce."));
+            reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_FORMAT_UNRECOGNIZED));
             transaction.abort();
             return;
           }
@@ -254,9 +257,9 @@ async function updateOperation(userId: string, operationId: string, update: (ope
           store.put(update(parsedOperation.data));
         }
       };
-      request.onerror = () => reject(new OfflineQueueError("No se pudo actualizar la cola offline."));
+      request.onerror = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_UPDATE_FAILED));
       transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(new OfflineQueueError("No se pudo actualizar la cola offline."));
+      transaction.onerror = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_UPDATE_FAILED));
     });
   } finally {
     database.close();
@@ -278,7 +281,7 @@ async function claimNextOperation(userId: string): Promise<OfflineOperation | nu
         const parsedOperations = z.array(offlineOperationSchema).safeParse(request.result);
 
         if (!parsedOperations.success) {
-          reject(new OfflineQueueError("La cola offline tiene un formato que esta versión no reconoce."));
+          reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_FORMAT_UNRECOGNIZED));
           transaction.abort();
           return;
         }
@@ -304,9 +307,9 @@ async function claimNextOperation(userId: string): Promise<OfflineOperation | nu
           store.put(claimedOperation);
         }
       };
-      request.onerror = () => reject(new OfflineQueueError("No se pudo preparar la sincronización."));
+      request.onerror = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.SYNC_PREPARATION_FAILED));
       transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(new OfflineQueueError("No se pudo preparar la sincronización."));
+      transaction.onerror = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.SYNC_PREPARATION_FAILED));
     });
   } finally {
     database.close();
@@ -371,7 +374,7 @@ async function sendOperation(operation: OfflineOperation): Promise<boolean> {
         dependencies: operation.dependencies,
         payload: operation.payload,
       }, {
-        headers: { "Cache-Control": "no-cache" },
+        headers: NO_CACHE_REQUEST_HEADERS,
         withCredentials: true,
         timeout: 30_000,
         validateStatus: () => true,
@@ -383,7 +386,7 @@ async function sendOperation(operation: OfflineOperation): Promise<boolean> {
       responseStatus = error.response.status;
       responseBody = error.response.data;
     } else {
-      await markOperationError(operation.userId, operation.operationId, "No se pudo contactar al servidor. El cambio sigue guardado en este dispositivo.");
+      await markOperationError(operation.userId, operation.operationId, OFFLINE_OPERATION_MESSAGES.CONTACT_SERVER_FAILED);
       return true;
     }
   }
@@ -408,7 +411,7 @@ async function sendOperation(operation: OfflineOperation): Promise<boolean> {
       return false;
     }
 
-    let message = "No se pudo sincronizar este cambio. El borrador permanece guardado.";
+    let message: string = OFFLINE_OPERATION_MESSAGES.SYNC_FAILED;
 
     if (parsedError.success) {
       message = parsedError.data.error.message;
@@ -425,7 +428,7 @@ async function sendOperation(operation: OfflineOperation): Promise<boolean> {
     return true;
   }
 
-  await markOperationError(operation.userId, operation.operationId, "El servidor respondió sin confirmar el resultado del cambio.");
+  await markOperationError(operation.userId, operation.operationId, OFFLINE_OPERATION_MESSAGES.SYNC_UNCONFIRMED);
   return true;
 }
 
@@ -456,11 +459,11 @@ export async function retryOfflineOperation(userId: string, operationId: string)
   const selectedOperation = operations.find((operation) => operation.operationId === operationId);
 
   if (!selectedOperation) {
-    throw new OfflineQueueError("No encontramos el cambio que querés reintentar.");
+    throw new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.OPERATION_NOT_FOUND);
   }
 
   if (selectedOperation.status !== "error") {
-    throw new OfflineQueueError("Solo se pueden reintentar cambios con error.");
+    throw new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.RETRY_ONLY_ERROR);
   }
 
   await updateOperation(userId, operationId, (operation) => ({ ...operation, status: "pending", message: null }));
@@ -472,7 +475,7 @@ export async function updateOfflineOperationPayload(userId: string, operationId:
   const selectedOperation = operations.find((operation) => operation.operationId === operationId);
 
   if (!selectedOperation || (selectedOperation.status !== "error" && selectedOperation.status !== "conflict")) {
-    throw new OfflineQueueError("Solo se pueden corregir cambios con error o conflicto.");
+    throw new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.RESOLVE_ONLY_ERROR_OR_CONFLICT);
   }
 
   await updateOperation(userId, operationId, (operation) => ({
@@ -492,11 +495,11 @@ export async function resolveOfflineConflict(userId: string, operationId: string
   const selectedOperation = operations.find((operation) => operation.operationId === operationId);
 
   if (!selectedOperation || selectedOperation.status !== "conflict") {
-    throw new OfflineQueueError("No encontramos el conflicto que querés resolver.");
+    throw new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.CONFLICT_NOT_FOUND);
   }
 
   if (resolution === "local" && !Number.isInteger(selectedOperation.remoteVersion)) {
-    throw new OfflineQueueError("No recibimos la versión actual del servidor. Actualizá los datos antes de resolver el conflicto.");
+    throw new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.REMOTE_VERSION_MISSING);
   }
 
   if (resolution === "local") {
@@ -528,7 +531,7 @@ export async function resolveOfflineConflict(userId: string, operationId: string
           const parsedOperations = z.array(offlineOperationSchema).safeParse(request.result);
 
           if (!parsedOperations.success) {
-            reject(new OfflineQueueError("La cola offline tiene un formato que esta versión no reconoce."));
+            reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_FORMAT_UNRECOGNIZED));
             transaction.abort();
             return;
           }
@@ -545,8 +548,8 @@ export async function resolveOfflineConflict(userId: string, operationId: string
           }
         };
         transaction.oncomplete = () => resolve();
-        request.onerror = () => reject(new OfflineQueueError("No se pudo actualizar las dependencias del cambio."));
-        transaction.onerror = () => reject(new OfflineQueueError("No se pudo guardar la resolución del conflicto."));
+        request.onerror = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.DEPENDENCY_UPDATE_FAILED));
+        transaction.onerror = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.CONFLICT_RESOLUTION_FAILED));
       });
     } finally {
       database.close();
@@ -572,8 +575,8 @@ export async function clearOfflineQueue(userId: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const request = indexedDB.deleteDatabase(databaseName(userId));
     request.onsuccess = () => resolve();
-    request.onerror = () => reject(new OfflineQueueError("No se pudo limpiar la información local de esta cuenta."));
-    request.onblocked = () => reject(new OfflineQueueError("Cerrá las otras pestañas de Merendar para limpiar la información local."));
+    request.onerror = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.ACCOUNT_LOCAL_CLEANUP_FAILED));
+    request.onblocked = () => reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.ACCOUNT_CLEANUP_TABS));
   });
 
   notifyQueueChange();

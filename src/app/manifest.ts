@@ -1,11 +1,12 @@
+import { ROUTES } from "@/constants/routes.constant";
+import { BRAND } from "@/constants/brand.constant";
 import type { MetadataRoute } from "next";
-import { ROUTES } from "@/constants/routes";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Merendar",
-    short_name: "Merendar",
-    description: "Plataforma comunitaria para organizar jornadas y acompañar a las familias.",
+    name: BRAND.name,
+    short_name: BRAND.shortName,
+    description: BRAND.description,
     start_url: ROUTES.HOME,
     scope: ROUTES.HOME,
     display: "standalone",

@@ -1,14 +1,5 @@
 import { z } from "zod";
-
-export const BENEFICIARY_SHEET_COLUMN_HEADERS = {
-  number: "N°",
-  beneficiary: "Apellido y Nombre",
-  dni: "DNI",
-  address: "Dirección",
-  neighborhood: "Barrio",
-  deliveryDate: "Fecha de entrega",
-  signature: "Firma",
-} as const;
+import { DELIVERY_VALIDATION_MESSAGES } from "@/constants/delivery.constant";
 
 export const distributionRecordPayloadSchema = z.object({
   kind: z.literal("distribution-record"),
@@ -17,7 +8,7 @@ export const distributionRecordPayloadSchema = z.object({
   familyId: z.string().trim().min(1).max(80),
   personId: z.string().trim().min(1).max(80),
   receivedAt: z.iso.date(),
-  moduleType: z.string().trim().min(2, "Ingresá el tipo de módulo").max(100),
+  moduleType: z.string().trim().min(2, DELIVERY_VALIDATION_MESSAGES.MODULE_TYPE_REQUIRED).max(100),
   quantity: z.number().int().positive().max(1000),
   physicalDniChecked: z.boolean(),
   documentsChecked: z.boolean(),
@@ -28,7 +19,7 @@ export const beneficiarySheetSchema = z.object({
   periodId: z.string().trim().min(1).max(80),
   personIds: z.array(z.string().trim().min(1).max(80)).min(1).max(1000),
 }).strict().refine((input) => new Set(input.personIds).size === input.personIds.length, {
-  message: "La selección contiene personas repetidas",
+  message: DELIVERY_VALIDATION_MESSAGES.REPEATED_SELECTION,
   path: ["personIds"],
 });
 
@@ -52,7 +43,7 @@ export const beneficiarySheetDraftSchema = z.object({
   }).strict()).min(1).max(1000),
   templateVersion: z.literal(2).optional(),
 }).strict().refine((draft) => new Set(draft.beneficiaries.map((beneficiary) => beneficiary.personId)).size === draft.beneficiaries.length, {
-  message: "La planilla contiene beneficiarios repetidos",
+  message: DELIVERY_VALIDATION_MESSAGES.REPEATED_BENEFICIARIES,
   path: ["beneficiaries"],
 });
 

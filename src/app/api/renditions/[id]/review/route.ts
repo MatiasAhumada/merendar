@@ -1,3 +1,5 @@
+import { PRIVATE_RESPONSE_HEADERS } from "@/constants/http.constant";
+import { RENDITION_ERROR_MESSAGES } from "@/constants/rendition.constant";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { prisma } from "@/lib/prisma";
@@ -6,12 +8,12 @@ import { isSameOriginRequest } from "@/server/services/origin.service";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 import { renditionReviewPayloadSchema } from "@/validations/rendition.validation";
 
-const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
+const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 
 export async function PATCH(request: NextRequest, context: RouteContext<"/api/renditions/[id]/review">) {
   try {
     if (!isSameOriginRequest(request)) {
-      throw new ApiError({ status: 403, message: "La solicitud no pertenece a este sitio." });
+      throw new ApiError({ status: 403, message: RENDITION_ERROR_MESSAGES.LA_SOLICITUD_NO_PERTENECE_A_ESTE_SITIO });
     }
 
     const user = await requireRenditionReviewAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
@@ -19,20 +21,20 @@ export async function PATCH(request: NextRequest, context: RouteContext<"/api/re
     const review = renditionReviewPayloadSchema.safeParse(body);
 
     if (!review.success) {
-      return NextResponse.json({ error: { message: review.error.issues[0]?.message ?? "Revisá los datos de la revisión." } }, { status: 400, headers: privateHeaders });
+      return NextResponse.json({ error: { message: review.error.issues[0]?.message ?? RENDITION_ERROR_MESSAGES.REVISA_LOS_DATOS_DE_LA_REVISION } }, { status: 400, headers: privateHeaders });
     }
 
     const { id } = await context.params;
     const existingRendition = await prisma.rendition.findUnique({ where: { id }, select: { id: true } });
 
     if (!existingRendition) {
-      throw new ApiError({ status: 404, message: "No encontramos la rendición seleccionada." });
+      throw new ApiError({ status: 404, message: RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_RENDICION_SELECCIONADA });
     }
 
     const signedSheetCount = await prisma.renditionDocument.count({ where: { renditionId: id, documentType: "PLANILLA_FIRMADA", supersededBy: { none: {} } } });
 
     if (!signedSheetCount) {
-      throw new ApiError({ status: 409, message: "Adjuntá una planilla firmada vigente antes de revisar la rendición." });
+      throw new ApiError({ status: 409, message: RENDITION_ERROR_MESSAGES.ADJUNTA_UNA_PLANILLA_FIRMADA_VIGENTE_ANTES_DE_REVISAR_LA_RENDICION });
     }
 
     const rendition = await prisma.rendition.update({
@@ -49,7 +51,7 @@ export async function PATCH(request: NextRequest, context: RouteContext<"/api/re
     return NextResponse.json({ rendition }, { headers: privateHeaders });
   } catch (error) {
     const status = error instanceof ApiError ? error.status : 500;
-    const message = error instanceof ApiError ? error.message : "No se pudo registrar la revisión documental.";
+    const message = error instanceof ApiError ? error.message : RENDITION_ERROR_MESSAGES.NO_SE_PUDO_REGISTRAR_LA_REVISION_DOCUMENTAL;
     return NextResponse.json({ error: { message } }, { status, headers: privateHeaders });
   }
 }

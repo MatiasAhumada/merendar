@@ -1,7 +1,10 @@
+
+import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
+import { RENDITION_LIMITS, RENDITION_ERROR_MESSAGES } from "@/constants/rendition.constant";
 import type { Prisma } from "@prisma/client";
 import type { SynchronizationHandler, SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
-import { RENDITION_LIMITS } from "@/constants/rendition.constant";
+
 import {
   renditionDocumentPayloadSchema,
   renditionReviewOperationPayloadSchema,
@@ -27,7 +30,7 @@ async function applyReview(
   });
 
   if (!rendition) {
-    throw new RenditionDocumentError("No encontramos la rendición seleccionada.", 404);
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_RENDICION_SELECCIONADA, 404);
   }
 
   const signedSheetCount = await transaction.renditionDocument.count({
@@ -39,7 +42,7 @@ async function applyReview(
   });
 
   if (!signedSheetCount) {
-    throw new RenditionDocumentError("Adjuntá una planilla firmada vigente antes de revisar la rendición.", 409);
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.ADJUNTA_UNA_PLANILLA_FIRMADA_VIGENTE_ANTES_DE_REVISAR_LA_RENDICION, 409);
   }
 
   const updatedRendition = await transaction.rendition.update({
@@ -65,21 +68,21 @@ function decodePdfDocument(originalName: string, contentBase64: string) {
   const content = Buffer.from(contentBase64, "base64");
 
   if (!content.length || content.length > RENDITION_LIMITS.MAX_DOCUMENT_BYTES) {
-    throw new RenditionDocumentError("Cada PDF debe pesar hasta 512 KiB y no puede estar vacío.");
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.CADA_PDF_DEBE_PESAR_HASTA_512_KIB_Y_NO_PUEDE_ESTAR_VACIO);
   }
 
   const header = content.subarray(0, 5).toString("ascii");
   const footer = content.subarray(Math.max(0, content.length - 1024)).toString("latin1");
 
   if (header !== "%PDF-" || !footer.includes("%%EOF")) {
-    throw new RenditionDocumentError("El contenido no es un PDF válido. Revisá que el archivo se haya exportado correctamente.");
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.EL_CONTENIDO_NO_ES_UN_PDF_VALIDO_REVISA_QUE_EL_ARCHIVO_SE_HAYA_EXPORTADO_C);
   }
 
   if (!originalName.toLowerCase().endsWith(".pdf")) {
-    throw new RenditionDocumentError("La planilla y sus respaldos deben ser archivos PDF.");
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PLANILLA_Y_SUS_RESPALDOS_DEBEN_SER_ARCHIVOS_PDF);
   }
 
-  return { content, byteSize: content.length, contentType: "application/pdf" };
+  return { content, byteSize: content.length, contentType: HTTP_CONTENT_TYPES.PDF };
 }
 
 async function applyDocuments(
@@ -93,7 +96,7 @@ async function applyDocuments(
   });
 
   if (!sheet || sheet.periodId !== payload.periodId) {
-    throw new RenditionDocumentError("La planilla emitida no pertenece al período seleccionado o ya no está disponible.");
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP);
   }
 
   const rendition = await transaction.rendition.upsert({
@@ -113,7 +116,7 @@ async function applyDocuments(
   });
 
   if (storedDocuments.length + payload.documents.length > RENDITION_LIMITS.MAX_DOCUMENTS_PER_RENDITION) {
-    throw new RenditionDocumentError("La rendición alcanzó el máximo de 20 documentos.");
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_RENDICION_ALCANZO_EL_MAXIMO_DE_20_DOCUMENTOS);
   }
 
   const createdDocumentIds: string[] = [];
@@ -124,7 +127,7 @@ async function applyDocuments(
       const hasExistingReplacement = storedDocuments.some((candidate) => candidate.supersedesId === document.supersedesId);
 
       if (!supersededDocument || supersededDocument.documentType !== document.type || hasExistingReplacement) {
-        throw new RenditionDocumentError("Elegí un documento vigente de esta rendición para corregirlo.");
+        throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.ELEGI_UN_DOCUMENTO_VIGENTE_DE_ESTA_RENDICION_PARA_CORREGIRLO);
       }
     }
 
@@ -174,7 +177,7 @@ export const renditionSynchronizationHandler: SynchronizationHandler = {
 
     if (parsedReview.success) {
       if (parsedReview.data.id !== operation.resourceId) {
-        throw new RenditionDocumentError("La revisión no coincide con la rendición seleccionada.");
+        throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_REVISION_NO_COINCIDE_CON_LA_RENDICION_SELECCIONADA);
       }
 
       const result = await applyReview(transaction, operation, parsedReview.data.status, parsedReview.data.notes);
@@ -193,7 +196,7 @@ export const renditionSynchronizationHandler: SynchronizationHandler = {
     const parsedPayload = renditionDocumentPayloadSchema.safeParse(operation.payload);
 
     if (!parsedPayload.success || parsedPayload.data.id !== operation.resourceId) {
-      throw new RenditionDocumentError("La carga no coincide con la operación pendiente.");
+      throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_CARGA_NO_COINCIDE_CON_LA_OPERACION_PENDIENTE);
     }
 
     const result = await applyDocuments(transaction, operation, parsedPayload.data);

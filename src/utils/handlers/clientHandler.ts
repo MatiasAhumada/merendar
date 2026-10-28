@@ -1,12 +1,15 @@
+
+
+import { APPLICATION_ERROR_MESSAGES, ERROR_MESSAGES } from "@/constants/error-messages.constant";
 import { AxiosError } from "axios";
+import { z } from "zod";
 import {
   toastSuccess,
   toastError,
   toastWarning,
   toastInfo,
 } from "@/utils/toast.util";
-import { ERROR_MESSAGES } from "@/constants/error-messages.constant";
-import { z } from "zod";
+
 import type { ToastOptions } from "@/types/toast";
 
 const errorMessageSchema = z.object({ message: z.string() });
@@ -22,7 +25,7 @@ interface HandlerOptions {
 function normalizeError(error: unknown): Error {
   if (error instanceof AxiosError) {
     if (!error.response) {
-      return new Error("Error de conexión");
+      return new Error(APPLICATION_ERROR_MESSAGES.ERROR_DE_CONEXION);
     }
 
     return new Error(error.message);

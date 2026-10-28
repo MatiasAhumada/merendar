@@ -1,7 +1,13 @@
-import clientAxios from "@/utils/clientAxios.util";
-import type { DashboardSummaryResult } from "@/types/dashboard";
+
+
+import { NO_STORE_REQUEST_HEADERS } from "@/constants/http.constant";
+import { DASHBOARD_ERROR_MESSAGES } from "@/constants/dashboard.constant";
+import { API_ROUTES } from "@/constants/routes.constant";
 import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
 import { apiDataResult, isTransportFailure, readOfflineSnapshot, updateOfflineSnapshot } from "@/services/client/offline-snapshot.service";
+import clientAxios from "@/utils/clientAxios.util";
+
+import type { DashboardSummaryResult } from "@/types/dashboard";
 
 export async function getDashboardSummary(userId: string, isOnline: boolean) {
   if (!isOnline) {
@@ -9,10 +15,10 @@ export async function getDashboardSummary(userId: string, isOnline: boolean) {
   }
 
   try {
-    const response = await clientAxios.get<unknown>("/api/dashboard", { headers: { "Cache-Control": "no-store" } });
+    const response = await clientAxios.get<unknown>(API_ROUTES.DASHBOARD, { headers: NO_STORE_REQUEST_HEADERS });
     const parsedResponse = dashboardSummaryResponseSchema.safeParse(response.data);
     if (!parsedResponse.success) {
-      throw new Error("El servidor devolvió métricas que Inicio no reconoce.");
+      throw new Error(DASHBOARD_ERROR_MESSAGES.EL_SERVIDOR_DEVOLVIO_METRICAS_QUE_INICIO_NO_RECONOCE);
     }
 
     const data: DashboardSummaryResult = parsedResponse.data;

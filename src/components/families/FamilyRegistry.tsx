@@ -1,7 +1,24 @@
 "use client";
 
+import { COMMON_UI_TEXT } from "@/constants/common-ui.constant";
+import { NO_STORE_REQUEST_HEADERS } from "@/constants/http.constant";
+import { FAMILY_ERROR_MESSAGES, FAMILY_UI_TEXT, FAMILY_DOCUMENT_LABELS, FAMILY_DOCUMENT_OPTIONS, FAMILY_MEMBER_RELATIONSHIPS, FAMILY_NEIGHBORHOODS } from "@/constants/family.constant";
+import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
+import { API_ROUTES } from "@/constants/routes.constant";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
+import { familyCollectionSchema, familyDeactivationTargetSchema, familyMemberChangeSchema, familyMemberInputSchema, familyPayloadSchema, newFamilyMemberChangeSchema, newFamilyMemberInputSchema, newFamilyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
+import { z } from "zod";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import { getFamilyCollection } from "@/services/client/family-data.service";
 import {
   ArrowRight01Icon,
   Call02Icon,
@@ -11,13 +28,7 @@ import {
   UserAdd01Icon,
   UserMultipleIcon,
 } from "@hugeicons/core-free-icons";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+
 import {
   Dialog,
   DialogContent,
@@ -44,17 +55,14 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { FAMILY_DOCUMENT_LABELS, FAMILY_DOCUMENT_OPTIONS, FAMILY_MEMBER_RELATIONSHIPS, FAMILY_NEIGHBORHOODS } from "@/constants/families.constant";
+
 import type { FamilyPersonRecord, FamilyRecord } from "@/interfaces/family.interface";
 import type { JsonObject } from "@/types/json-value";
 import type { FamilyMemberChangeInput, FamilyPersonInput } from "@/types/family";
-import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
+
 import type { OfflineOperation } from "@/types/offline-operation";
-import { familyCollectionSchema, familyDeactivationTargetSchema, familyMemberChangeSchema, familyMemberInputSchema, familyPayloadSchema, newFamilyMemberChangeSchema, newFamilyMemberInputSchema, newFamilyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
-import { z } from "zod";
+
 import clientAxios from "@/utils/clientAxios.util";
-import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { getFamilyCollection } from "@/services/client/family-data.service";
 
 interface FamilyRegistryProps {
   initialFamilies: FamilyRecord[];
@@ -153,7 +161,7 @@ function toFamilyMemberChangeJson(change: FamilyMemberChangeInput): JsonObject {
 
   if (change.action === "add-member") {
     if (!change.personId) {
-      throw new Error("La operación para agregar un integrante requiere un personId.");
+      throw new Error(FAMILY_ERROR_MESSAGES.LA_OPERACION_PARA_AGREGAR_UN_INTEGRANTE_REQUIERE_UN_PERSONID);
     }
 
     payload.personId = change.personId;
@@ -261,22 +269,22 @@ function applyPendingMemberChanges(family: FamilyRecord, operations: OfflineOper
 
 function offlineStatusLabel(operation: OfflineOperation) {
   if (operation.status === "conflict") {
-    return "Conflicto por DNI";
+    return FAMILY_UI_TEXT.CONFLICTO_POR_DNI;
   }
 
   if (operation.status === "error") {
-    return "Pendiente de atención";
+    return FAMILY_UI_TEXT.PENDIENTE_DE_ATENCION;
   }
 
   if (operation.status === "syncing") {
-    return "Sincronizando";
+    return FAMILY_UI_TEXT.SINCRONIZANDO;
   }
 
-  return "Pendiente de sincronización";
+  return FAMILY_UI_TEXT.PENDIENTE_DE_SINCRONIZACION;
 }
 
 function getMemberCountLabel(count: number) {
-  return `${count} ${count === 1 ? "integrante" : "integrantes"}`;
+  return FAMILY_UI_TEXT.MEMBER_COUNT(count);
 }
 
 type FamilyMemberValues = z.infer<typeof familyMemberInputSchema>;
@@ -328,7 +336,7 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
         errors[field].push(issue.message);
       });
       setFieldErrors(errors);
-      setFormMessage("Revisá los campos marcados antes de guardar.");
+      setFormMessage(FAMILY_UI_TEXT.REVISA_LOS_CAMPOS_MARCADOS_ANTES_DE_GUARDAR);
       return;
     }
 
@@ -348,31 +356,31 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
     <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
       <SheetContent side="bottom" className="mx-auto max-h-[92dvh] max-w-3xl overflow-y-auto rounded-t-3xl">
         <SheetHeader className="pr-14">
-          <SheetTitle className="font-display text-xl font-semibold">{member ? "Actualizar integrante" : "Agregar integrante"}</SheetTitle>
-          <SheetDescription>Los cambios se guardan en esta ficha y se sincronizan al recuperar conexión.</SheetDescription>
+          <SheetTitle className="font-display text-xl font-semibold">{member ? FAMILY_UI_TEXT.ACTUALIZAR_INTEGRANTE : FAMILY_UI_TEXT.AGREGAR_INTEGRANTE}</SheetTitle>
+          <SheetDescription>{FAMILY_UI_TEXT.LOS_CAMBIOS_SE_GUARDAN_EN_ESTA_FICHA_Y_SE_SINCRONIZAN_AL_RECUPERAR_CONEX}</SheetDescription>
         </SheetHeader>
         <form className="px-6 pb-8" onSubmit={submitMember}>
           <FieldGroup className="gap-4">
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field><FieldLabel htmlFor="family-member-first-name">Nombre *</FieldLabel><Input id="family-member-first-name" value={firstName} onChange={(event) => setFirstName(event.target.value)} required aria-invalid={Boolean(fieldErrors.firstName?.length)} />{fieldErrors.firstName?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-              <Field><FieldLabel htmlFor="family-member-last-name">Apellido *</FieldLabel><Input id="family-member-last-name" value={lastName} onChange={(event) => setLastName(event.target.value)} required aria-invalid={Boolean(fieldErrors.lastName?.length)} />{fieldErrors.lastName?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-              <Field><FieldLabel htmlFor="family-member-dni">DNI{member ? "" : " *"}</FieldLabel><Input id="family-member-dni" inputMode="numeric" value={dni} onChange={(event) => setDni(event.target.value.replace(/\D/g, "").slice(0, 8))} aria-invalid={Boolean(fieldErrors.dni?.length)} aria-required={!member} /><FieldDescription>{member ? "Los registros existentes sin DNI pueden seguir consultándose; completalo cuando esté disponible." : "Ingresá los 7 u 8 números del DNI."}</FieldDescription>{fieldErrors.dni?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-              <Field><FieldLabel htmlFor="family-member-phone">Teléfono</FieldLabel><Input id="family-member-phone" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} /></Field>
-              <Field><FieldLabel htmlFor="family-member-email">Email</FieldLabel><Input id="family-member-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(fieldErrors.email?.length)} />{fieldErrors.email?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-              <Field><FieldLabel htmlFor="family-member-relationship">Vínculo *</FieldLabel><Select value={relationship} onValueChange={setRelationship}><SelectTrigger id="family-member-relationship" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{FAMILY_MEMBER_RELATIONSHIPS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent></Select></Field>
+              <Field><FieldLabel htmlFor="family-member-first-name">{FAMILY_UI_TEXT.NOMBRE}</FieldLabel><Input id="family-member-first-name" value={firstName} onChange={(event) => setFirstName(event.target.value)} required aria-invalid={Boolean(fieldErrors.firstName?.length)} />{fieldErrors.firstName?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+              <Field><FieldLabel htmlFor="family-member-last-name">{FAMILY_UI_TEXT.APELLIDO}</FieldLabel><Input id="family-member-last-name" value={lastName} onChange={(event) => setLastName(event.target.value)} required aria-invalid={Boolean(fieldErrors.lastName?.length)} />{fieldErrors.lastName?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+              <Field><FieldLabel htmlFor="family-member-dni">{FAMILY_DOCUMENT_LABELS.DNI}{member ? "" : " *"}</FieldLabel><Input id="family-member-dni" inputMode="numeric" value={dni} onChange={(event) => setDni(event.target.value.replace(/\D/g, "").slice(0, 8))} aria-invalid={Boolean(fieldErrors.dni?.length)} aria-required={!member} /><FieldDescription>{member ? FAMILY_UI_TEXT.LOS_REGISTROS_EXISTENTES_SIN_DNI_PUEDEN_SEGUIR_CONSULTANDOSE_COMPLETALO_CU : FAMILY_UI_TEXT.INGRESA_LOS_7_U_8_NUMEROS_DEL_DNI}</FieldDescription>{fieldErrors.dni?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+              <Field><FieldLabel htmlFor="family-member-phone">{FAMILY_UI_TEXT.TELEFONO}</FieldLabel><Input id="family-member-phone" type="tel" value={phone} onChange={(event) => setPhone(event.target.value)} /></Field>
+              <Field><FieldLabel htmlFor="family-member-email">{APPLICATION_UI_TEXT.EMAIL}</FieldLabel><Input id="family-member-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} aria-invalid={Boolean(fieldErrors.email?.length)} />{fieldErrors.email?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+              <Field><FieldLabel htmlFor="family-member-relationship">{FAMILY_UI_TEXT.VINCULO}</FieldLabel><Select value={relationship} onValueChange={setRelationship}><SelectTrigger id="family-member-relationship" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{FAMILY_MEMBER_RELATIONSHIPS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent></Select></Field>
             </div>
             <Field>
-              <FieldLabel htmlFor="family-member-reference">Persona referente *</FieldLabel>
+              <FieldLabel htmlFor="family-member-reference">{FAMILY_UI_TEXT.PERSONA_REFERENTE}</FieldLabel>
               <Select value={referencePersonId} onValueChange={setReferencePersonId}>
-                <SelectTrigger id="family-member-reference" className="w-full"><SelectValue placeholder="Seleccionar referente" /></SelectTrigger>
+                <SelectTrigger id="family-member-reference" className="w-full"><SelectValue placeholder={FAMILY_UI_TEXT.SELECCIONAR_REFERENTE} /></SelectTrigger>
                 <SelectContent>
                   {family.members.map((familyMember) => <SelectItem key={familyMember.id} value={familyMember.id}>{familyMember.firstName} {familyMember.lastName}</SelectItem>)}
-                  {!member ? <SelectItem value={personId}>{firstName || lastName ? `${firstName} ${lastName}`.trim() : "Nuevo integrante"}</SelectItem> : null}
+                  {!member ? <SelectItem value={personId}>{firstName || lastName ? `${firstName} ${lastName}`.trim() : FAMILY_UI_TEXT.NUEVO_INTEGRANTE}</SelectItem> : null}
                 </SelectContent>
               </Select>
             </Field>
             <fieldset className="space-y-2">
-              <legend className="text-sm font-medium">Documentación faltante</legend>
+              <legend className="text-sm font-medium">{FAMILY_UI_TEXT.DOCUMENTACION_FALTANTE}</legend>
               <div className="grid gap-2 sm:grid-cols-2">
                 {FAMILY_DOCUMENT_OPTIONS.map((document) => {
                   const isMissing = missingDocuments.includes(document.value);
@@ -381,8 +389,8 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
               </div>
             </fieldset>
           </FieldGroup>
-          {formMessage ? <Alert variant="destructive" className="mt-5"><AlertTitle>No se pudo guardar</AlertTitle><AlertDescription>{formMessage}</AlertDescription></Alert> : null}
-          <div className="mt-6 flex flex-col-reverse justify-end gap-2 sm:flex-row"><Button variant="outline" type="button" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={isSaving}>{isSaving ? "Guardando…" : "Guardar integrante"}</Button></div>
+          {formMessage ? <Alert variant="destructive" className="mt-5"><AlertTitle>{FAMILY_UI_TEXT.NO_SE_PUDO_GUARDAR}</AlertTitle><AlertDescription>{formMessage}</AlertDescription></Alert> : null}
+          <div className="mt-6 flex flex-col-reverse justify-end gap-2 sm:flex-row"><Button variant="outline" type="button" onClick={onClose}>{APPLICATION_UI_TEXT.CANCELAR}</Button><Button type="submit" disabled={isSaving}>{isSaving ? COMMON_UI_TEXT.GUARDANDO : FAMILY_UI_TEXT.GUARDAR_INTEGRANTE}</Button></div>
         </form>
       </SheetContent>
     </Sheet>
@@ -434,16 +442,16 @@ function FamilyDetails({ family, canWrite, pendingMemberIds, onClose, onAddMembe
       <SheetContent side="right" className="w-full max-w-xl overflow-y-auto">
         <SheetHeader className="pr-12">
           <SheetTitle className="font-display text-xl font-semibold">{family.name}</SheetTitle>
-          <SheetDescription>Ficha familiar · padrón comunitario</SheetDescription>
+          <SheetDescription>{FAMILY_UI_TEXT.FICHA_FAMILIAR_PADRON_COMUNITARIO}</SheetDescription>
         </SheetHeader>
         <div className="flex flex-col gap-5 px-6 pb-6">
           <div className="space-y-3 rounded-xl bg-muted p-4 text-sm">
-            <div><p className="text-xs text-muted-foreground">Domicilio</p><p className="font-medium">Barrio {family.neighborhood} · {family.address}</p></div>
-            <div><p className="text-xs text-muted-foreground">Contacto del grupo</p><p className="font-medium">{family.contactPhone || "Sin teléfono"} · {family.contactEmail || "Sin email"}</p></div>
-            <div><p className="text-xs text-muted-foreground">Referente</p><p className="font-medium">{referencePerson ? `${referencePerson.firstName} ${referencePerson.lastName}` : "Sin referente"}</p></div>
+            <div><p className="text-xs text-muted-foreground">{FAMILY_UI_TEXT.DOMICILIO}</p><p className="font-medium">{FAMILY_UI_TEXT.BARRIO}{family.neighborhood} {APPLICATION_UI_TEXT.TEXT}{family.address}</p></div>
+            <div><p className="text-xs text-muted-foreground">{FAMILY_UI_TEXT.CONTACTO_DEL_GRUPO}</p><p className="font-medium">{family.contactPhone || FAMILY_UI_TEXT.SIN_TELEFONO} {APPLICATION_UI_TEXT.TEXT}{family.contactEmail || FAMILY_UI_TEXT.SIN_EMAIL}</p></div>
+            <div><p className="text-xs text-muted-foreground">{FAMILY_UI_TEXT.REFERENTE}</p><p className="font-medium">{referencePerson ? `${referencePerson.firstName} ${referencePerson.lastName}` : FAMILY_UI_TEXT.SIN_REFERENTE}</p></div>
           </div>
-          <section aria-label="Integrantes de la familia" className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Integrantes ({family.members.length})</h3>{canWrite ? <Button size="sm" onClick={onAddMember}><HugeiconsIcon icon={UserAdd01Icon} strokeWidth={1.8} data-icon="inline-start" />Agregar integrante</Button> : null}</div>
+          <section aria-label={FAMILY_UI_TEXT.INTEGRANTES_DE_LA_FAMILIA} className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{FAMILY_UI_TEXT.INTEGRANTES}{family.members.length}{APPLICATION_UI_TEXT.TEXT_2}</h3>{canWrite ? <Button size="sm" onClick={onAddMember}><HugeiconsIcon icon={UserAdd01Icon} strokeWidth={1.8} data-icon="inline-start" />{FAMILY_UI_TEXT.AGREGAR_INTEGRANTE}</Button> : null}</div>
             {family.members.map((member) => (
               <Card key={member.membershipId} size="sm">
                 <CardContent className="space-y-3">
@@ -453,38 +461,38 @@ function FamilyDetails({ family, canWrite, pendingMemberIds, onClose, onAddMembe
                       <p className="text-xs text-muted-foreground">{member.relationship}{member.id === family.referencePersonId ? " · referente" : ""}</p>
                     </div>
                     <Badge variant={member.missingDocuments.length ? "warning" : "success"}>
-                      {member.missingDocuments.length ? "Documentación pendiente" : "Documentación completa"}
+                      {member.missingDocuments.length ? FAMILY_UI_TEXT.DOCUMENTACION_PENDIENTE : FAMILY_UI_TEXT.DOCUMENTACION_COMPLETA}
                     </Badge>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div><p className="text-xs text-muted-foreground">DNI</p><p>{member.dni || "Sin informar"}</p></div>
-                    <div><p className="text-xs text-muted-foreground">Contacto</p><p>{member.phone || member.email || "Sin informar"}</p></div>
+                    <div><p className="text-xs text-muted-foreground">{FAMILY_DOCUMENT_LABELS.DNI}</p><p>{member.dni || FAMILY_UI_TEXT.SIN_INFORMAR}</p></div>
+                    <div><p className="text-xs text-muted-foreground">{FAMILY_UI_TEXT.CONTACTO}</p><p>{member.phone || member.email || FAMILY_UI_TEXT.SIN_INFORMAR}</p></div>
                   </div>
                   {member.missingDocuments.length ? (
                     <div className="flex flex-wrap gap-1.5">
                       {member.missingDocuments.map((document) => <Badge key={document.id} variant="warning">{FAMILY_DOCUMENT_LABELS[document.documentType]}</Badge>)}
                     </div>
                   ) : null}
-                  {pendingMemberIds.includes(member.id) ? <Badge variant="warning">Pendiente de sincronización</Badge> : null}
-                  {canWrite ? <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => onEditMember(member)}>Editar datos</Button><Button size="sm" variant="destructive" disabled={pendingMemberIds.includes(member.id)} onClick={() => setDeactivationTarget(member)}>{pendingMemberIds.includes(member.id) ? "Baja pendiente" : "Dar de baja"}</Button></div> : null}
+                  {pendingMemberIds.includes(member.id) ? <Badge variant="warning">{FAMILY_UI_TEXT.PENDIENTE_DE_SINCRONIZACION}</Badge> : null}
+                  {canWrite ? <div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => onEditMember(member)}>{FAMILY_UI_TEXT.EDITAR_DATOS}</Button><Button size="sm" variant="destructive" disabled={pendingMemberIds.includes(member.id)} onClick={() => setDeactivationTarget(member)}>{pendingMemberIds.includes(member.id) ? FAMILY_UI_TEXT.BAJA_PENDIENTE : FAMILY_UI_TEXT.DAR_DE_BAJA}</Button></div> : null}
                 </CardContent>
               </Card>
             ))}
           </section>
         </div>
-        <SheetFooter className="flex-wrap justify-between gap-2"><SheetClose asChild><Button variant="outline">Cerrar ficha</Button></SheetClose>{canWrite ? <Button variant="destructive" disabled={pendingMemberIds.includes("family")} onClick={() => setDeactivationTarget("family")}>{pendingMemberIds.includes("family") ? "Baja pendiente" : "Dar de baja familia"}</Button> : null}</SheetFooter>
+        <SheetFooter className="flex-wrap justify-between gap-2"><SheetClose asChild><Button variant="outline">{FAMILY_UI_TEXT.CERRAR_FICHA}</Button></SheetClose>{canWrite ? <Button variant="destructive" disabled={pendingMemberIds.includes("family")} onClick={() => setDeactivationTarget("family")}>{pendingMemberIds.includes("family") ? FAMILY_UI_TEXT.BAJA_PENDIENTE : FAMILY_UI_TEXT.DAR_DE_BAJA_FAMILIA}</Button> : null}</SheetFooter>
       </SheetContent>
       <Dialog open={Boolean(deactivationTarget)} onOpenChange={(open) => { if (!open && !isDeactivating) { setDeactivationTarget(null); setDeactivationError(""); } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{deactivationTarget === "family" ? "Dar de baja la familia" : "Dar de baja a esta persona"}</DialogTitle>
-            <DialogDescription>La baja conserva la ficha y los datos de las personas. Si hay entregas o planillas históricas, el sistema la bloqueará para preservar esos registros.</DialogDescription>
+            <DialogTitle>{deactivationTarget === "family" ? FAMILY_UI_TEXT.DAR_DE_BAJA_LA_FAMILIA : FAMILY_UI_TEXT.DAR_DE_BAJA_A_ESTA_PERSONA}</DialogTitle>
+            <DialogDescription>{FAMILY_UI_TEXT.LA_BAJA_CONSERVA_LA_FICHA_Y_LOS_DATOS_DE_LAS_PERSONAS_SI_HAY_ENTREGAS_O}</DialogDescription>
           </DialogHeader>
           <div className="rounded-xl bg-muted p-3 text-sm font-medium">{deactivationTarget === "family" ? family.name : `${deactivationTarget?.firstName ?? ""} ${deactivationTarget?.lastName ?? ""}`}</div>
           {deactivationError ? <p role="alert" className="text-sm text-destructive">{deactivationError}</p> : null}
           <DialogFooter>
-            <Button variant="outline" disabled={isDeactivating} onClick={() => setDeactivationTarget(null)}>Volver</Button>
-            <Button variant="destructive" disabled={isDeactivating} onClick={() => void confirmDeactivation()}>{isDeactivating ? "Guardando baja…" : "Confirmar baja"}</Button>
+            <Button variant="outline" disabled={isDeactivating} onClick={() => setDeactivationTarget(null)}>{APPLICATION_UI_TEXT.VOLVER}</Button>
+            <Button variant="destructive" disabled={isDeactivating} onClick={() => void confirmDeactivation()}>{isDeactivating ? FAMILY_UI_TEXT.GUARDANDO_BAJA : FAMILY_UI_TEXT.CONFIRMAR_BAJA}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -519,7 +527,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       setQueueMessage("");
       return familyOperations;
     } catch {
-      setQueueMessage("No se pudo leer la cola offline de esta cuenta.");
+      setQueueMessage(FAMILY_UI_TEXT.NO_SE_PUDO_LEER_LA_COLA_OFFLINE_DE_ESTA_CUENTA);
       return [];
     }
   }, [userId]);
@@ -555,7 +563,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       editingPayload = parsedPayload.data;
     }
   }
-  let submitLabel = "Guardar familia";
+  let submitLabel: string = FAMILY_UI_TEXT.GUARDAR_FAMILIA;
 
   if (editingOperation) {
     submitLabel = "Guardar corrección";
@@ -636,7 +644,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     const parsedPayload = familyPayloadSchema.safeParse(operation.payload);
 
     if (!parsedPayload.success) {
-      setQueueMessage("No se pudo abrir este borrador para corregirlo.");
+      setQueueMessage(FAMILY_UI_TEXT.NO_SE_PUDO_ABRIR_ESTE_BORRADOR_PARA_CORREGIRLO);
       return;
     }
 
@@ -693,7 +701,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
         errors[field].push(issue.message);
       });
       setFormErrors(errors);
-      setFormMessage("Revisá los campos marcados antes de guardar.");
+      setFormMessage(FAMILY_UI_TEXT.REVISA_LOS_CAMPOS_MARCADOS_ANTES_DE_GUARDAR);
       setIsSaving(false);
       return;
     }
@@ -722,7 +730,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
           await synchronizeOfflineQueue(userId);
         } catch {
           await refreshOfflineFamilies();
-          setQueueMessage("El borrador quedó guardado en este dispositivo y sigue pendiente de confirmación del servidor. Reintentá la sincronización cuando vuelva a estar disponible.");
+          setQueueMessage(FAMILY_UI_TEXT.EL_BORRADOR_QUEDO_GUARDADO_EN_ESTE_DISPOSITIVO_Y_SIGUE_PENDIENTE_DE_CONFIR);
           return;
         }
 
@@ -730,7 +738,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
         const submittedOperation = pendingFamilyOperations.find((operation) => operation.operationId === submittedOperationId);
 
         if (submittedOperation) {
-          setQueueMessage("El borrador quedó guardado en este dispositivo y sigue pendiente de confirmación del servidor. Reintentá la sincronización cuando esté disponible.");
+          setQueueMessage(FAMILY_UI_TEXT.EL_BORRADOR_QUEDO_GUARDADO_EN_ESTE_DISPOSITIVO_Y_SIGUE_PENDIENTE_DE_CONFIR_2);
           return;
         }
 
@@ -738,14 +746,14 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
           await refreshFamilies();
         } catch {
           setNeedsFamilyRefresh(true);
-          setQueueMessage("La familia ya está confirmada en el servidor, pero no pudimos actualizar el padrón. Reintentá la actualización sin volver a cargarla.");
+          setQueueMessage(FAMILY_UI_TEXT.LA_FAMILIA_YA_ESTA_CONFIRMADA_EN_EL_SERVIDOR_PERO_NO_PUDIMOS_ACTUALIZAR_EL);
         }
       }
     } catch (error) {
       if (error instanceof Error) {
         setFormMessage(error.message);
       } else {
-        setFormMessage("No se pudo guardar el borrador en este dispositivo.");
+        setFormMessage(FAMILY_UI_TEXT.NO_SE_PUDO_GUARDAR_EL_BORRADOR_EN_ESTE_DISPOSITIVO);
       }
     } finally {
       setIsSaving(false);
@@ -760,7 +768,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       setNeedsFamilyRefresh(false);
       setQueueMessage("");
     } catch {
-      setQueueMessage("La familia está confirmada en el servidor, pero el padrón sigue sin actualizarse. Podés volver a intentarlo sin duplicar el registro.");
+      setQueueMessage(FAMILY_UI_TEXT.LA_FAMILIA_ESTA_CONFIRMADA_EN_EL_SERVIDOR_PERO_EL_PADRON_SIGUE_SIN_ACTUALI);
     } finally {
       setIsRefreshingFamilies(false);
     }
@@ -773,11 +781,11 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     const blockedOperation = unresolvedOperations.find((operation) => operation.status === "error" || operation.status === "conflict");
 
     if (blockedOperation) {
-      return "Primero resolvé el cambio familiar pendiente antes de solicitar una baja.";
+      return FAMILY_UI_TEXT.PRIMERO_RESOLVE_EL_CAMBIO_FAMILIAR_PENDIENTE_ANTES_DE_SOLICITAR_UNA_BAJA;
     }
 
     if (unresolvedOperations.some((operation) => operation.operation === "delete")) {
-      return "Ya hay una baja pendiente para esta familia.";
+      return FAMILY_UI_TEXT.YA_HAY_UNA_BAJA_PENDIENTE_PARA_ESTA_FAMILIA;
     }
 
     setQueueMessage("");
@@ -792,7 +800,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
         payload: target,
       });
       await refreshOfflineFamilies();
-      setQueueMessage("La baja quedó guardada y se confirmará cuando el servidor valide que no haya registros históricos vinculados.");
+      setQueueMessage(FAMILY_UI_TEXT.LA_BAJA_QUEDO_GUARDADA_Y_SE_CONFIRMARA_CUANDO_EL_SERVIDOR_VALIDE_QUE_NO_HA);
 
       if (!navigator.onLine) {
         return null;
@@ -803,17 +811,17 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       const submittedOperation = remainingOperations.find((operation) => operation.operationId === queuedOperation.operationId);
 
       if (submittedOperation) {
-        setQueueMessage(submittedOperation.message ?? "La baja permanece guardada en este dispositivo y espera confirmación del servidor.");
+        setQueueMessage(submittedOperation.message ?? FAMILY_UI_TEXT.LA_BAJA_PERMANECE_GUARDADA_EN_ESTE_DISPOSITIVO_Y_ESPERA_CONFIRMACION_DEL_S);
         return null;
       }
 
       try {
-        const response = await clientAxios.get<unknown>("/api/families", { headers: { "Cache-Control": "no-store" } });
+        const response = await clientAxios.get<unknown>(API_ROUTES.FAMILIES, { headers: NO_STORE_REQUEST_HEADERS });
         const parsedFamilies = familyCollectionSchema.safeParse(response.data);
 
         if (!parsedFamilies.success) {
           setNeedsFamilyRefresh(true);
-          setQueueMessage("La baja quedó confirmada; no pudimos actualizar el padrón. Reintentá la actualización sin repetir la solicitud.");
+          setQueueMessage(FAMILY_UI_TEXT.LA_BAJA_QUEDO_CONFIRMADA_NO_PUDIMOS_ACTUALIZAR_EL_PADRON_REINTENTA_LA_ACTU);
           return null;
         }
 
@@ -828,14 +836,14 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
         setQueueMessage("");
       } catch {
         setNeedsFamilyRefresh(true);
-        setQueueMessage("La baja quedó confirmada; no pudimos actualizar el padrón. Reintentá la actualización sin repetir la solicitud.");
+        setQueueMessage(FAMILY_UI_TEXT.LA_BAJA_QUEDO_CONFIRMADA_NO_PUDIMOS_ACTUALIZAR_EL_PADRON_REINTENTA_LA_ACTU);
       }
     } catch (error) {
       if (error instanceof Error) {
         return error.message;
       }
 
-      return "No se pudo guardar la solicitud de baja.";
+      return FAMILY_UI_TEXT.NO_SE_PUDO_GUARDAR_LA_SOLICITUD_DE_BAJA;
     }
 
     return null;
@@ -843,7 +851,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
 
   async function saveFamilyMember(values: FamilyMemberValues, referencePersonId: string, memberId: string, personId: string) {
     if (!selectedFamilyView) {
-      return "No encontramos la familia que querés actualizar.";
+      return FAMILY_UI_TEXT.NO_ENCONTRAMOS_LA_FAMILIA_QUE_QUERES_ACTUALIZAR;
     }
 
     const editingMember = memberEditor?.member;
@@ -852,7 +860,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     );
 
     if (duplicateDni) {
-      return "Ese DNI ya está registrado en esta familia.";
+      return FAMILY_UI_TEXT.ESE_DNI_YA_ESTA_REGISTRADO_EN_ESTA_FAMILIA;
     }
 
     let change: FamilyMemberChangeInput;
@@ -866,7 +874,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     const parsedChange = newFamilyMemberChangeSchema.safeParse(change);
 
     if (!parsedChange.success) {
-      return "Revisá los datos del integrante antes de guardar.";
+      return FAMILY_UI_TEXT.REVISA_LOS_DATOS_DEL_INTEGRANTE_ANTES_DE_GUARDAR;
     }
 
     const previousOperations = offlineOperations
@@ -904,18 +912,18 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
         const thisOperation = remainingOperations.find((operation) => operation.resourceId === selectedFamilyView.id && operation.operation === "update");
 
         if (thisOperation?.status === "conflict") {
-          return thisOperation.message ?? "La ficha cambió en otro dispositivo. Actualizá y volvé a intentar.";
+          return thisOperation.message ?? FAMILY_UI_TEXT.LA_FICHA_CAMBIO_EN_OTRO_DISPOSITIVO_ACTUALIZA_Y_VOLVE_A_INTENTAR;
         }
 
         if (thisOperation?.status === "error") {
-          return thisOperation.message ?? "El cambio quedó guardado en este dispositivo y espera sincronización.";
+          return thisOperation.message ?? FAMILY_UI_TEXT.EL_CAMBIO_QUEDO_GUARDADO_EN_ESTE_DISPOSITIVO_Y_ESPERA_SINCRONIZACION;
         }
 
-        const response = await clientAxios.get<unknown>("/api/families", { headers: { "Cache-Control": "no-store" } });
+        const response = await clientAxios.get<unknown>(API_ROUTES.FAMILIES, { headers: NO_STORE_REQUEST_HEADERS });
         const parsedFamilies = familyCollectionSchema.safeParse(response.data);
 
         if (!parsedFamilies.success) {
-          return "El cambio quedó guardado. No pudimos actualizar la lista; volvé a intentar sin volver a cargar los datos.";
+          return FAMILY_UI_TEXT.EL_CAMBIO_QUEDO_GUARDADO_NO_PUDIMOS_ACTUALIZAR_LA_LISTA_VOLVE_A_INTENTAR_S;
         }
 
         setFamilies(parsedFamilies.data.families);
@@ -932,7 +940,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
         return error.message;
       }
 
-      return "No se pudo guardar el integrante.";
+      return FAMILY_UI_TEXT.NO_SE_PUDO_GUARDAR_EL_INTEGRANTE;
     }
   }
 
@@ -940,24 +948,23 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
     <div className="flex flex-col gap-5">
       <section className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">Padrón de familias</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">{FAMILY_UI_TEXT.PADRON_DE_FAMILIAS}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {families.length} grupos registrados{localFamilies.length ? ` · ${localFamilies.length} pendientes de sincronización` : ""}
+            {families.length} {FAMILY_UI_TEXT.GRUPOS_REGISTRADOS}{localFamilies.length ? FAMILY_UI_TEXT.PENDING_SYNCHRONIZATION_COUNT(localFamilies.length) : ""}
           </p>
         </div>
         <Badge variant="success" className="h-8 px-3">
           <HugeiconsIcon icon={UserMultipleIcon} strokeWidth={1.8} data-icon="inline-start" />
-          Registro comunitario
-        </Badge>
+          {FAMILY_UI_TEXT.REGISTRO_COMUNITARIO}</Badge>
       </section>
 
       {queueMessage ? (
         <Alert variant="info">
-          <AlertTitle>{needsFamilyRefresh ? "Actualización pendiente" : "Estado de la captura offline"}</AlertTitle>
+          <AlertTitle>{needsFamilyRefresh ? FAMILY_UI_TEXT.ACTUALIZACION_PENDIENTE : FAMILY_UI_TEXT.ESTADO_DE_LA_CAPTURA_OFFLINE}</AlertTitle>
           <AlertDescription className="flex flex-wrap items-center gap-3">
             <span>{queueMessage}</span>
             {needsFamilyRefresh ? <Button type="button" variant="outline" size="sm" onClick={() => void retryFamilyRefresh()} disabled={isRefreshingFamilies}>
-              {isRefreshingFamilies ? "Actualizando padrón…" : "Reintentar actualización"}
+              {isRefreshingFamilies ? FAMILY_UI_TEXT.ACTUALIZANDO_PADRON : FAMILY_UI_TEXT.REINTENTAR_ACTUALIZACION}
             </Button> : null}
           </AlertDescription>
         </Alert>
@@ -966,73 +973,72 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       <div className="flex flex-col gap-2 sm:flex-row">
         <div className="relative min-w-0 flex-1">
           <HugeiconsIcon icon={Search01Icon} strokeWidth={1.8} className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-muted-foreground" />
-          <Input aria-label="Buscar familias" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por persona, DNI, barrio o domicilio..." className="pl-11" />
+          <Input aria-label={FAMILY_UI_TEXT.BUSCAR_FAMILIAS} type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={FAMILY_UI_TEXT.BUSCAR_POR_PERSONA_DNI_BARRIO_O_DOMICILIO} className="pl-11" />
         </div>
         {canWrite ? <Sheet open={isFormOpen} onOpenChange={(open) => { if (open) setIsFormOpen(true); else closeForm(); }}>
           <SheetTrigger asChild>
-            <Button aria-label="Nueva familia" className="w-full sm:w-auto">
+            <Button aria-label={FAMILY_UI_TEXT.NUEVA_FAMILIA} className="w-full sm:w-auto">
               <HugeiconsIcon icon={UserAdd01Icon} strokeWidth={1.8} />
-              Nueva familia
-            </Button>
+              {FAMILY_UI_TEXT.NUEVA_FAMILIA}</Button>
           </SheetTrigger>
           <SheetContent side="bottom" className="mx-auto max-h-[92dvh] max-w-3xl overflow-y-auto rounded-t-3xl">
             <SheetHeader className="pr-14">
-              <SheetTitle className="font-display text-xl font-semibold">{editingOperation ? "Corregir borrador familiar" : "Registrar grupo familiar"}</SheetTitle>
-              <SheetDescription>La ficha queda guardada por esta cuenta y se sincroniza al recuperar conexión.</SheetDescription>
+              <SheetTitle className="font-display text-xl font-semibold">{editingOperation ? FAMILY_UI_TEXT.CORREGIR_BORRADOR_FAMILIAR : FAMILY_UI_TEXT.REGISTRAR_GRUPO_FAMILIAR}</SheetTitle>
+              <SheetDescription>{FAMILY_UI_TEXT.LA_FICHA_QUEDA_GUARDADA_POR_ESTA_CUENTA_Y_SE_SINCRONIZA_AL_RECUPERAR_CON}</SheetDescription>
             </SheetHeader>
             <form key={editingOperation?.operationId ?? "new-family"} className="px-6 pb-8" onSubmit={submitFamily}>
               <FieldGroup className="gap-4">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field>
-                    <FieldLabel htmlFor="family-name">Nombre del grupo familiar *</FieldLabel>
-                    <Input id="family-name" name="name" defaultValue={editingPayload?.name ?? ""} placeholder="Ej. Familia López" required aria-invalid={Boolean(formErrors.name?.length)} />
+                    <FieldLabel htmlFor="family-name">{FAMILY_UI_TEXT.NOMBRE_DEL_GRUPO_FAMILIAR}</FieldLabel>
+                    <Input id="family-name" name="name" defaultValue={editingPayload?.name ?? ""} placeholder={FAMILY_UI_TEXT.EJ_FAMILIA_LOPEZ} required aria-invalid={Boolean(formErrors.name?.length)} />
                     {formErrors.name?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
                   </Field>
                   <Field>
-                    <FieldLabel htmlFor="family-neighborhood">Barrio *</FieldLabel>
+                    <FieldLabel htmlFor="family-neighborhood">{FAMILY_UI_TEXT.BARRIO_2}</FieldLabel>
                     <Select name="neighborhood" value={selectedNeighborhood} onValueChange={setSelectedNeighborhood} required>
-                      <SelectTrigger id="family-neighborhood" className="w-full"><SelectValue placeholder="Seleccionar barrio" /></SelectTrigger>
+                      <SelectTrigger id="family-neighborhood" className="w-full"><SelectValue placeholder={FAMILY_UI_TEXT.SELECCIONAR_BARRIO} /></SelectTrigger>
                       <SelectContent><SelectGroup>{FAMILY_NEIGHBORHOODS.map((neighborhood) => <SelectItem key={neighborhood} value={neighborhood}>{neighborhood}</SelectItem>)}</SelectGroup></SelectContent>
                     </Select>
                     {formErrors.neighborhood?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
                   </Field>
                 </div>
                 <Field>
-                  <FieldLabel htmlFor="family-address">Domicilio *</FieldLabel>
-                  <Input id="family-address" name="address" defaultValue={editingPayload?.address ?? ""} placeholder="Calle, altura, manzana y lote" required aria-invalid={Boolean(formErrors.address?.length)} />
+                  <FieldLabel htmlFor="family-address">{FAMILY_UI_TEXT.DOMICILIO_2}</FieldLabel>
+                  <Input id="family-address" name="address" defaultValue={editingPayload?.address ?? ""} placeholder={FAMILY_UI_TEXT.CALLE_ALTURA_MANZANA_Y_LOTE} required aria-invalid={Boolean(formErrors.address?.length)} />
                   {formErrors.address?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
                 </Field>
-                <div className="space-y-2"><p className="text-sm font-medium">Contacto del grupo *</p><p className="text-sm text-muted-foreground">Completá al menos un teléfono argentino o un email válido.</p></div>
+                <div className="space-y-2"><p className="text-sm font-medium">{FAMILY_UI_TEXT.CONTACTO_DEL_GRUPO_2}</p><p className="text-sm text-muted-foreground">{FAMILY_UI_TEXT.COMPLETA_AL_MENOS_UN_TELEFONO_ARGENTINO_O_UN_EMAIL_VALIDO}</p></div>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field><FieldLabel htmlFor="family-phone">Teléfono argentino de contacto</FieldLabel><Input id="family-phone" name="contactPhone" type="tel" defaultValue={editingPayload?.contactPhone ?? ""} placeholder="381 555 0142 o +54 9 381 555 0142" aria-invalid={Boolean(formErrors.contactPhone?.length)} /><FieldDescription>Usá característica y abonado (10 dígitos); podés agregar +54 y separadores.</FieldDescription>{formErrors.contactPhone?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-                  <Field><FieldLabel htmlFor="family-email">Email de contacto</FieldLabel><Input id="family-email" name="contactEmail" type="email" defaultValue={editingPayload?.contactEmail ?? ""} placeholder="nombre@correo.com" aria-invalid={Boolean(formErrors.contactEmail?.length)} />{formErrors.contactEmail?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                  <Field><FieldLabel htmlFor="family-phone">{FAMILY_UI_TEXT.TELEFONO_ARGENTINO_DE_CONTACTO}</FieldLabel><Input id="family-phone" name="contactPhone" type="tel" defaultValue={editingPayload?.contactPhone ?? ""} placeholder={FAMILY_UI_TEXT.TEXT_381_555_0142_O_54_9_381_555_0142} aria-invalid={Boolean(formErrors.contactPhone?.length)} /><FieldDescription>{FAMILY_UI_TEXT.USA_CARACTERISTICA_Y_ABONADO_10_DIGITOS_PODES_AGREGAR_54_Y_SEPARADORES}</FieldDescription>{formErrors.contactPhone?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                  <Field><FieldLabel htmlFor="family-email">{FAMILY_UI_TEXT.EMAIL_DE_CONTACTO}</FieldLabel><Input id="family-email" name="contactEmail" type="email" defaultValue={editingPayload?.contactEmail ?? ""} placeholder={FAMILY_UI_TEXT.NOMBRE_CORREO_COM} aria-invalid={Boolean(formErrors.contactEmail?.length)} />{formErrors.contactEmail?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-4">
-                  <div><h3 className="font-semibold">Personas integrantes</h3><p className="text-xs text-muted-foreground">Registrá cada persona una sola vez en el padrón.</p></div>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setMembers((currentMembers) => [...currentMembers, createEmptyMember()])} disabled={members.length >= 20}>Agregar integrante</Button>
+                  <div><h3 className="font-semibold">{FAMILY_UI_TEXT.PERSONAS_INTEGRANTES}</h3><p className="text-xs text-muted-foreground">{FAMILY_UI_TEXT.REGISTRA_CADA_PERSONA_UNA_SOLA_VEZ_EN_EL_PADRON}</p></div>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setMembers((currentMembers) => [...currentMembers, createEmptyMember()])} disabled={members.length >= 20}>{FAMILY_UI_TEXT.AGREGAR_INTEGRANTE}</Button>
                 </div>
                 <Field>
-                  <FieldLabel htmlFor="family-reference">Persona referente *</FieldLabel>
+                  <FieldLabel htmlFor="family-reference">{FAMILY_UI_TEXT.PERSONA_REFERENTE}</FieldLabel>
                   <Select value={referenceMemberId} onValueChange={setReferenceMemberId} required>
-                    <SelectTrigger id="family-reference" className="w-full"><SelectValue placeholder="Seleccionar referente" /></SelectTrigger>
-                    <SelectContent>{members.map((member, index) => <SelectItem key={member.localId} value={member.localId}>{member.firstName || member.lastName ? `${member.firstName} ${member.lastName}`.trim() : `Integrante ${index + 1}`}</SelectItem>)}</SelectContent>
+                    <SelectTrigger id="family-reference" className="w-full"><SelectValue placeholder={FAMILY_UI_TEXT.SELECCIONAR_REFERENTE} /></SelectTrigger>
+                    <SelectContent>{members.map((member, index) => <SelectItem key={member.localId} value={member.localId}>{member.firstName || member.lastName ? `${member.firstName} ${member.lastName}`.trim() : FAMILY_UI_TEXT.MEMBER_FALLBACK(index + 1)}</SelectItem>)}</SelectContent>
                   </Select>
                   {formErrors.referenceMemberIndex?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}
                 </Field>
                 {members.map((member, index) => (
                   <Card key={member.localId} size="sm">
                     <CardContent className="space-y-4">
-                      <div className="flex items-center justify-between gap-3"><h4 className="font-semibold">Integrante {index + 1}</h4>{members.length > 1 ? <Button type="button" variant="ghost" size="sm" onClick={() => { setMembers((currentMembers) => currentMembers.filter((currentMember) => currentMember.localId !== member.localId)); if (referenceMemberId === member.localId) setReferenceMemberId(members.find((currentMember) => currentMember.localId !== member.localId)?.localId ?? ""); }}>Quitar</Button> : null}</div>
+                      <div className="flex items-center justify-between gap-3"><h4 className="font-semibold">{FAMILY_UI_TEXT.INTEGRANTE}{index + 1}</h4>{members.length > 1 ? <Button type="button" variant="ghost" size="sm" onClick={() => { setMembers((currentMembers) => currentMembers.filter((currentMember) => currentMember.localId !== member.localId)); if (referenceMemberId === member.localId) setReferenceMemberId(members.find((currentMember) => currentMember.localId !== member.localId)?.localId ?? ""); }}>{FAMILY_UI_TEXT.QUITAR}</Button> : null}</div>
                       <div className="grid gap-3 sm:grid-cols-2">
-                        <Field><FieldLabel htmlFor={`member-first-${member.localId}`}>Nombre *</FieldLabel><Input id={`member-first-${member.localId}`} value={member.firstName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, firstName: event.target.value }))} required aria-invalid={Boolean(formErrors[`members.${index}.firstName`]?.length)} />{formErrors[`members.${index}.firstName`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-                        <Field><FieldLabel htmlFor={`member-last-${member.localId}`}>Apellido *</FieldLabel><Input id={`member-last-${member.localId}`} value={member.lastName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, lastName: event.target.value }))} required aria-invalid={Boolean(formErrors[`members.${index}.lastName`]?.length)} />{formErrors[`members.${index}.lastName`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-                        <Field><FieldLabel htmlFor={`member-dni-${member.localId}`}>DNI{editingOperation ? "" : " *"}</FieldLabel><Input id={`member-dni-${member.localId}`} inputMode="numeric" value={member.dni ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, dni: event.target.value.replace(/\D/g, "").slice(0, 8) }))} aria-invalid={Boolean(formErrors[`members.${index}.dni`]?.length)} aria-required={!editingOperation} /><FieldDescription>{editingOperation ? "Este borrador anterior puede conservar integrantes sin DNI." : "Ingresá los 7 u 8 números del DNI."}</FieldDescription>{formErrors[`members.${index}.dni`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-                        <Field><FieldLabel htmlFor={`member-phone-${member.localId}`}>Teléfono</FieldLabel><Input id={`member-phone-${member.localId}`} type="tel" value={member.phone ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, phone: event.target.value }))} /></Field>
-                        <Field><FieldLabel htmlFor={`member-email-${member.localId}`}>Email</FieldLabel><Input id={`member-email-${member.localId}`} type="email" value={member.email ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, email: event.target.value }))} aria-invalid={Boolean(formErrors[`members.${index}.email`]?.length)} />{formErrors[`members.${index}.email`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
-                        <Field><FieldLabel htmlFor={`member-relationship-${member.localId}`}>Vínculo *</FieldLabel><Select value={member.relationship} onValueChange={(relationship) => updateMember(member.localId, (currentMember) => ({ ...currentMember, relationship }))}><SelectTrigger id={`member-relationship-${member.localId}`} className="w-full"><SelectValue /></SelectTrigger><SelectContent>{FAMILY_MEMBER_RELATIONSHIPS.map((relationship) => <SelectItem key={relationship} value={relationship}>{relationship}</SelectItem>)}</SelectContent></Select></Field>
+                        <Field><FieldLabel htmlFor={`member-first-${member.localId}`}>{FAMILY_UI_TEXT.NOMBRE}</FieldLabel><Input id={`member-first-${member.localId}`} value={member.firstName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, firstName: event.target.value }))} required aria-invalid={Boolean(formErrors[`members.${index}.firstName`]?.length)} />{formErrors[`members.${index}.firstName`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                        <Field><FieldLabel htmlFor={`member-last-${member.localId}`}>{FAMILY_UI_TEXT.APELLIDO}</FieldLabel><Input id={`member-last-${member.localId}`} value={member.lastName} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, lastName: event.target.value }))} required aria-invalid={Boolean(formErrors[`members.${index}.lastName`]?.length)} />{formErrors[`members.${index}.lastName`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                        <Field><FieldLabel htmlFor={`member-dni-${member.localId}`}>{FAMILY_DOCUMENT_LABELS.DNI}{editingOperation ? "" : " *"}</FieldLabel><Input id={`member-dni-${member.localId}`} inputMode="numeric" value={member.dni ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, dni: event.target.value.replace(/\D/g, "").slice(0, 8) }))} aria-invalid={Boolean(formErrors[`members.${index}.dni`]?.length)} aria-required={!editingOperation} /><FieldDescription>{editingOperation ? FAMILY_UI_TEXT.ESTE_BORRADOR_ANTERIOR_PUEDE_CONSERVAR_INTEGRANTES_SIN_DNI : FAMILY_UI_TEXT.INGRESA_LOS_7_U_8_NUMEROS_DEL_DNI}</FieldDescription>{formErrors[`members.${index}.dni`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                        <Field><FieldLabel htmlFor={`member-phone-${member.localId}`}>{FAMILY_UI_TEXT.TELEFONO}</FieldLabel><Input id={`member-phone-${member.localId}`} type="tel" value={member.phone ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, phone: event.target.value }))} /></Field>
+                        <Field><FieldLabel htmlFor={`member-email-${member.localId}`}>{APPLICATION_UI_TEXT.EMAIL}</FieldLabel><Input id={`member-email-${member.localId}`} type="email" value={member.email ?? ""} onChange={(event) => updateMember(member.localId, (currentMember) => ({ ...currentMember, email: event.target.value }))} aria-invalid={Boolean(formErrors[`members.${index}.email`]?.length)} />{formErrors[`members.${index}.email`]?.map((message) => <FieldDescription key={message} className="text-destructive">{message}</FieldDescription>)}</Field>
+                        <Field><FieldLabel htmlFor={`member-relationship-${member.localId}`}>{FAMILY_UI_TEXT.VINCULO}</FieldLabel><Select value={member.relationship} onValueChange={(relationship) => updateMember(member.localId, (currentMember) => ({ ...currentMember, relationship }))}><SelectTrigger id={`member-relationship-${member.localId}`} className="w-full"><SelectValue /></SelectTrigger><SelectContent>{FAMILY_MEMBER_RELATIONSHIPS.map((relationship) => <SelectItem key={relationship} value={relationship}>{relationship}</SelectItem>)}</SelectContent></Select></Field>
                       </div>
                       <fieldset className="space-y-2">
-                        <legend className="text-sm font-medium">Documentación faltante</legend>
+                        <legend className="text-sm font-medium">{FAMILY_UI_TEXT.DOCUMENTACION_FALTANTE}</legend>
                         <div className="grid gap-2 sm:grid-cols-2">
                           {FAMILY_DOCUMENT_OPTIONS.map((document) => {
                             const isMissing = member.missingDocuments.includes(document.value);
@@ -1044,21 +1050,21 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
                   </Card>
                 ))}
               </FieldGroup>
-              {formMessage ? <Alert variant="destructive" className="mt-5"><AlertTitle>No se pudo guardar</AlertTitle><AlertDescription>{formMessage}</AlertDescription></Alert> : null}
-              <div className="mt-6 flex flex-col-reverse justify-end gap-2 sm:flex-row"><SheetClose asChild><Button variant="outline" type="button">Cancelar</Button></SheetClose><Button type="submit" disabled={isSaving}>{submitLabel}</Button></div>
+              {formMessage ? <Alert variant="destructive" className="mt-5"><AlertTitle>{FAMILY_UI_TEXT.NO_SE_PUDO_GUARDAR}</AlertTitle><AlertDescription>{formMessage}</AlertDescription></Alert> : null}
+              <div className="mt-6 flex flex-col-reverse justify-end gap-2 sm:flex-row"><SheetClose asChild><Button variant="outline" type="button">{APPLICATION_UI_TEXT.CANCELAR}</Button></SheetClose><Button type="submit" disabled={isSaving}>{submitLabel}</Button></div>
             </form>
           </SheetContent>
         </Sheet> : null}
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Filtrar familias">
-        <Button variant={filter === "all" ? "secondary" : "outline"} size="sm" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>Todas ({allFamilies.length})</Button>
-        {neighborhoods.map((neighborhood) => <Button key={neighborhood} variant={filter === neighborhood ? "secondary" : "outline"} size="sm" aria-pressed={filter === neighborhood} onClick={() => setFilter(neighborhood)}>{neighborhood} ({allFamilies.filter((family) => family.neighborhood === neighborhood).length})</Button>)}
-        <Button variant={filter === "alerts" ? "secondary" : "outline"} size="sm" aria-pressed={filter === "alerts"} onClick={() => setFilter("alerts")}>Con alertas ({alertCount})</Button>
+      <div className="flex gap-2 overflow-x-auto pb-1" role="group" aria-label={FAMILY_UI_TEXT.FILTRAR_FAMILIAS}>
+        <Button variant={filter === "all" ? "secondary" : "outline"} size="sm" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>{FAMILY_UI_TEXT.TODAS}{allFamilies.length}{APPLICATION_UI_TEXT.TEXT_2}</Button>
+        {neighborhoods.map((neighborhood) => <Button key={neighborhood} variant={filter === neighborhood ? "secondary" : "outline"} size="sm" aria-pressed={filter === neighborhood} onClick={() => setFilter(neighborhood)}>{neighborhood} {FAMILY_UI_TEXT.TEXT}{allFamilies.filter((family) => family.neighborhood === neighborhood).length}{APPLICATION_UI_TEXT.TEXT_2}</Button>)}
+        <Button variant={filter === "alerts" ? "secondary" : "outline"} size="sm" aria-pressed={filter === "alerts"} onClick={() => setFilter("alerts")}>{FAMILY_UI_TEXT.CON_ALERTAS}{alertCount}{APPLICATION_UI_TEXT.TEXT_2}</Button>
       </div>
 
       {visibleFamilies.length ? (
-        <section aria-label="Listado de familias" className="grid gap-3 xl:grid-cols-2">
+        <section aria-label={FAMILY_UI_TEXT.LISTADO_DE_FAMILIAS} className="grid gap-3 xl:grid-cols-2">
           {visibleFamilies.map((family) => {
             const missingCount = family.members.reduce((total, member) => total + member.missingDocuments.length, 0);
             const referencePerson = family.members.find((member) => member.id === family.referencePersonId);
@@ -1092,18 +1098,18 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
                   <div className="flex items-start gap-3">
                     <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-accent text-accent-foreground"><HugeiconsIcon icon={UserMultipleIcon} strokeWidth={1.8} className="size-6" /></span>
                     <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2"><h2 className="font-display text-base font-semibold">{family.name}</h2><Badge variant={missingCount ? "warning" : "success"}>{missingCount ? `${missingCount} faltantes` : "Documentación completa"}</Badge>{offlineOperation ? <Badge variant={offlineVariant}>{offlineStatusLabel(offlineOperation)}</Badge> : null}</div>
-                      <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><HugeiconsIcon icon={Location01Icon} strokeWidth={1.8} />{family.neighborhood} · {family.address}</p>
+                      <div className="flex flex-wrap items-center gap-2"><h2 className="font-display text-base font-semibold">{family.name}</h2><Badge variant={missingCount ? "warning" : "success"}>{missingCount ? FAMILY_UI_TEXT.MISSING_DOCUMENT_COUNT(missingCount) : FAMILY_UI_TEXT.DOCUMENTACION_COMPLETA}</Badge>{offlineOperation ? <Badge variant={offlineVariant}>{offlineStatusLabel(offlineOperation)}</Badge> : null}</div>
+                      <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><HugeiconsIcon icon={Location01Icon} strokeWidth={1.8} />{family.neighborhood} {APPLICATION_UI_TEXT.TEXT}{family.address}</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted p-3 text-xs">
-                    <div><p className="font-semibold uppercase tracking-wide text-muted-foreground">Integrantes</p><p className="mt-1 font-medium">{getMemberCountLabel(family.members.length)}</p></div>
-                    <div><p className="font-semibold uppercase tracking-wide text-muted-foreground">Persona referente</p><p className="mt-1 font-medium">{referencePerson ? `${referencePerson.firstName} ${referencePerson.lastName}` : "Sin informar"}</p></div>
+                    <div><p className="font-semibold uppercase tracking-wide text-muted-foreground">{FAMILY_UI_TEXT.INTEGRANTES_2}</p><p className="mt-1 font-medium">{getMemberCountLabel(family.members.length)}</p></div>
+                    <div><p className="font-semibold uppercase tracking-wide text-muted-foreground">{FAMILY_UI_TEXT.PERSONA_REFERENTE_2}</p><p className="mt-1 font-medium">{referencePerson ? `${referencePerson.firstName} ${referencePerson.lastName}` : FAMILY_UI_TEXT.SIN_INFORMAR}</p></div>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    {family.contactPhone ? <Button variant="soft" size="sm" asChild><a href={`tel:${family.contactPhone.replace(/[^\d+]/g, "")}`}><HugeiconsIcon icon={Call02Icon} strokeWidth={1.8} data-icon="inline-start" />{family.contactPhone}</a></Button> : <span className="text-xs text-muted-foreground">Sin teléfono de contacto</span>}
-                    {operationToEdit ? <Button variant="outline" size="sm" onClick={openOfflineDraftEditor}>Corregir borrador</Button> : null}
-                    <Button size="sm" onClick={() => setSelectedFamily(family)}>Ver ficha familiar<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" /></Button>
+                    {family.contactPhone ? <Button variant="soft" size="sm" asChild><a href={`tel:${family.contactPhone.replace(/[^\d+]/g, "")}`}><HugeiconsIcon icon={Call02Icon} strokeWidth={1.8} data-icon="inline-start" />{family.contactPhone}</a></Button> : <span className="text-xs text-muted-foreground">{FAMILY_UI_TEXT.SIN_TELEFONO_DE_CONTACTO}</span>}
+                    {operationToEdit ? <Button variant="outline" size="sm" onClick={openOfflineDraftEditor}>{FAMILY_UI_TEXT.CORREGIR_BORRADOR}</Button> : null}
+                    <Button size="sm" onClick={() => setSelectedFamily(family)}>{FAMILY_UI_TEXT.VER_FICHA_FAMILIAR}<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" /></Button>
                   </div>
                   {offlineOperation?.message ? <p role="status" className="text-sm text-muted-foreground">{offlineOperation.message}</p> : null}
                 </CardContent>
@@ -1112,13 +1118,13 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
           })}
         </section>
       ) : (
-        <Card><CardContent className="py-10 text-center"><h2 className="font-semibold">{allFamilies.length ? "No hay resultados" : "Todavía no hay familias registradas"}</h2><p className="mt-1 text-sm text-muted-foreground">{allFamilies.length ? "Probá con otro nombre, DNI, barrio o domicilio." : "Creá la primera ficha para iniciar el padrón comunitario."}</p></CardContent></Card>
+        <Card><CardContent className="py-10 text-center"><h2 className="font-semibold">{allFamilies.length ? FAMILY_UI_TEXT.NO_HAY_RESULTADOS : FAMILY_UI_TEXT.TODAVIA_NO_HAY_FAMILIAS_REGISTRADAS}</h2><p className="mt-1 text-sm text-muted-foreground">{allFamilies.length ? FAMILY_UI_TEXT.PROBA_CON_OTRO_NOMBRE_DNI_BARRIO_O_DOMICILIO : FAMILY_UI_TEXT.CREA_LA_PRIMERA_FICHA_PARA_INICIAR_EL_PADRON_COMUNITARIO}</p></CardContent></Card>
       )}
 
       <Card variant="muted" size="sm">
         <CardContent className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-full bg-warning/15 text-warning"><HugeiconsIcon icon={CloudUploadIcon} strokeWidth={1.8} /></span><div><p className="font-semibold">{alertCount} fichas con documentación pendiente</p><p className="text-xs text-muted-foreground">Los faltantes se muestran en cada integrante.</p></div></div>
-          <Badge variant="secondary">Padrón actualizado</Badge>
+          <div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-full bg-warning/15 text-warning"><HugeiconsIcon icon={CloudUploadIcon} strokeWidth={1.8} /></span><div><p className="font-semibold">{alertCount} {FAMILY_UI_TEXT.FICHAS_CON_DOCUMENTACION_PENDIENTE}</p><p className="text-xs text-muted-foreground">{FAMILY_UI_TEXT.LOS_FALTANTES_SE_MUESTRAN_EN_CADA_INTEGRANTE}</p></div></div>
+          <Badge variant="secondary">{FAMILY_UI_TEXT.PADRON_ACTUALIZADO}</Badge>
         </CardContent>
       </Card>
 

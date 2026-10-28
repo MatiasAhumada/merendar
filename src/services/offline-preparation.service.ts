@@ -1,9 +1,14 @@
+
+
+import { HTTP_CONTENT_TYPES, HTTP_REQUEST, HTTP_RESPONSE_TYPES, HTTP_CACHE_CONTROL, HTTP_HEADERS, NO_STORE_REQUEST_HEADERS } from "@/constants/http.constant";
 import { z } from "zod";
+import { OFFLINE_PREPARATION, OFFLINE_PREPARATION_MESSAGES, type OfflinePreparedRoute } from "@/constants/offline.constant";
+import { API_ROUTES, ROUTES } from "@/constants/routes.constant";
+import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
 import axios from "axios";
-import { OFFLINE_PREPARATION, type OfflinePreparedRoute } from "@/constants/offline.constant";
+
 import clientAxios from "@/utils/clientAxios.util";
 import type { JsonValue } from "@/types/json-value";
-import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
 
 const offlineSnapshotSchema = z.object({
   schemaVersion: z.literal(OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION),
@@ -55,8 +60,8 @@ const offlinePreparedDocumentSchema = z.object({
   content: z.instanceof(Blob),
   documentType: z.enum(["merchandise", "rendition", "beneficiary-sheet", "beneficiary-sheet-local"]).optional(),
 });
-const merchandiseDocumentUrl = (documentId: string) => `/api/merchandise/documents/${encodeURIComponent(documentId)}`;
-const renditionDocumentUrl = (documentId: string) => `/api/renditions/documents/${encodeURIComponent(documentId)}`;
+const merchandiseDocumentUrl = API_ROUTES.MERCHANDISE_DOCUMENT;
+const renditionDocumentUrl = API_ROUTES.RENDITION_DOCUMENT;
 const beneficiarySheetCollectionSchema = z.object({
   sheets: z.array(z.object({
     id: z.string().min(1),
@@ -144,7 +149,7 @@ function databaseName(userId: string) {
 
 function openDatabase(userId: string): Promise<IDBDatabase> {
   if (!globalThis.indexedDB) {
-    return Promise.reject(new OfflinePreparationError("Este navegador no admite preparación offline."));
+    return Promise.reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.UNSUPPORTED_BROWSER));
   }
 
   return new Promise((resolve, reject) => {
@@ -158,8 +163,8 @@ function openDatabase(userId: string): Promise<IDBDatabase> {
       }
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(new OfflinePreparationError("No se pudo abrir la preparación offline."));
-    request.onblocked = () => reject(new OfflinePreparationError("Cerrá las otras pestañas de Merendar para actualizar la preparación offline."));
+    request.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.OPEN_FAILED));
+    request.onblocked = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.UPDATE_TABS));
   });
 }
 
@@ -172,7 +177,7 @@ function openAccountDatabase(): Promise<IDBDatabase> {
       }
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(new OfflinePreparationError("No se pudo actualizar la cuenta activa del dispositivo."));
+    request.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.ACTIVE_ACCOUNT_UPDATE_FAILED));
   });
 }
 
@@ -188,7 +193,7 @@ export async function setActiveOfflineAccount(userId: string) {
       const transaction = database.transaction(ACCOUNT_STORE, "readwrite");
       transaction.objectStore(ACCOUNT_STORE).put({ key: ACTIVE_ACCOUNT_KEY, userId });
       transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo actualizar la cuenta activa del dispositivo."));
+      transaction.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.ACTIVE_ACCOUNT_UPDATE_FAILED));
     });
   } finally {
     database.close();
@@ -209,7 +214,7 @@ export async function readActiveOfflineAccount() {
         const accountId = z.object({ userId: z.string().min(1) }).safeParse(request.result);
         resolve(accountId.success ? accountId.data.userId : null);
       };
-      request.onerror = () => reject(new OfflinePreparationError("No se pudo leer la cuenta activa del dispositivo."));
+      request.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.ACTIVE_ACCOUNT_READ_FAILED));
     });
   } finally {
     database.close();
@@ -229,7 +234,7 @@ export async function clearActiveOfflineAccount(userId: string) {
       const transaction = database.transaction(ACCOUNT_STORE, "readwrite");
       transaction.objectStore(ACCOUNT_STORE).delete(ACTIVE_ACCOUNT_KEY);
       transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo limpiar la cuenta activa del dispositivo."));
+      transaction.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.ACTIVE_ACCOUNT_CLEANUP_FAILED));
     });
   } finally {
     database.close();
@@ -241,24 +246,24 @@ async function cachePublicOfflineShellAssets() {
   const assetsToCache = new Set<string>();
 
   for (const route of OFFLINE_PREPARATION.ROUTES) {
-    const response = await fetch(route, { cache: "no-store", credentials: "same-origin", redirect: "manual" });
+    const response = await fetch(route, { cache: HTTP_CACHE_CONTROL.NO_STORE, credentials: HTTP_REQUEST.SAME_ORIGIN, redirect: HTTP_REQUEST.MANUAL_REDIRECT });
     const contentType = response.headers.get("content-type") ?? "";
-    const cacheControl = response.headers.get("cache-control") ?? "";
+    const cacheControl = response.headers.get(HTTP_HEADERS.CACHE_CONTROL) ?? "";
     const isPublicShell = response.ok
       && !response.redirected
-      && contentType.includes("text/html")
-      && !cacheControl.includes("private")
-      && !cacheControl.includes("no-store");
+      && contentType.includes(HTTP_CONTENT_TYPES.HTML)
+      && !cacheControl.includes(HTTP_CACHE_CONTROL.PRIVATE)
+      && !cacheControl.includes(HTTP_CACHE_CONTROL.NO_STORE);
 
     if (!isPublicShell) {
-      throw new OfflinePreparationError(`No se pudo preparar la ruta pública ${route} para continuar sin conexión.`);
+      throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.PUBLIC_ROUTE_PREPARATION_FAILED(route));
     }
 
     const shellHtml = await response.text();
     await cache.put(route, new Response(shellHtml, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "public, max-age=0, must-revalidate",
+        [HTTP_HEADERS.CACHE_CONTROL]: HTTP_CACHE_CONTROL.PUBLIC_REVALIDATE,
       },
     }));
 
@@ -272,7 +277,7 @@ async function cachePublicOfflineShellAssets() {
 
   for (const assetPath of assetsToCache) {
     if (assetPath.endsWith(".css")) {
-      const stylesheetResponse = await clientAxios.get<string>(assetPath, { responseType: "text", headers: { "Cache-Control": "no-store" } });
+      const stylesheetResponse = await clientAxios.get<string>(assetPath, { responseType: HTTP_RESPONSE_TYPES.TEXT, headers: NO_STORE_REQUEST_HEADERS });
       const stylesheetAssets = [...stylesheetResponse.data.matchAll(/url\(["']?([^"')]+)["']?\)/g)]
         .map((match) => match[1])
         .filter((nestedAssetPath) => nestedAssetPath.startsWith("/_next/static/"));
@@ -284,7 +289,7 @@ async function cachePublicOfflineShellAssets() {
 
   await Promise.all([...assetsToCache].map((assetPath) => clientAxios.get<ArrayBuffer>(assetPath, {
     responseType: "arraybuffer",
-    headers: { "Cache-Control": "no-store" },
+    headers: NO_STORE_REQUEST_HEADERS,
   })));
 }
 
@@ -323,14 +328,14 @@ function collectBeneficiarySheetReferences(value: JsonValue, references: Offline
   const parsedCollection = beneficiarySheetCollectionSchema.safeParse(value);
 
   if (!parsedCollection.success) {
-    throw new OfflinePreparationError("El servidor devolvió planillas con un formato que no se puede preparar.");
+    throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.INVALID_SHEETS_RESPONSE);
   }
 
   for (const sheet of parsedCollection.data.sheets) {
     references.push({
       id: sheet.id,
       originalName: `planilla-${sheet.periodId}-v${sheet.version}.pdf`,
-      url: `/api/records/sheets/${encodeURIComponent(sheet.id)}`,
+      url: API_ROUTES.RECORD_SHEET(sheet.id),
       documentType: "beneficiary-sheet",
     });
   }
@@ -343,7 +348,7 @@ function collectPreparedDocumentReferences(snapshots: OfflinePreparation["snapsh
     collectDocumentReferences(snapshot.data, documentReferences);
   }
 
-  const recordsSnapshot = snapshots["/entrega"];
+  const recordsSnapshot = snapshots[ROUTES.DELIVERY];
   if (recordsSnapshot) {
     collectBeneficiarySheetReferences(recordsSnapshot.data, documentReferences);
   }
@@ -358,16 +363,16 @@ async function downloadPreparedDocuments(snapshots: OfflinePreparation["snapshot
   let totalByteSize = 0;
 
   for (const reference of uniqueReferences) {
-    const response = await clientAxios.get<Blob>(reference.url, { responseType: "blob", headers: { "Cache-Control": "no-store" } });
+    const response = await clientAxios.get<Blob>(reference.url, { responseType: HTTP_RESPONSE_TYPES.BLOB, headers: NO_STORE_REQUEST_HEADERS });
     const content = response.data;
 
     if (content.size > OFFLINE_PREPARATION.MAX_DOCUMENT_BYTES) {
-      throw new OfflinePreparationError(`El documento ${reference.originalName} supera el tamaño permitido para preparación offline.`);
+      throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.DOCUMENT_TOO_LARGE(reference.originalName));
     }
 
     totalByteSize += content.size;
     if (totalByteSize > OFFLINE_PREPARATION.MAX_DOCUMENTS_TOTAL_BYTES) {
-      throw new OfflinePreparationError("Los documentos autorizados superan el espacio disponible para la preparación offline.");
+      throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.DOCUMENTS_OVER_CAPACITY);
     }
 
     const contentType = response.headers["content-type"];
@@ -391,7 +396,7 @@ async function ensurePreparationStorageCapacity(snapshots: OfflinePreparation["s
   const storageEstimate = await navigator.storage?.estimate();
 
   if (storageEstimate?.quota && storageEstimate.quota - (storageEstimate.usage ?? 0) < requiredBytes) {
-    throw new OfflinePreparationError("No hay espacio suficiente para guardar las vistas y documentos privados sin conexión.");
+    throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.STORAGE_CAPACITY_INSUFFICIENT);
   }
 }
 
@@ -417,12 +422,12 @@ async function savePreparation(preparation: OfflinePreparation, documents: Offli
         }
       };
       existingDocumentsRequest.onerror = () => {
-        reject(new OfflinePreparationError("No se pudieron conservar las planillas locales pendientes."));
+        reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.LOCAL_SHEETS_PRESERVATION_FAILED));
         transaction.abort();
       };
       transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo guardar la preparación offline."));
-      transaction.onabort = () => reject(new OfflinePreparationError("No se pudo guardar la preparación offline."));
+      transaction.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.SAVE_FAILED));
+      transaction.onabort = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.SAVE_FAILED));
     });
   } finally {
     database.close();
@@ -432,7 +437,7 @@ async function savePreparation(preparation: OfflinePreparation, documents: Offli
 export async function saveOfflinePreparedDocument(userId: string, document: OfflinePreparedDocument) {
   const parsedDocument = offlinePreparedDocumentSchema.safeParse(document);
   if (!parsedDocument.success || parsedDocument.data.byteSize > OFFLINE_PREPARATION.MAX_DOCUMENT_BYTES) {
-    throw new OfflinePreparationError("La planilla local no tiene un formato o tamaño permitido.");
+    throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.INVALID_LOCAL_SHEET);
   }
 
   const preparation = await readOfflinePreparation(userId);
@@ -445,11 +450,11 @@ export async function saveOfflinePreparedDocument(userId: string, document: Offl
     .filter((existingDocument) => existingDocument.id !== parsedDocument.data.id)
     .reduce((total, existingDocument) => total + existingDocument.byteSize, parsedDocument.data.byteSize);
   if (totalBytes > OFFLINE_PREPARATION.MAX_DOCUMENTS_TOTAL_BYTES) {
-    throw new OfflinePreparationError("No hay espacio suficiente para guardar el PDF en este dispositivo.");
+    throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.PDF_STORAGE_INSUFFICIENT);
   }
   const storageEstimate = await navigator.storage?.estimate();
   if (storageEstimate?.quota && storageEstimate.quota - (storageEstimate.usage ?? 0) < parsedDocument.data.byteSize + OFFLINE_PREPARATION.STORAGE_RESERVE_BYTES) {
-    throw new OfflinePreparationError("No hay espacio suficiente para guardar el PDF en este dispositivo.");
+    throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.PDF_STORAGE_INSUFFICIENT);
   }
 
   const database = await openDatabase(userId);
@@ -458,8 +463,8 @@ export async function saveOfflinePreparedDocument(userId: string, document: Offl
       const transaction = database.transaction(OFFLINE_PREPARATION.DOCUMENTS_STORE, "readwrite");
       transaction.objectStore(OFFLINE_PREPARATION.DOCUMENTS_STORE).put(parsedDocument.data);
       transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo guardar la planilla local."));
-      transaction.onabort = () => reject(new OfflinePreparationError("No se pudo guardar la planilla local."));
+      transaction.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.SAVE_LOCAL_SHEET_FAILED));
+      transaction.onabort = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.SAVE_LOCAL_SHEET_FAILED));
     });
   } finally {
     database.close();
@@ -473,8 +478,8 @@ export async function removeOfflinePreparedDocument(userId: string, documentId: 
       const transaction = database.transaction(OFFLINE_PREPARATION.DOCUMENTS_STORE, "readwrite");
       transaction.objectStore(OFFLINE_PREPARATION.DOCUMENTS_STORE).delete(documentId);
       transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo retirar el borrador local incompleto."));
-      transaction.onabort = () => reject(new OfflinePreparationError("No se pudo retirar el borrador local incompleto."));
+      transaction.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.REMOVE_INCOMPLETE_LOCAL_SHEET_FAILED));
+      transaction.onabort = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.REMOVE_INCOMPLETE_LOCAL_SHEET_FAILED));
     });
   } finally {
     database.close();
@@ -489,8 +494,8 @@ async function saveMigratedPreparation(preparation: OfflinePreparation) {
       const transaction = database.transaction(OFFLINE_PREPARATION.STORE, "readwrite");
       transaction.objectStore(OFFLINE_PREPARATION.STORE).put({ key: OFFLINE_PREPARATION.KEY, ...preparation });
       transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo actualizar el formato de la preparación offline."));
-      transaction.onabort = () => reject(new OfflinePreparationError("No se pudo actualizar el formato de la preparación offline."));
+      transaction.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.UPDATE_SCHEMA_FAILED));
+      transaction.onabort = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.UPDATE_SCHEMA_FAILED));
     });
   } finally {
     database.close();
@@ -512,7 +517,7 @@ export async function readOfflinePreparation(userId: string): Promise<OfflinePre
         .objectStore(OFFLINE_PREPARATION.STORE)
         .get(OFFLINE_PREPARATION.KEY);
       request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(new OfflinePreparationError("No se pudo leer la preparación offline."));
+      request.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.READ_FAILED));
     });
     const parsedPreparation = normalizeStoredOfflinePreparation(storedPreparation);
 
@@ -588,11 +593,11 @@ export async function updateOfflinePreparedSnapshot(userId: string, route: Offli
         snapshotUpdated = true;
       };
       request.onerror = () => {
-        reject(new OfflinePreparationError("No se pudo actualizar la vista preparada en este dispositivo."));
+        reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.UPDATE_PREPARED_VIEW_FAILED));
       };
       transaction.oncomplete = () => resolve(snapshotUpdated);
-      transaction.onerror = () => reject(new OfflinePreparationError("No se pudo actualizar la vista preparada en este dispositivo."));
-      transaction.onabort = () => reject(new OfflinePreparationError("No se pudo actualizar la vista preparada en este dispositivo."));
+      transaction.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.UPDATE_PREPARED_VIEW_FAILED));
+      transaction.onabort = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.UPDATE_PREPARED_VIEW_FAILED));
     });
   } finally {
     database.close();
@@ -612,11 +617,11 @@ export async function readOfflinePreparedDocuments(userId: string): Promise<Offl
         .objectStore(OFFLINE_PREPARATION.DOCUMENTS_STORE)
         .getAll();
       request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(new OfflinePreparationError("No se pudieron leer los documentos preparados."));
+      request.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.READ_DOCUMENTS_FAILED));
     });
     const parsedDocuments = z.array(offlinePreparedDocumentSchema).safeParse(storedDocuments);
     if (!parsedDocuments.success) {
-      throw new OfflinePreparationError("Los documentos preparados tienen un formato que esta versión no reconoce.");
+      throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.DOCUMENT_FORMAT_UNRECOGNIZED);
     }
     return parsedDocuments.data;
   } finally {
@@ -676,7 +681,7 @@ async function prepareWithBoundedRetries(
     }
   }
 
-  throw new OfflinePreparationError("No se pudo completar la preparación automática después de varios intentos.");
+  throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.RETRIES_EXHAUSTED);
 }
 
 async function coordinateOfflinePreparation(
@@ -755,48 +760,48 @@ async function prepareOfflineWorkspaceOnce(
   sessionExpiresAt: string,
 ) {
   if (!userId || !Number.isFinite(Date.parse(sessionExpiresAt)) || Date.now() >= Date.parse(sessionExpiresAt)) {
-    throw new OfflinePreparationError("La sesión venció. Conectate de nuevo para preparar el acceso offline.");
+    throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.SESSION_EXPIRED);
   }
 
   await cachePublicOfflineShellAssets();
   const capturedAt = new Date().toISOString();
   const snapshots: OfflinePreparation["snapshots"] = {
-    "/": {
+    [ROUTES.HOME]: {
       schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
       capturedAt,
       data: { authorized: false },
     },
   };
   if (capabilities.includes("dashboard.metrics.read")) {
-    const dashboardResponse = await clientAxios.get<unknown>("/api/dashboard", { headers: { "Cache-Control": "no-store" } });
+    const dashboardResponse = await clientAxios.get<unknown>(API_ROUTES.DASHBOARD, { headers: NO_STORE_REQUEST_HEADERS });
     const parsedDashboard = dashboardSummaryResponseSchema.safeParse(dashboardResponse.data);
 
     if (!parsedDashboard.success || !parsedDashboard.data.authorized) {
-      throw new OfflinePreparationError("No se pudieron validar las métricas autorizadas para el inicio.");
+      throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.DASHBOARD_METRICS_INVALID);
     }
 
-    snapshots["/"] = {
+    snapshots[ROUTES.HOME] = {
       schemaVersion: OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION,
       capturedAt,
       data: parsedDashboard.data,
     };
   }
   const routeRequests: Array<{ route: keyof typeof OFFLINE_PREPARATION.ROUTE_CAPABILITIES; endpoint: string }> = [
-    { route: "/familias", endpoint: "/api/families" },
-    { route: "/mercaderia", endpoint: "/api/merchandise" },
-    { route: "/entrega", endpoint: "/api/records?includePeriodDetails=true" },
-    { route: "/usuarios", endpoint: "/api/users" },
-    { route: "/permisos", endpoint: "/api/access-policy" },
+    { route: ROUTES.FAMILIES, endpoint: API_ROUTES.FAMILIES },
+    { route: ROUTES.GOODS, endpoint: API_ROUTES.MERCHANDISE },
+    { route: ROUTES.DELIVERY, endpoint: `${API_ROUTES.RECORDS}?includePeriodDetails=true` },
+    { route: ROUTES.USERS, endpoint: API_ROUTES.USERS },
+    { route: ROUTES.ACCESS_POLICY, endpoint: API_ROUTES.ACCESS_POLICY },
   ];
 
   for (const request of routeRequests) {
     const requiredCapabilities = OFFLINE_PREPARATION.ROUTE_CAPABILITIES[request.route];
     if (requiredCapabilities.some((capability) => capabilities.includes(capability))) {
-      const response = await clientAxios.get<unknown>(request.endpoint, { headers: { "Cache-Control": "no-store" } });
+      const response = await clientAxios.get<unknown>(request.endpoint, { headers: NO_STORE_REQUEST_HEADERS });
       const parsedSnapshot = z.json().safeParse(response.data);
 
       if (!parsedSnapshot.success) {
-        throw new OfflinePreparationError("El servidor devolvió datos que no se pudieron guardar de forma segura.");
+        throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.SNAPSHOT_INVALID);
       }
 
       snapshots[request.route] = {
@@ -832,7 +837,7 @@ export async function clearOfflinePreparation(userId: string) {
   await new Promise<void>((resolve, reject) => {
     const request = indexedDB.deleteDatabase(databaseName(userId));
     request.onsuccess = () => resolve();
-    request.onerror = () => reject(new OfflinePreparationError("No se pudo limpiar la preparación local de esta cuenta."));
-    request.onblocked = () => reject(new OfflinePreparationError("Cerrá las otras pestañas de Merendar para limpiar la preparación local."));
+    request.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.ACCOUNT_PREPARATION_CLEANUP_FAILED));
+    request.onblocked = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.ACCOUNT_CLEANUP_TABS));
   });
 }

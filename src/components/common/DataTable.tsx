@@ -1,8 +1,8 @@
 import { Fragment, ReactNode } from "react";
+import { COMMON_UI_TEXT } from "@/constants/common-ui.constant";
 import { Input } from "@/components/ui/input";
 import { Search01Icon } from "hugeicons-react";
-import { motion } from "framer-motion";
-import { useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 
 interface Column<T> {
   key: keyof T & string;
@@ -33,7 +33,7 @@ export function DataTable<T>({
   columns,
   data,
   keyExtractor,
-  emptyMessage = "No hay datos disponibles",
+  emptyMessage = COMMON_UI_TEXT.NO_HAY_DATOS_DISPONIBLES,
   loading = false,
   searchPlaceholder = "Buscar...",
   onSearch,
@@ -103,8 +103,7 @@ export function DataTable<T>({
                     >
                       <div className="flex items-center justify-center gap-3">
                         <div className="w-5 h-5 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
-                        Cargando...
-                      </div>
+                        {COMMON_UI_TEXT.CARGANDO}</div>
                     </td>
                   </tr>
                 ) : data.length === 0 ? (

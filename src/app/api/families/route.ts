@@ -1,25 +1,30 @@
+
+
+import { PRIVATE_RESPONSE_HEADERS, HTTP_CACHE_CONTROL, HTTP_HEADERS } from "@/constants/http.constant";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";
+import { FAMILY_API_MESSAGES, FAMILY_LIMITS } from "@/constants/family.constant";
 import { familyService } from "@/server/services/family.service";
 import { requireFamilyReadAccess, requireFamilyWriteAccess } from "@/server/services/family-access";
 import { isSameOriginRequest } from "@/server/services/origin.service";
-import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
 import { createFamilyRequestSchema } from "@/validations/family.validation";
+import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
+
 const searchSchema = z.object({
-  search: z.string().trim().max(100).optional(),
-  neighborhood: z.string().trim().max(100).optional(),
+  search: z.string().trim().max(FAMILY_LIMITS.SEARCH_FILTER_MAX_LENGTH).optional(),
+  neighborhood: z.string().trim().max(FAMILY_LIMITS.NEIGHBORHOOD_MAX_LENGTH).optional(),
   alerts: z.enum(["true", "false"]).optional(),
 });
-const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
+const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 
 function handleError(error: unknown, request: NextRequest) {
   const apiError = error instanceof ApiError
     ? error
-    : new ApiError({ status: 500, message: "No se pudo completar la operación con familias", isOperational: false });
+    : new ApiError({ status: 500, message: FAMILY_API_MESSAGES.OPERATION_FAILED, isOperational: false });
 
-  const response = apiErrorHandler({ error: apiError, request, fallbackMessage: "No se pudo completar la operación con familias" });
-  response.headers.set("Cache-Control", privateHeaders["Cache-Control"]);
+  const response = apiErrorHandler({ error: apiError, request, fallbackMessage: FAMILY_API_MESSAGES.OPERATION_FAILED });
+  response.headers.set(HTTP_HEADERS.CACHE_CONTROL, HTTP_CACHE_CONTROL.PRIVATE_NO_STORE);
   return response;
 }
 
@@ -33,7 +38,7 @@ export async function GET(request: NextRequest) {
     });
 
     if (!params.success) {
-      return NextResponse.json({ error: { message: "Revisá los filtros de búsqueda", details: params.error.flatten().fieldErrors } }, { status: 400, headers: privateHeaders });
+      return NextResponse.json({ error: { message: FAMILY_API_MESSAGES.SEARCH_FILTERS_INVALID, details: params.error.flatten().fieldErrors } }, { status: 400, headers: privateHeaders });
     }
 
     const families = await familyService.findAll({
@@ -51,7 +56,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     if (!isSameOriginRequest(request)) {
-      throw new ApiError({ status: 403, message: "La solicitud no pertenece a este sitio" });
+      throw new ApiError({ status: 403, message: FAMILY_API_MESSAGES.WRONG_ORIGIN });
     }
 
     const user = await requireFamilyWriteAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
@@ -60,13 +65,13 @@ export async function POST(request: NextRequest) {
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json({ error: { message: "El cuerpo de la solicitud no es válido" } }, { status: 400, headers: privateHeaders });
+      return NextResponse.json({ error: { message: FAMILY_API_MESSAGES.REQUEST_BODY_INVALID } }, { status: 400, headers: privateHeaders });
     }
 
     const parsedInput = createFamilyRequestSchema.safeParse(body);
 
     if (!parsedInput.success) {
-      return NextResponse.json({ error: { message: "Revisá los campos del formulario", details: parsedInput.error.flatten().fieldErrors } }, { status: 400, headers: privateHeaders });
+      return NextResponse.json({ error: { message: FAMILY_API_MESSAGES.FORM_FIELDS_INVALID, details: parsedInput.error.flatten().fieldErrors } }, { status: 400, headers: privateHeaders });
     }
 
     const { operationId, ...familyInput } = parsedInput.data;

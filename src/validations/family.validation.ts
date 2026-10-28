@@ -1,27 +1,28 @@
 import { FamilyDocumentType } from "@prisma/client";
+import { FAMILY_DNI_PATTERN, FAMILY_LIMITS, FAMILY_VALIDATION_MESSAGES } from "@/constants/family.constant";
 import { z } from "zod";
 
 const familyPersonSchema = z.object({
   personId: z.uuid().optional(),
   membershipId: z.uuid().optional(),
-  firstName: z.string().trim().min(1, "Ingresá el nombre").max(80),
-  lastName: z.string().trim().min(1, "Ingresá el apellido").max(80),
-  dni: z.string().trim().regex(/^\d{7,8}$/, "Ingresá un DNI de 7 u 8 números").optional(),
-  email: z.string().trim().toLowerCase().pipe(z.email("Ingresá un email válido")).optional(),
-  phone: z.string().trim().max(40).transform((phone) => phone || undefined).optional(),
-  relationship: z.string().trim().min(1).max(40),
-  missingDocuments: z.array(z.enum(FamilyDocumentType)).max(5),
+  firstName: z.string().trim().min(1, FAMILY_VALIDATION_MESSAGES.FIRST_NAME_REQUIRED).max(FAMILY_LIMITS.FIRST_NAME_MAX_LENGTH),
+  lastName: z.string().trim().min(1, FAMILY_VALIDATION_MESSAGES.LAST_NAME_REQUIRED).max(FAMILY_LIMITS.LAST_NAME_MAX_LENGTH),
+  dni: z.string().trim().regex(FAMILY_DNI_PATTERN, FAMILY_VALIDATION_MESSAGES.DNI_INVALID).optional(),
+  email: z.string().trim().toLowerCase().pipe(z.email(FAMILY_VALIDATION_MESSAGES.EMAIL_INVALID)).optional(),
+  phone: z.string().trim().max(FAMILY_LIMITS.PHONE_MAX_LENGTH).transform((phone) => phone || undefined).optional(),
+  relationship: z.string().trim().min(1).max(FAMILY_LIMITS.RELATIONSHIP_MAX_LENGTH),
+  missingDocuments: z.array(z.enum(FamilyDocumentType)).max(FAMILY_LIMITS.MAX_MISSING_DOCUMENTS),
 }).strict();
 
-const requiredDniSchema = z.string({ error: "Ingresá un DNI de 7 u 8 números" })
+const requiredDniSchema = z.string({ error: FAMILY_VALIDATION_MESSAGES.DNI_INVALID })
   .trim()
-  .regex(/^\d{7,8}$/, "Ingresá un DNI de 7 u 8 números");
+  .regex(FAMILY_DNI_PATTERN, FAMILY_VALIDATION_MESSAGES.DNI_INVALID);
 
 const familyPersonAdmissionSchema = familyPersonSchema.extend({
   dni: requiredDniSchema,
 });
 
-const argentinePhoneSchema = z.string().trim().min(1, "Ingresá un teléfono argentino válido").max(40).refine((phone) => {
+const argentinePhoneSchema = z.string().trim().min(1, FAMILY_VALIDATION_MESSAGES.PHONE_INVALID).max(FAMILY_LIMITS.PHONE_MAX_LENGTH).refine((phone) => {
   const digits = phone.replace(/\D/g, "");
   let nationalNumber = digits;
 
@@ -36,20 +37,20 @@ const argentinePhoneSchema = z.string().trim().min(1, "Ingresá un teléfono arg
   }
 
   return /^\d{10}$/.test(nationalNumber) && /^[1-368]/.test(nationalNumber);
-}, "Ingresá característica y número de abonado (10 dígitos)");
+}, FAMILY_VALIDATION_MESSAGES.PHONE_FORMAT);
 
 const familyPhoneField = z.string().trim().max(40).transform((phone) => phone || undefined).optional();
-const familyEmailField = z.string().trim().toLowerCase().pipe(z.email("Ingresá un email válido")).optional();
+const familyEmailField = z.string().trim().toLowerCase().pipe(z.email(FAMILY_VALIDATION_MESSAGES.EMAIL_INVALID)).optional();
 const newFamilyPhoneField = z.union([z.literal(""), argentinePhoneSchema]).optional().transform((phone) => phone || undefined);
 
 const familyFields = {
-  name: z.string().trim().min(2, "Ingresá el nombre del grupo familiar").max(120),
-  neighborhood: z.string().trim().min(2, "Seleccioná un barrio").max(100),
-  address: z.string().trim().min(2, "Ingresá el domicilio").max(180),
+  name: z.string().trim().min(FAMILY_LIMITS.NAME_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.NAME_REQUIRED).max(FAMILY_LIMITS.NAME_MAX_LENGTH),
+  neighborhood: z.string().trim().min(FAMILY_LIMITS.NEIGHBORHOOD_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.NEIGHBORHOOD_REQUIRED).max(FAMILY_LIMITS.NEIGHBORHOOD_MAX_LENGTH),
+  address: z.string().trim().min(FAMILY_LIMITS.ADDRESS_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.ADDRESS_REQUIRED).max(FAMILY_LIMITS.ADDRESS_MAX_LENGTH),
   contactPhone: familyPhoneField,
   contactEmail: familyEmailField,
   referenceMemberIndex: z.number().int().min(0),
-  members: z.array(familyPersonSchema).min(1, "Agregá al menos una persona").max(20),
+  members: z.array(familyPersonSchema).min(FAMILY_LIMITS.MIN_MEMBERS, FAMILY_VALIDATION_MESSAGES.MEMBER_REQUIRED).max(FAMILY_LIMITS.MAX_MEMBERS),
 };
 
 function validateFamilyMembers(
@@ -59,7 +60,7 @@ function validateFamilyMembers(
   if (family.referenceMemberIndex >= family.members.length) {
     context.addIssue({
       code: "custom",
-      message: "Elegí una persona referente del grupo",
+      message: FAMILY_VALIDATION_MESSAGES.REFERENCE_MEMBER_REQUIRED,
       path: ["referenceMemberIndex"],
     });
   }
@@ -70,7 +71,7 @@ function validateFamilyMembers(
     if (member.dni && seenDnis.has(member.dni)) {
       context.addIssue({
         code: "custom",
-        message: "El DNI está repetido en el grupo familiar",
+        message: FAMILY_VALIDATION_MESSAGES.DUPLICATE_DNI,
         path: ["members", index, "dni"],
       });
     }
@@ -93,7 +94,7 @@ function validateRequiredFamilyContact(
   if (!phoneIsValid && !emailIsValid) {
     context.addIssue({
       code: "custom",
-      message: "Ingresá un teléfono argentino válido o un email de contacto válido",
+      message: FAMILY_VALIDATION_MESSAGES.PHONE_OR_EMAIL_REQUIRED,
       path: ["contactPhone"],
     });
   }
@@ -102,20 +103,20 @@ function validateRequiredFamilyContact(
 export const newFamilyPayloadSchema = z.object({
   ...familyFields,
   contactPhone: newFamilyPhoneField,
-  members: z.array(familyPersonAdmissionSchema).min(1, "Agregá al menos una persona").max(20),
+  members: z.array(familyPersonAdmissionSchema).min(FAMILY_LIMITS.MIN_MEMBERS, FAMILY_VALIDATION_MESSAGES.MEMBER_REQUIRED).max(FAMILY_LIMITS.MAX_MEMBERS),
 }).strict().superRefine((family, context) => {
   validateFamilyMembers(family, context);
   validateRequiredFamilyContact(family, context);
 });
 
 export const familyMemberInputSchema = z.object({
-  firstName: z.string().trim().min(1, "Ingresá el nombre").max(80),
-  lastName: z.string().trim().min(1, "Ingresá el apellido").max(80),
-  dni: z.string().trim().regex(/^\d{7,8}$/, "Ingresá un DNI de 7 u 8 números").optional(),
-  email: z.string().trim().toLowerCase().pipe(z.email("Ingresá un email válido")).optional(),
-  phone: z.string().trim().max(40).transform((phone) => phone || undefined).optional(),
-  relationship: z.string().trim().min(1).max(40),
-  missingDocuments: z.array(z.enum(FamilyDocumentType)).max(5),
+  firstName: z.string().trim().min(1, FAMILY_VALIDATION_MESSAGES.FIRST_NAME_REQUIRED).max(FAMILY_LIMITS.FIRST_NAME_MAX_LENGTH),
+  lastName: z.string().trim().min(1, FAMILY_VALIDATION_MESSAGES.LAST_NAME_REQUIRED).max(FAMILY_LIMITS.LAST_NAME_MAX_LENGTH),
+  dni: z.string().trim().regex(FAMILY_DNI_PATTERN, FAMILY_VALIDATION_MESSAGES.DNI_INVALID).optional(),
+  email: z.string().trim().toLowerCase().pipe(z.email(FAMILY_VALIDATION_MESSAGES.EMAIL_INVALID)).optional(),
+  phone: z.string().trim().max(FAMILY_LIMITS.PHONE_MAX_LENGTH).transform((phone) => phone || undefined).optional(),
+  relationship: z.string().trim().min(1).max(FAMILY_LIMITS.RELATIONSHIP_MAX_LENGTH),
+  missingDocuments: z.array(z.enum(FamilyDocumentType)).max(FAMILY_LIMITS.MAX_MISSING_DOCUMENTS),
 }).strict();
 
 export const newFamilyMemberInputSchema = familyMemberInputSchema.extend({
@@ -213,7 +214,7 @@ export const familyDeactivationRequestSchema = z.object({
 export const createFamilyRequestSchema = z.object({
   ...familyFields,
   contactPhone: newFamilyPhoneField,
-  members: z.array(familyPersonAdmissionSchema).min(1, "Agregá al menos una persona").max(20),
+  members: z.array(familyPersonAdmissionSchema).min(FAMILY_LIMITS.MIN_MEMBERS, FAMILY_VALIDATION_MESSAGES.MEMBER_REQUIRED).max(FAMILY_LIMITS.MAX_MEMBERS),
   operationId: z.uuid(),
 }).strict().superRefine((family, context) => {
   validateFamilyMembers(family, context);

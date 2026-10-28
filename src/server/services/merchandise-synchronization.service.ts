@@ -1,7 +1,13 @@
+
+import { MERCHANDISE_ERROR_MESSAGES } from "@/constants/merchandise.constant";
+import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
+import { RENDITION_LIMITS } from "@/constants/rendition.constant";
+import type { PdfContentType } from "@/types/http";
+
 import type { Prisma } from "@prisma/client";
 import type { SynchronizationHandler, SubmittedSyncOperation, SyncHandlerResult } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
-import { RENDITION_LIMITS } from "@/constants/rendition.constant";
+
 import {
   merchandiseOperationPayloadSchema,
   merchandisePayloadSchema,
@@ -13,7 +19,7 @@ import {
 
 interface DocumentInput {
   originalName: string;
-  contentType: "application/pdf";
+  contentType: PdfContentType;
   contentBase64: string;
 }
 
@@ -32,15 +38,15 @@ function decodeDocument(document: DocumentInput | undefined) {
   const content = Buffer.from(document.contentBase64, "base64");
 
   if (!content.length || content.length > RENDITION_LIMITS.MAX_DOCUMENT_BYTES) {
-    throw new MerchandiseDocumentError("El comprobante debe pesar hasta 512 KiB.");
+    throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_COMPROBANTE_DEBE_PESAR_HASTA_512_KIB);
   }
 
   const header = content.subarray(0, 5).toString("ascii");
   const footer = content.subarray(Math.max(0, content.length - 1024)).toString("latin1");
-  const isPdf = document.contentType === "application/pdf" && document.originalName.toLowerCase().endsWith(".pdf") && header === "%PDF-" && footer.includes("%%EOF");
+  const isPdf = document.contentType === HTTP_CONTENT_TYPES.PDF && document.originalName.toLowerCase().endsWith(".pdf") && header === "%PDF-" && footer.includes("%%EOF");
 
   if (!isPdf) {
-    throw new MerchandiseDocumentError("El contenido no es un PDF válido. Revisá que sea un archivo PDF exportado correctamente.");
+    throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_CONTENIDO_NO_ES_UN_PDF_VALIDO_REVISA_QUE_SEA_UN_ARCHIVO_PDF_EXPORTADO_C);
   }
 
   return { content, contentType: document.contentType, byteSize: content.length, originalName: document.originalName };
@@ -225,14 +231,14 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
   const baseVersion = operation.baseVersion;
 
   if (!Number.isInteger(baseVersion)) {
-    throw new MerchandiseDocumentError("La corrección no tiene una versión base válida.");
+    throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.LA_CORRECCION_NO_TIENE_UNA_VERSION_BASE_VALIDA);
   }
 
   if (payload.kind === "period") {
     const period = await transaction.merchandisePeriod.findUnique({ where: { id: payload.id } });
 
     if (!period) {
-      throw new MerchandiseDocumentError("No encontramos el período que querés corregir.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_PERIODO_QUE_QUERES_CORREGIR);
     }
 
     if (period.version !== baseVersion) {
@@ -240,13 +246,13 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
     }
 
     if (period.status !== "VIGENTE") {
-      throw new MerchandiseDocumentError("No se puede corregir un período anulado.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_SE_PUEDE_CORREGIR_UN_PERIODO_ANULADO);
     }
 
     const duplicate = await transaction.merchandisePeriod.findFirst({ where: { id: { not: period.id }, label: payload.label, agency: payload.agency } });
 
     if (duplicate) {
-      throw new MerchandiseDocumentError("Ya existe un período con ese nombre y organismo.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.YA_EXISTE_UN_PERIODO_CON_ESE_NOMBRE_Y_ORGANISMO);
     }
 
     const updated = await transaction.merchandisePeriod.update({ where: { id: period.id }, data: { label: payload.label, agency: payload.agency, startsAt: new Date(payload.startsAt), endsAt: new Date(payload.endsAt), version: { increment: 1 } } });
@@ -257,7 +263,7 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
     const request = await transaction.merchandiseRequest.findUnique({ where: { id: payload.id }, include: { quota: true } });
 
     if (!request) {
-      throw new MerchandiseDocumentError("No encontramos la solicitud que querés corregir.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_SOLICITUD_QUE_QUERES_CORREGIR);
     }
 
     if (request.version !== baseVersion) {
@@ -265,17 +271,17 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
     }
 
     if (request.status === "CANCELADA" || request.status === "RECHAZADA") {
-      throw new MerchandiseDocumentError("No se puede corregir una solicitud cancelada o rechazada.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_SE_PUEDE_CORREGIR_UNA_SOLICITUD_CANCELADA_O_RECHAZADA);
     }
 
     if (request.quota && payload.requestedQuantity < request.quota.approvedQuantity) {
-      throw new MerchandiseDocumentError("La cantidad solicitada no puede ser menor al cupo aprobado.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.LA_CANTIDAD_SOLICITADA_NO_PUEDE_SER_MENOR_AL_CUPO_APROBADO);
     }
 
     const duplicate = await transaction.merchandiseRequest.findFirst({ where: { id: { not: request.id }, requestNumber: payload.requestNumber } });
 
     if (duplicate) {
-      throw new MerchandiseDocumentError("Ya existe una solicitud con ese número.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.YA_EXISTE_UNA_SOLICITUD_CON_ESE_NUMERO);
     }
 
     const updated = await transaction.merchandiseRequest.update({ where: { id: request.id }, data: { requestNumber: payload.requestNumber, requestedAt: new Date(payload.requestedAt), requestedQuantity: payload.requestedQuantity, notes: payload.notes, version: { increment: 1 } } });
@@ -286,7 +292,7 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
     const quota = await transaction.merchandiseQuota.findUnique({ where: { id: payload.id }, include: { request: true } });
 
     if (!quota) {
-      throw new MerchandiseDocumentError("No encontramos el cupo que querés corregir.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_CUPO_QUE_QUERES_CORREGIR);
     }
 
     if (quota.version !== baseVersion) {
@@ -294,13 +300,13 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
     }
 
     if (quota.request.status === "CANCELADA" || payload.approvedQuantity > quota.request.requestedQuantity) {
-      throw new MerchandiseDocumentError("El cupo debe mantenerse dentro de la cantidad solicitada y de una solicitud vigente.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_CUPO_DEBE_MANTENERSE_DENTRO_DE_LA_CANTIDAD_SOLICITADA_Y_DE_UNA_SOLICITU);
     }
 
     const receipts = await transaction.merchandiseRemittance.aggregate({ where: { quotaId: quota.id, status: "VIGENTE" }, _sum: { receivedQuantity: true } });
 
     if (payload.approvedQuantity < (receipts._sum.receivedQuantity ?? 0)) {
-      throw new MerchandiseDocumentError("El cupo corregido no puede ser menor a las recepciones ya registradas.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_CUPO_CORREGIDO_NO_PUEDE_SER_MENOR_A_LAS_RECEPCIONES_YA_REGISTRADAS);
     }
 
     const updated = await transaction.merchandiseQuota.update({ where: { id: quota.id }, data: { approvedQuantity: payload.approvedQuantity, approvedAt: new Date(payload.approvedAt), notes: payload.notes, version: { increment: 1 } } });
@@ -311,7 +317,7 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
     const remittance = await transaction.merchandiseRemittance.findUnique({ where: { id: payload.id }, include: { quota: true } });
 
     if (!remittance) {
-      throw new MerchandiseDocumentError("No encontramos el remito que querés corregir.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_REMITO_QUE_QUERES_CORREGIR);
     }
 
     if (remittance.version !== baseVersion) {
@@ -319,38 +325,38 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
     }
 
     if (remittance.status !== "VIGENTE") {
-      throw new MerchandiseDocumentError("No se puede corregir un remito anulado.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_SE_PUEDE_CORREGIR_UN_REMITO_ANULADO);
     }
 
     const duplicate = await transaction.merchandiseRemittance.findFirst({ where: { id: { not: remittance.id }, remittanceNumber: payload.remittanceNumber } });
 
     if (duplicate) {
-      throw new MerchandiseDocumentError("Ya existe un remito con ese número.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.YA_EXISTE_UN_REMITO_CON_ESE_NUMERO);
     }
 
     const otherReceipts = await transaction.merchandiseRemittance.aggregate({ where: { quotaId: remittance.quotaId, id: { not: remittance.id }, status: "VIGENTE" }, _sum: { receivedQuantity: true } });
 
     if ((otherReceipts._sum.receivedQuantity ?? 0) + payload.receivedQuantity > remittance.quota.approvedQuantity) {
-      throw new MerchandiseDocumentError("La cantidad corregida supera el saldo del cupo aprobado.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.LA_CANTIDAD_CORREGIDA_SUPERA_EL_SALDO_DEL_CUPO_APROBADO);
     }
 
     const updated = await transaction.merchandiseRemittance.update({ where: { id: remittance.id }, data: { remittanceNumber: payload.remittanceNumber, receivedAt: new Date(payload.receivedAt), receivedQuantity: payload.receivedQuantity, responsibleName: payload.responsibleName, notes: payload.notes, version: { increment: 1 } } });
     return { type: "synchronized", resourceVersion: resourceVersion(updated.version), result: { resourceId: updated.id, kind: "remittance" } } as const;
   }
 
-  throw new MerchandiseDocumentError("Este tipo de registro no admite correcciones.");
+  throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.ESTE_TIPO_DE_REGISTRO_NO_ADMITE_CORRECCIONES);
 }
 
 async function applyCancellation(transaction: Prisma.TransactionClient, operation: SubmittedSyncOperation, payload: Extract<MerchandiseOperationPayload, { action: "cancel" }>) {
   if (!Number.isInteger(operation.baseVersion)) {
-    throw new MerchandiseDocumentError("La anulación no tiene una versión base válida.");
+    throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.LA_ANULACION_NO_TIENE_UNA_VERSION_BASE_VALIDA);
   }
 
   if (payload.kind === "period") {
     const period = await transaction.merchandisePeriod.findUnique({ where: { id: payload.id }, include: { _count: { select: { requests: true, distributionRecords: true, beneficiarySheets: true, renditions: true } } } });
 
     if (!period) {
-      throw new MerchandiseDocumentError("No encontramos el período que querés anular.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_PERIODO_QUE_QUERES_ANULAR);
     }
 
     if (period.version !== operation.baseVersion) {
@@ -358,7 +364,7 @@ async function applyCancellation(transaction: Prisma.TransactionClient, operatio
     }
 
     if (period.status !== "VIGENTE" || Object.values(period._count).some((count) => count > 0)) {
-      throw new MerchandiseDocumentError("El período tiene operaciones o documentación vinculada y no se puede anular. Anulá cada operación aplicable primero.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_PERIODO_TIENE_OPERACIONES_O_DOCUMENTACION_VINCULADA_Y_NO_SE_PUEDE_ANULA);
     }
 
     const updated = await transaction.merchandisePeriod.update({ where: { id: period.id }, data: { status: "ANULADO", cancelledAt: new Date(), cancelledById: operation.userId, cancellationReason: payload.reason, version: { increment: 1 } } });
@@ -369,7 +375,7 @@ async function applyCancellation(transaction: Prisma.TransactionClient, operatio
     const request = await transaction.merchandiseRequest.findUnique({ where: { id: payload.id }, include: { quota: true, _count: { select: { remittances: true } } } });
 
     if (!request) {
-      throw new MerchandiseDocumentError("No encontramos la solicitud que querés anular.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_SOLICITUD_QUE_QUERES_ANULAR);
     }
 
     if (request.version !== operation.baseVersion) {
@@ -377,7 +383,7 @@ async function applyCancellation(transaction: Prisma.TransactionClient, operatio
     }
 
     if (request.status === "CANCELADA" || request.quota || request._count.remittances) {
-      throw new MerchandiseDocumentError("La solicitud tiene cupo o remitos vinculados y no se puede anular. La documentación se conserva; primero resolvé las operaciones dependientes.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.LA_SOLICITUD_TIENE_CUPO_O_REMITOS_VINCULADOS_Y_NO_SE_PUEDE_ANULAR_LA_DOCUM);
     }
 
     const updated = await transaction.merchandiseRequest.update({ where: { id: request.id }, data: { status: "CANCELADA", notes: `${request.notes ? `${request.notes}\n` : ""}Anulada: ${payload.reason}`, version: { increment: 1 } } });
@@ -388,7 +394,7 @@ async function applyCancellation(transaction: Prisma.TransactionClient, operatio
     const remittance = await transaction.merchandiseRemittance.findUnique({ where: { id: payload.id } });
 
     if (!remittance) {
-      throw new MerchandiseDocumentError("No encontramos el remito que querés anular.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_REMITO_QUE_QUERES_ANULAR);
     }
 
     if (remittance.version !== operation.baseVersion) {
@@ -396,14 +402,14 @@ async function applyCancellation(transaction: Prisma.TransactionClient, operatio
     }
 
     if (remittance.status !== "VIGENTE") {
-      throw new MerchandiseDocumentError("El remito ya está anulado.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_REMITO_YA_ESTA_ANULADO);
     }
 
     const updated = await transaction.merchandiseRemittance.update({ where: { id: remittance.id }, data: { status: "ANULADO", cancelledAt: new Date(), cancelledById: operation.userId, cancellationReason: payload.reason, version: { increment: 1 } } });
     return { type: "synchronized", resourceVersion: resourceVersion(updated.version), result: { resourceId: updated.id, kind: "remittance", status: "ANULADO" } } as const;
   }
 
-  throw new MerchandiseDocumentError("Este tipo de registro no admite anulaciones.");
+  throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.ESTE_TIPO_DE_REGISTRO_NO_ADMITE_ANULACIONES);
 }
 
 async function applyPayload(transaction: Prisma.TransactionClient, operation: SubmittedSyncOperation, payload: MerchandisePayload) {
@@ -432,31 +438,31 @@ export const merchandiseSynchronizationHandler: SynchronizationHandler = {
       try {
         rawPayload = JSON.parse(rawPayload);
       } catch {
-        throw new MerchandiseDocumentError("Revisá los datos del cambio pendiente de mercadería.");
+        throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.REVISA_LOS_DATOS_DEL_CAMBIO_PENDIENTE_DE_MERCADERIA);
       }
     }
 
     const parsedPayload = merchandiseOperationPayloadSchema.safeParse(rawPayload);
 
     if (!parsedPayload.success) {
-      throw new MerchandiseDocumentError("Revisá los datos del cambio pendiente de mercadería.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.REVISA_LOS_DATOS_DEL_CAMBIO_PENDIENTE_DE_MERCADERIA);
     }
 
     const payload = parsedPayload.data;
 
     if (operation.resourceId !== payload.id) {
-      throw new MerchandiseDocumentError("El identificador del borrador no coincide con su contenido.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_IDENTIFICADOR_DEL_BORRADOR_NO_COINCIDE_CON_SU_CONTENIDO);
     }
 
     if (operation.operation === "create") {
       if (!merchandisePayloadSchema.safeParse(payload).success || operation.baseVersion !== null) {
-        throw new MerchandiseDocumentError("El alta de mercadería no tiene una versión base válida.");
+        throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_ALTA_DE_MERCADERIA_NO_TIENE_UNA_VERSION_BASE_VALIDA);
       }
 
       const parsedCreatePayload = merchandisePayloadSchema.safeParse(payload);
 
       if (!parsedCreatePayload.success) {
-        throw new MerchandiseDocumentError("Revisá los datos del alta antes de sincronizar.");
+        throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.REVISA_LOS_DATOS_DEL_ALTA_ANTES_DE_SINCRONIZAR);
       }
 
       return applyPayload(transaction, operation, parsedCreatePayload.data);
@@ -466,7 +472,7 @@ export const merchandiseSynchronizationHandler: SynchronizationHandler = {
       const parsedUpdate = merchandiseUpdatePayloadSchema.safeParse(payload);
 
       if (!parsedUpdate.success) {
-        throw new MerchandiseDocumentError("Revisá los datos de la corrección antes de sincronizar.");
+        throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.REVISA_LOS_DATOS_DE_LA_CORRECCION_ANTES_DE_SINCRONIZAR);
       }
 
       return applyUpdate(transaction, operation, parsedUpdate.data);
@@ -475,7 +481,7 @@ export const merchandiseSynchronizationHandler: SynchronizationHandler = {
     const cancellation = merchandiseOperationPayloadSchema.safeParse(payload);
 
     if (!cancellation.success || !("action" in cancellation.data)) {
-      throw new MerchandiseDocumentError("Revisá los datos de la anulación antes de sincronizar.");
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.REVISA_LOS_DATOS_DE_LA_ANULACION_ANTES_DE_SINCRONIZAR);
     }
 
     return applyCancellation(transaction, operation, cancellation.data);

@@ -1,14 +1,18 @@
 "use client";
 
+import { NO_STORE_REQUEST_HEADERS } from "@/constants/http.constant";
+import { APPLICATION_ERROR_MESSAGES } from "@/constants/error-messages.constant";
+import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
+import { API_ROUTES } from "@/constants/routes.constant";
 import { useEffect, useState } from "react";
-import { UserRole } from "@prisma/client";
-import axios from "axios";
 import { z } from "zod";
 import { AppSessionContext, type AppSessionContextValue } from "@/components/shared/AppSessionContext";
 import { AppShell } from "@/components/shared/AppShell";
-import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
+import { USER_ROLE_LABELS, USER_ROLE_OPTIONS } from "@/constants/user-role.constant";
 import { readActiveOfflineAccount, readOfflinePreparation, setActiveOfflineAccount } from "@/services/offline-preparation.service";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import axios from "axios";
+
 import clientAxios from "@/utils/clientAxios.util";
 import type { AuthenticatedUser } from "@/server/services/auth.service";
 
@@ -18,7 +22,7 @@ const sessionResponseSchema = z.object({
     name: z.string().min(1),
     email: z.string().nullable(),
     username: z.string().nullable(),
-    role: z.nativeEnum(UserRole),
+    role: z.enum(USER_ROLE_OPTIONS),
   }),
   expiresAt: z.iso.datetime(),
   capabilities: z.array(z.string()),
@@ -40,7 +44,7 @@ async function readLocalAppSession(): Promise<AppSessionContextValue> {
   }
 
   const roleEntry = Object.entries(USER_ROLE_LABELS).find(([, label]) => label === preparation.roleLabel);
-  const role = z.nativeEnum(UserRole).safeParse(roleEntry?.[0]);
+  const role = z.enum(USER_ROLE_OPTIONS).safeParse(roleEntry?.[0]);
   if (!role.success) {
     return { ready: true, user: null, sessionExpiresAt: null, capabilities: [] };
   }
@@ -89,10 +93,10 @@ export function AuthenticatedApplication({ children }: Readonly<{ children: Reac
       }
 
       try {
-        const response = await clientAxios.get<unknown>("/api/session", { headers: { "Cache-Control": "no-store" } });
+        const response = await clientAxios.get<unknown>(API_ROUTES.AUTH.SESSION, { headers: NO_STORE_REQUEST_HEADERS });
         const parsedResponse = sessionResponseSchema.safeParse(response.data);
         if (!parsedResponse.success) {
-          throw new Error("La sesión devolvió un perfil que esta versión de Merendar no reconoce.");
+          throw new Error(APPLICATION_ERROR_MESSAGES.LA_SESION_DEVOLVIO_UN_PERFIL_QUE_ESTA_VERSION_DE_MERENDAR_NO_RECONOCE);
         }
 
         await setActiveOfflineAccount(parsedResponse.data.user.id);
@@ -132,7 +136,7 @@ export function AuthenticatedApplication({ children }: Readonly<{ children: Reac
   }, [isOnline]);
 
   if (!session.ready) {
-    return <main className="mx-auto flex min-h-screen w-full max-w-7xl items-center justify-center p-6" role="status">Comprobando la sesión y los datos preparados…</main>;
+    return <main className="mx-auto flex min-h-screen w-full max-w-7xl items-center justify-center p-6" role="status">{APPLICATION_UI_TEXT.COMPROBANDO_LA_SESION_Y_LOS_DATOS_PREPARADOS}</main>;
   }
 
   if (!session.user || !session.sessionExpiresAt) {

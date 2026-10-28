@@ -1,9 +1,10 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { COMMON_UI_TEXT } from "@/constants/common-ui.constant";
+
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Cancel01Icon } from "hugeicons-react";
-import { useReducedMotion } from "framer-motion";
 import type { Variants } from "framer-motion";
 
 interface GenericModalProps {
@@ -191,7 +192,7 @@ export function ConfirmModal({
             {cancelText}
           </Button>
           <Button variant={variant} onClick={handleConfirm} disabled={loading}>
-            {loading ? "Procesando..." : confirmText}
+            {loading ? COMMON_UI_TEXT.PROCESANDO : confirmText}
           </Button>
         </>
       }

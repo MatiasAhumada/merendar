@@ -1,5 +1,5 @@
+import { API_ROUTES } from "@/constants/routes.constant";
 import clientAxios from "@/utils/clientAxios.util";
-import { API_ROUTES } from "@/constants/routes";
 
 export interface CreateUserDto {
   name: string;

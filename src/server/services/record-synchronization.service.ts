@@ -1,8 +1,12 @@
+
+
+import { OFFLINE_OPERATION_MESSAGES, SYNC_SERVER_MESSAGES } from "@/constants/offline.constant";
+import { DELIVERY_ERROR_MESSAGES } from "@/constants/delivery.constant";
 import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/validations/record.validation";
 import { Prisma, type Prisma as PrismaTypes } from "@prisma/client";
+import { z } from "zod";
 import type { SynchronizationHandler } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
-import { z } from "zod";
 
 export class RecordSynchronizationError extends Error {
   readonly code: "period_not_found" | "beneficiary_not_in_roster" | "beneficiary_dni_missing";
@@ -36,7 +40,7 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
     const validBaseVersion = z.null().safeParse(operation.baseVersion);
 
     if (operation.operation !== "create" || !validBaseVersion.success) {
-      throw new Error("El registro solo permite altas nuevas");
+      throw new Error(DELIVERY_ERROR_MESSAGES.EL_REGISTRO_SOLO_PERMITE_ALTAS_NUEVAS);
     }
 
     const parsedSheetDraft = beneficiarySheetDraftSchema.safeParse(operation.payload);
@@ -45,7 +49,7 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
       const period = await transaction.merchandisePeriod.findUnique({ where: { id: draft.periodId }, select: { id: true } });
 
       if (!period) {
-        throw new RecordSynchronizationError("period_not_found", 404, "El período ya no está disponible. Conectate y elegí otro período antes de emitir la planilla.");
+        throw new RecordSynchronizationError("period_not_found", 404, SYNC_SERVER_MESSAGES.EL_PERIODO_YA_NO_ESTA_DISPONIBLE_CONECTATE_Y_ELEGI_OTRO_PERIODO_ANTES_DE_E);
       }
 
       const personIds = draft.beneficiaries.map((beneficiary) => beneficiary.personId);
@@ -60,13 +64,13 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
       });
 
       if (personIds.some((personId) => !memberships.some((membership) => membership.personId === personId))) {
-        throw new RecordSynchronizationError("beneficiary_not_in_roster", 400, "Una persona seleccionada ya no pertenece al padrón. Actualizá los datos antes de volver a emitir.");
+        throw new RecordSynchronizationError("beneficiary_not_in_roster", 400, SYNC_SERVER_MESSAGES.UNA_PERSONA_SELECCIONADA_YA_NO_PERTENECE_AL_PADRON_ACTUALIZA_LOS_DATOS_ANT);
       }
 
       const membershipWithoutDni = memberships.find((membership) => !/^\d{7,8}$/.test(membership.person.dni ?? ""));
       if (membershipWithoutDni) {
         const beneficiaryWithoutDni = draft.beneficiaries.find((beneficiary) => beneficiary.personId === membershipWithoutDni.personId);
-        const beneficiaryName = beneficiaryWithoutDni?.name ?? "Una persona seleccionada";
+        const beneficiaryName = beneficiaryWithoutDni?.name ?? OFFLINE_OPERATION_MESSAGES.UNA_PERSONA_SELECCIONADA;
         throw new RecordSynchronizationError("beneficiary_dni_missing", 400, `${beneficiaryName} no tiene un DNI válido registrado. Corregilo en Familias y volvé a emitir la planilla.`);
       }
 
@@ -94,7 +98,7 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
     const parsedPayload = distributionRecordPayloadSchema.safeParse(operation.payload);
 
     if (!parsedPayload.success || parsedPayload.data.id !== operation.resourceId) {
-      throw new Error("El registro no tiene un formato válido");
+      throw new Error(DELIVERY_ERROR_MESSAGES.EL_REGISTRO_NO_TIENE_UN_FORMATO_VALIDO);
     }
 
     const input = parsedPayload.data;
@@ -106,7 +110,7 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
     });
 
     if (!period || !membership) {
-      throw new RecordSynchronizationError("beneficiary_not_in_roster", 400, "El período o beneficiario ya no está disponible en el padrón.");
+      throw new RecordSynchronizationError("beneficiary_not_in_roster", 400, SYNC_SERVER_MESSAGES.EL_PERIODO_O_BENEFICIARIO_YA_NO_ESTA_DISPONIBLE_EN_EL_PADRON);
     }
 
     const duplicate = await transaction.distributionRecord.findUnique({

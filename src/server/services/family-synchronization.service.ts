@@ -1,9 +1,11 @@
-import { familyDeactivationTargetSchema, familyPayloadSchema } from "@/validations/family.validation";
-import type { SyncHandlerResult, SynchronizationHandler } from "@/interfaces/synchronization.interface";
-import { familyMemberChangeSchema } from "@/validations/family.validation";
+
+
+import { FAMILY_ERROR_MESSAGES } from "@/constants/family.constant";
+import { familyDeactivationTargetSchema, familyPayloadSchema, familyMemberChangeSchema } from "@/validations/family.validation";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { deactivateFamilyInTransaction } from "@/server/repository/family.repository";
+import type { SyncHandlerResult, SynchronizationHandler } from "@/interfaces/synchronization.interface";
 
 export class FamilyDeactivationSyncError extends Error {
   readonly code: "family_deactivation_blocked" | "family_member_deactivation_blocked";
@@ -24,7 +26,7 @@ export const familySynchronizationHandler: SynchronizationHandler = {
       const parsedTarget = familyDeactivationTargetSchema.safeParse(operation.payload);
 
       if (!baseVersion.success || !parsedTarget.success) {
-        throw new Error("La baja familiar no tiene una versión base o un destino válido");
+        throw new Error(FAMILY_ERROR_MESSAGES.LA_BAJA_FAMILIAR_NO_TIENE_UNA_VERSION_BASE_O_UN_DESTINO_VALIDO);
       }
 
       const requestHash = createHash("sha256").update(JSON.stringify({
@@ -55,22 +57,22 @@ export const familySynchronizationHandler: SynchronizationHandler = {
         return { type: "conflict", resourceVersion: currentVersion, current: { kind: "family_changed", version: currentVersion } };
       }
 
-      let message = "No encontramos esa familia para dar de baja.";
+      let message: string = FAMILY_ERROR_MESSAGES.NO_ENCONTRAMOS_ESA_FAMILIA_PARA_DAR_DE_BAJA;
 
       if (result.type === "missing-member") {
-        message = "No encontramos ese integrante en esta familia.";
+        message = FAMILY_ERROR_MESSAGES.NO_ENCONTRAMOS_ESE_INTEGRANTE_EN_ESTA_FAMILIA;
       }
 
       if (result.type === "has-records") {
-        message = "No se puede dar de baja porque la familia o el integrante aparece en entregas o planillas históricas.";
+        message = FAMILY_ERROR_MESSAGES.NO_SE_PUEDE_DAR_DE_BAJA_PORQUE_LA_FAMILIA_O_EL_INTEGRANTE_APARECE_EN_E;
       }
 
       if (result.type === "last-member") {
-        message = "No se puede dar de baja al último integrante. Primero agregá otra persona a la familia.";
+        message = FAMILY_ERROR_MESSAGES.NO_SE_PUEDE_DAR_DE_BAJA_AL_ULTIMO_INTEGRANTE_PRIMERO_AGREGA_OTRA_PERSO;
       }
 
       if (result.type === "reference-member") {
-        message = "No se puede dar de baja al referente. Primero elegí otro referente para la familia.";
+        message = FAMILY_ERROR_MESSAGES.NO_SE_PUEDE_DAR_DE_BAJA_AL_REFERENTE_PRIMERO_ELEGI_OTRO_REFERENTE_PARA;
       }
 
       let code: "family_deactivation_blocked" | "family_member_deactivation_blocked" = "family_member_deactivation_blocked";
@@ -84,13 +86,13 @@ export const familySynchronizationHandler: SynchronizationHandler = {
 
     if (operation.operation === "create") {
       if (!baseVersionValidation.success) {
-        throw new Error("El alta de familia no tiene una versión base válida");
+        throw new Error(FAMILY_ERROR_MESSAGES.EL_ALTA_DE_FAMILIA_NO_TIENE_UNA_VERSION_BASE_VALIDA);
       }
 
       const parsedPayload = familyPayloadSchema.safeParse(operation.payload);
 
       if (!parsedPayload.success) {
-        throw new Error("La operación familiar no tiene un formato válido");
+        throw new Error(FAMILY_ERROR_MESSAGES.LA_OPERACION_FAMILIAR_NO_TIENE_UN_FORMATO_VALIDO);
       }
 
       const familyInput = parsedPayload.data;
@@ -141,7 +143,7 @@ export const familySynchronizationHandler: SynchronizationHandler = {
       const referencePerson = createdPeople[familyInput.referenceMemberIndex];
 
       if (!referencePerson) {
-        throw new Error("La operación familiar no indica un referente válido");
+        throw new Error(FAMILY_ERROR_MESSAGES.LA_OPERACION_FAMILIAR_NO_INDICA_UN_REFERENTE_VALIDO);
       }
 
       const family = await transaction.family.create({
@@ -159,7 +161,7 @@ export const familySynchronizationHandler: SynchronizationHandler = {
               const person = createdPeople[index];
 
               if (!person) {
-                throw new Error("La operación familiar contiene una persona incompleta");
+                throw new Error(FAMILY_ERROR_MESSAGES.LA_OPERACION_FAMILIAR_CONTIENE_UNA_PERSONA_INCOMPLETA);
               }
 
               return {
@@ -179,13 +181,13 @@ export const familySynchronizationHandler: SynchronizationHandler = {
     }
 
     if (operation.operation !== "update" || !z.number().int().nonnegative().safeParse(operation.baseVersion).success) {
-      throw new Error("La operación familiar no está habilitada para sincronizar");
+      throw new Error(FAMILY_ERROR_MESSAGES.LA_OPERACION_FAMILIAR_NO_ESTA_HABILITADA_PARA_SINCRONIZAR);
     }
 
     const parsedChange = familyMemberChangeSchema.safeParse(operation.payload);
 
     if (!parsedChange.success) {
-      throw new Error("La operación de integrante no tiene un formato válido");
+      throw new Error(FAMILY_ERROR_MESSAGES.LA_OPERACION_DE_INTEGRANTE_NO_TIENE_UN_FORMATO_VALIDO);
     }
 
     const memberChange = parsedChange.data;

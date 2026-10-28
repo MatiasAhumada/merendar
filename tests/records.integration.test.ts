@@ -7,7 +7,7 @@ import { UserRole } from "@prisma/client";
 import { PDFDocument } from "pdf-lib";
 import { createBeneficiarySheetPdf } from "@/server/services/beneficiary-sheet.service";
 import { createLocalBeneficiarySheetPdf } from "@/services/local-beneficiary-sheet.service";
-import { BENEFICIARY_SHEET_COLUMN_HEADERS } from "@/validations/record.validation";
+import { BENEFICIARY_SHEET_COLUMN_HEADERS } from "@/constants/delivery.constant";
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";

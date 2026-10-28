@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { DASHBOARD_UI_TEXT, DASHBOARD_ACTIONS } from "@/constants/dashboard.constant";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -10,8 +10,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { DashboardSummaryPanel } from "@/components/dashboard/DashboardSummaryPanel";
 import { SessionRoute } from "@/components/shared/SessionRoute";
 import { useAppSession } from "@/components/shared/AppSessionContext";
-import { DASHBOARD_ACTIONS } from "@/constants/dashboard.constant";
 import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
+import Link from "next/link";
 
 function getInitials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part.charAt(0)).join("").toUpperCase();
@@ -28,8 +28,8 @@ export default function DashboardPage() {
         <div className="flex flex-col gap-5">
           <section className="flex items-center justify-between gap-4">
             <div className="min-w-0">
-              <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">Hola, {user.name}</h1>
-              <p className="mt-1 text-sm text-muted-foreground">Resumen de los módulos persistentes de Merendar</p>
+              <h1 className="font-display text-2xl font-bold tracking-tight sm:text-3xl">{DASHBOARD_UI_TEXT.HOLA}{user.name}</h1>
+              <p className="mt-1 text-sm text-muted-foreground">{DASHBOARD_UI_TEXT.RESUMEN_DE_LOS_MODULOS_PERSISTENTES_DE_MERENDAR}</p>
             </div>
             <div className="flex shrink-0 items-center gap-3">
               <Badge variant="secondary" className="hidden sm:inline-flex">{USER_ROLE_LABELS[user.role]}</Badge>
@@ -41,8 +41,8 @@ export default function DashboardPage() {
             <DashboardSummaryPanel userId={user.id} initialSummary={null} />
             <section id="acciones" aria-labelledby="actions-title" className="flex flex-col gap-3">
               <div className="flex items-center justify-between gap-2">
-                <h2 id="actions-title" className="font-display text-lg font-semibold">Accesos disponibles</h2>
-                <span className="text-xs text-muted-foreground">Según tu rol</span>
+                <h2 id="actions-title" className="font-display text-lg font-semibold">{DASHBOARD_UI_TEXT.ACCESOS_DISPONIBLES}</h2>
+                <span className="text-xs text-muted-foreground">{DASHBOARD_UI_TEXT.SEGUN_TU_ROL}</span>
               </div>
               {dashboardActions.length ? (
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-1">
@@ -60,15 +60,15 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <Alert variant="info">
-                  <AlertTitle>Tu cuenta todavía no tiene módulos operativos</AlertTitle>
-                  <AlertDescription>Si necesitás consultar o registrar una tarea de la organización, pedile a Presidencia que revise las capacidades habilitadas para tu rol.</AlertDescription>
+                  <AlertTitle>{DASHBOARD_UI_TEXT.TU_CUENTA_TODAVIA_NO_TIENE_MODULOS_OPERATIVOS}</AlertTitle>
+                  <AlertDescription>{DASHBOARD_UI_TEXT.SI_NECESITAS_CONSULTAR_O_REGISTRAR_UNA_TAREA_DE_LA_ORGANIZACION_PEDILE_A}</AlertDescription>
                 </Alert>
               )}
             </section>
           </div>
         </div>
       ) : (
-        <Card><CardContent className="py-6 text-sm text-muted-foreground">Preparando el inicio para esta cuenta…</CardContent></Card>
+        <Card><CardContent className="py-6 text-sm text-muted-foreground">{DASHBOARD_UI_TEXT.PREPARANDO_EL_INICIO_PARA_ESTA_CUENTA}</CardContent></Card>
       )}
     </SessionRoute>
   );

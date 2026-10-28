@@ -1,17 +1,18 @@
+import { USER_ERROR_MESSAGES } from "@/constants/user.constant";
 import { AccessCapability, UserRole } from "@prisma/client";
-import { ACCESS_CAPABILITY_KEYS } from "@/constants/access-policy.constant";
+import { ACCESS_CAPABILITY_KEYS, RESERVED_ACCESS_CAPABILITY_KEYS } from "@/constants/access-policy.constant";
 import { authService } from "@/server/services/auth.service";
 import { accessPolicyRepository } from "@/server/repository/access-policy.repository";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 
-const reservedAdministrativeCapabilities = new Set(["users.manage", "access-policy.manage"]);
+const reservedAdministrativeCapabilities = new Set<string>(RESERVED_ACCESS_CAPABILITY_KEYS);
 
 export async function getEffectiveCapabilities(role: UserRole) {
   const capabilities = await accessPolicyRepository.findEnabledCapabilities(role);
   const effectiveCapabilities = capabilities.map((capability) => ACCESS_CAPABILITY_KEYS[capability]);
 
   if (role === UserRole.PRESIDENTE) {
-    return [...effectiveCapabilities, "users.manage", "access-policy.manage"];
+    return [...effectiveCapabilities, ...RESERVED_ACCESS_CAPABILITY_KEYS];
   }
 
   return effectiveCapabilities;
@@ -55,8 +56,8 @@ export async function requireCapability(
 
 export async function requireAdministrativeCapability(
   token: string | undefined,
-  capabilityKey: "users.manage" | "access-policy.manage",
+  capabilityKey: (typeof RESERVED_ACCESS_CAPABILITY_KEYS)[number],
   forbiddenMessage: string,
 ) {
-  return requireCapability(token, capabilityKey, "Iniciá sesión para continuar", forbiddenMessage);
+  return requireCapability(token, capabilityKey, USER_ERROR_MESSAGES.INICIA_SESION_PARA_CONTINUAR, forbiddenMessage);
 }

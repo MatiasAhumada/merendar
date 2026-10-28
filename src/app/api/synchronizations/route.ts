@@ -1,11 +1,23 @@
+
+
+import { OFFLINE_OPERATION_MESSAGES } from "@/constants/offline.constant";
+import { PRIVATE_RESPONSE_HEADERS } from "@/constants/http.constant";
 import { NextRequest, NextResponse } from "next/server";
-import type { SyncResource as PrismaSyncResource } from "@prisma/client";
 import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";
 import { authService } from "@/server/services/auth.service";
 import { isSameOriginRequest } from "@/server/services/origin.service";
 import { createSynchronizationHandlers, synchronizationService } from "@/server/services/synchronization.service";
 import { familyDeactivationTargetSchema, familyMemberChangeSchema, familyPayloadSchema } from "@/validations/family.validation";
+import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
+import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/validations/record.validation";
+import { renditionSynchronizationPayloadSchema } from "@/validations/rendition.validation";
+import { RenditionDocumentError } from "@/server/services/rendition-synchronization.service";
+import { RecordSynchronizationError } from "@/server/services/record-synchronization.service";
+import { FamilyDeactivationSyncError } from "@/server/services/family-synchronization.service";
+import { hasEffectiveCapability } from "@/server/services/access-policy.service";
+import type { SyncResource as PrismaSyncResource } from "@prisma/client";
+
 import {
   SynchronizationConflictError,
   SynchronizationDependencyError,
@@ -19,13 +31,6 @@ import {
   merchandisePayloadSchema,
   merchandiseUpdatePayloadSchema,
 } from "@/validations/merchandise.validation";
-import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
-import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/validations/record.validation";
-import { renditionSynchronizationPayloadSchema } from "@/validations/rendition.validation";
-import { RenditionDocumentError } from "@/server/services/rendition-synchronization.service";
-import { RecordSynchronizationError } from "@/server/services/record-synchronization.service";
-import { FamilyDeactivationSyncError } from "@/server/services/family-synchronization.service";
-import { hasEffectiveCapability } from "@/server/services/access-policy.service";
 
 const synchronizationSchema = z.object({
   operationId: z.uuid(),
@@ -52,7 +57,7 @@ const capabilityByResource: Record<PrismaSyncResource, string> = {
   RENDITIONS: "renditions.write",
 };
 
-const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
+const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 
 function errorResponse(status: number, code: string, message: string, extra: Record<string, unknown> = {}) {
   return NextResponse.json({ error: { code, message, ...extra } }, { status, headers: privateHeaders });
@@ -60,13 +65,13 @@ function errorResponse(status: number, code: string, message: string, extra: Rec
 
 export async function POST(request: NextRequest) {
   if (!isSameOriginRequest(request)) {
-    return errorResponse(403, "invalid_origin", "La solicitud no pertenece a este sitio.");
+    return errorResponse(403, "invalid_origin", OFFLINE_OPERATION_MESSAGES.LA_SOLICITUD_NO_PERTENECE_A_ESTE_SITIO);
   }
 
   const session = await authService.getSession(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
 
   if (!session) {
-    return errorResponse(401, "session_expired", "La sesión venció. Iniciá sesión para sincronizar los cambios pendientes.");
+    return errorResponse(401, "session_expired", OFFLINE_OPERATION_MESSAGES.LA_SESION_VENCIO_INICIA_SESION_PARA_SINCRONIZAR_LOS_CAMBIOS_PENDIENTES);
   }
 
   let body: unknown;
@@ -74,17 +79,17 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return errorResponse(400, "invalid_body", "El cuerpo de la operación no es válido.");
+    return errorResponse(400, "invalid_body", OFFLINE_OPERATION_MESSAGES.EL_CUERPO_DE_LA_OPERACION_NO_ES_VALIDO);
   }
 
   const parsedOperation = synchronizationSchema.safeParse(body);
 
   if (!parsedOperation.success) {
-    return errorResponse(400, "invalid_operation", "Revisá los datos del cambio pendiente.");
+    return errorResponse(400, "invalid_operation", OFFLINE_OPERATION_MESSAGES.REVISA_LOS_DATOS_DEL_CAMBIO_PENDIENTE);
   }
 
   if (parsedOperation.data.userId !== session.user.id) {
-    return errorResponse(403, "account_changed", "El cambio pertenece a otra cuenta y no se enviará con este usuario.");
+    return errorResponse(403, "account_changed", OFFLINE_OPERATION_MESSAGES.EL_CAMBIO_PERTENECE_A_OTRA_CUENTA_Y_NO_SE_ENVIARA_CON_ESTE_USUARIO);
   }
 
   if (parsedOperation.data.resource === "families") {
@@ -92,13 +97,13 @@ export async function POST(request: NextRequest) {
       const baseVersionValidation = z.null().safeParse(parsedOperation.data.baseVersion);
 
       if (!baseVersionValidation.success) {
-        return errorResponse(400, "invalid_family_operation", "El alta de familia no tiene una versión base válida.");
+        return errorResponse(400, "invalid_family_operation", OFFLINE_OPERATION_MESSAGES.EL_ALTA_DE_FAMILIA_NO_TIENE_UNA_VERSION_BASE_VALIDA);
       }
 
       const parsedFamilyPayload = familyPayloadSchema.safeParse(parsedOperation.data.payload);
 
       if (!parsedFamilyPayload.success) {
-        return errorResponse(400, "invalid_family_payload", "Revisá los datos de la familia antes de sincronizar.", {
+        return errorResponse(400, "invalid_family_payload", OFFLINE_OPERATION_MESSAGES.REVISA_LOS_DATOS_DE_LA_FAMILIA_ANTES_DE_SINCRONIZAR, {
           details: parsedFamilyPayload.error.flatten().fieldErrors,
         });
       }
@@ -108,7 +113,7 @@ export async function POST(request: NextRequest) {
       const parsedMemberChange = familyMemberChangeSchema.safeParse(parsedOperation.data.payload);
 
       if (!parsedMemberChange.success) {
-        return errorResponse(400, "invalid_family_member_operation", "Revisá los datos del integrante antes de sincronizar.", {
+        return errorResponse(400, "invalid_family_member_operation", OFFLINE_OPERATION_MESSAGES.REVISA_LOS_DATOS_DEL_INTEGRANTE_ANTES_DE_SINCRONIZAR, {
           details: parsedMemberChange.error.flatten().fieldErrors,
         });
       }
@@ -118,12 +123,12 @@ export async function POST(request: NextRequest) {
       const parsedTarget = familyDeactivationTargetSchema.safeParse(parsedOperation.data.payload);
 
       if (!parsedTarget.success) {
-        return errorResponse(400, "invalid_family_deactivation", "Revisá el destino de la baja familiar pendiente.");
+        return errorResponse(400, "invalid_family_deactivation", OFFLINE_OPERATION_MESSAGES.REVISA_EL_DESTINO_DE_LA_BAJA_FAMILIAR_PENDIENTE);
       }
 
       parsedOperation.data.payload = parsedTarget.data;
     } else {
-      return errorResponse(400, "invalid_family_operation", "El padrón solo permite altas o cambios de integrantes.");
+      return errorResponse(400, "invalid_family_operation", OFFLINE_OPERATION_MESSAGES.EL_PADRON_SOLO_PERMITE_ALTAS_O_CAMBIOS_DE_INTEGRANTES);
     }
   }
 
@@ -138,7 +143,7 @@ export async function POST(request: NextRequest) {
       try {
         rawPayload = JSON.parse(serializedPayload.data);
       } catch {
-        return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la recepción pendiente.");
+        return errorResponse(400, "invalid_merchandise_operation", OFFLINE_OPERATION_MESSAGES.REVISA_LOS_DATOS_DE_LA_RECEPCION_PENDIENTE);
       }
     }
 
@@ -149,7 +154,7 @@ export async function POST(request: NextRequest) {
       const parsedPayload = merchandisePayloadSchema.safeParse(rawPayload);
 
       if (!parsedPayload.success) {
-        return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la recepción pendiente.");
+        return errorResponse(400, "invalid_merchandise_operation", OFFLINE_OPERATION_MESSAGES.REVISA_LOS_DATOS_DE_LA_RECEPCION_PENDIENTE);
       }
 
       normalizedPayload = parsedPayload.data;
@@ -158,7 +163,7 @@ export async function POST(request: NextRequest) {
       const parsedPayload = merchandiseUpdatePayloadSchema.safeParse(rawPayload);
 
       if (!parsedPayload.success) {
-        return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la corrección pendiente.");
+        return errorResponse(400, "invalid_merchandise_operation", OFFLINE_OPERATION_MESSAGES.REVISA_LOS_DATOS_DE_LA_CORRECCION_PENDIENTE);
       }
 
       normalizedPayload = parsedPayload.data;
@@ -167,17 +172,17 @@ export async function POST(request: NextRequest) {
       const parsedPayload = merchandiseCancellationPayloadSchema.safeParse(rawPayload);
 
       if (!parsedPayload.success) {
-        return errorResponse(400, "invalid_merchandise_operation", "Revisá los datos de la anulación pendiente.");
+        return errorResponse(400, "invalid_merchandise_operation", OFFLINE_OPERATION_MESSAGES.REVISA_LOS_DATOS_DE_LA_ANULACION_PENDIENTE);
       }
 
       normalizedPayload = parsedPayload.data;
       merchandiseId = parsedPayload.data.id;
     } else {
-      return errorResponse(400, "invalid_merchandise_operation", "El cambio de mercadería no tiene una operación o versión base válida.");
+      return errorResponse(400, "invalid_merchandise_operation", OFFLINE_OPERATION_MESSAGES.EL_CAMBIO_DE_MERCADERIA_NO_TIENE_UNA_OPERACION_O_VERSION_BASE_VALIDA);
     }
 
     if (merchandiseId !== parsedOperation.data.resourceId) {
-      return errorResponse(400, "invalid_merchandise_operation", "El identificador del borrador no coincide con los datos guardados.");
+      return errorResponse(400, "invalid_merchandise_operation", OFFLINE_OPERATION_MESSAGES.EL_IDENTIFICADOR_DEL_BORRADOR_NO_COINCIDE_CON_LOS_DATOS_GUARDADOS);
     }
 
     parsedOperation.data.payload = normalizedPayload;
@@ -193,11 +198,11 @@ export async function POST(request: NextRequest) {
     } else if (parsedSheetDraft.success && parsedSheetDraft.data.id === parsedOperation.data.resourceId) {
       parsedOperation.data.payload = parsedSheetDraft.data;
     } else {
-      return errorResponse(400, "invalid_record_operation", "Revisá el registro o la planilla local antes de sincronizar.");
+      return errorResponse(400, "invalid_record_operation", OFFLINE_OPERATION_MESSAGES.REVISA_EL_REGISTRO_O_LA_PLANILLA_LOCAL_ANTES_DE_SINCRONIZAR);
     }
 
     if (parsedOperation.data.operation !== "create" || !validBaseVersion.success) {
-      return errorResponse(400, "invalid_record_operation", "Los registros y las planillas locales solo admiten altas nuevas.");
+      return errorResponse(400, "invalid_record_operation", OFFLINE_OPERATION_MESSAGES.LOS_REGISTROS_Y_LAS_PLANILLAS_LOCALES_SOLO_ADMITEN_ALTAS_NUEVAS);
     }
   }
 
@@ -206,11 +211,11 @@ export async function POST(request: NextRequest) {
     const validBaseVersion = z.null().safeParse(parsedOperation.data.baseVersion);
 
     if (!parsedPayload.success || parsedPayload.data.id !== parsedOperation.data.resourceId) {
-      return errorResponse(400, "invalid_rendition_operation", "Revisá los archivos o la revisión pendiente antes de sincronizar.");
+      return errorResponse(400, "invalid_rendition_operation", OFFLINE_OPERATION_MESSAGES.REVISA_LOS_ARCHIVOS_O_LA_REVISION_PENDIENTE_ANTES_DE_SINCRONIZAR);
     }
 
     if (parsedOperation.data.operation !== "create" || !validBaseVersion.success) {
-      return errorResponse(400, "invalid_rendition_operation", "Los cambios de rendición solo admiten nuevas cargas o revisiones.");
+      return errorResponse(400, "invalid_rendition_operation", OFFLINE_OPERATION_MESSAGES.LOS_CAMBIOS_DE_RENDICION_SOLO_ADMITEN_NUEVAS_CARGAS_O_REVISIONES);
     }
 
     parsedOperation.data.payload = parsedPayload.data;
@@ -221,7 +226,7 @@ export async function POST(request: NextRequest) {
   const handler = handlers[resource];
 
   if (!handler) {
-    return errorResponse(501, "resource_adapter_unavailable", "La vista todavía no habilitó la sincronización de este tipo de cambio.");
+    return errorResponse(501, "resource_adapter_unavailable", OFFLINE_OPERATION_MESSAGES.LA_VISTA_TODAVIA_NO_HABILITO_LA_SINCRONIZACION_DE_ESTE_TIPO_DE_CAMBIO);
   }
 
   let requiredCapability = capabilityByResource[resource];
@@ -234,7 +239,7 @@ export async function POST(request: NextRequest) {
   const capabilityAllowed = await hasEffectiveCapability(session.user.role, requiredCapability);
 
   if (!capabilityAllowed) {
-    return errorResponse(403, "permission_revoked", "La cuenta ya no tiene permiso para sincronizar este cambio.");
+    return errorResponse(403, "permission_revoked", OFFLINE_OPERATION_MESSAGES.LA_CUENTA_YA_NO_TIENE_PERMISO_PARA_SINCRONIZAR_ESTE_CAMBIO);
   }
 
   const operation: SubmittedSyncOperation = {
@@ -283,6 +288,6 @@ export async function POST(request: NextRequest) {
       return errorResponse(409, "dependency_not_ready", error.message, { operationId: error.operationId });
     }
 
-    return errorResponse(500, "synchronization_failed", "No se pudo guardar el cambio en el servidor.");
+    return errorResponse(500, "synchronization_failed", OFFLINE_OPERATION_MESSAGES.NO_SE_PUDO_GUARDAR_EL_CAMBIO_EN_EL_SERVIDOR);
   }
 }

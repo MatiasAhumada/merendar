@@ -1,7 +1,11 @@
-import axios from "axios";
+
+
+import { OFFLINE_OPERATION_MESSAGES, SYNC_SERVER_MESSAGES } from "@/constants/offline.constant";
 import { z } from "zod";
-import type { OfflinePreparedRoute } from "@/constants/offline.constant";
 import { readOfflinePreparation, updateOfflinePreparedSnapshot } from "@/services/offline-preparation.service";
+import axios from "axios";
+
+import type { OfflinePreparedRoute } from "@/constants/offline.constant";
 
 export type OfflineDataSource = "api" | "indexeddb";
 
@@ -13,7 +17,7 @@ export interface OfflineDataResult<T> {
 }
 
 export class OfflineDataUnavailableError extends Error {
-  constructor(message = "Esta vista todavía no tiene datos preparados para esta cuenta.") {
+  constructor(message: string = OFFLINE_OPERATION_MESSAGES.ESTA_VISTA_TODAVIA_NO_TIENE_DATOS_PREPARADOS_PARA_ESTA_CUENTA) {
     super(message);
     this.name = "OfflineDataUnavailableError";
   }
@@ -33,7 +37,7 @@ export async function readOfflineSnapshot<T>(userId: string, route: OfflinePrepa
 
   const parsedSnapshot = schema.safeParse(snapshot.data);
   if (!parsedSnapshot.success) {
-    throw new OfflineDataUnavailableError("Los datos preparados no coinciden con el formato de esta vista. Conectate para actualizarlos.");
+    throw new OfflineDataUnavailableError(SYNC_SERVER_MESSAGES.LOS_DATOS_PREPARADOS_NO_COINCIDEN_CON_EL_FORMATO_DE_ESTA_VISTA_CONECTATE_P);
   }
 
   return { data: parsedSnapshot.data, source: "indexeddb", capturedAt: snapshot.capturedAt, cacheUpdated: false };

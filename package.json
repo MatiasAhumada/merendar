@@ -5,17 +5,22 @@
   "packageManager": "pnpm@10.20.0",
   "scripts": {
     "dev": "next dev -p 3022 -H 0.0.0.0",
+    "predev": "tsx scripts/generate-service-worker-config.ts",
     "build": "next build",
+    "prebuild": "tsx scripts/generate-service-worker-config.ts",
     "start": "next start -p 3022 -H 0.0.0.0",
+    "prestart": "tsx scripts/generate-service-worker-config.ts",
     "lint": "eslint",
     "test:integration": "tsx --test --test-concurrency=1 tests/*.integration.test.ts",
+    "pretest:integration": "tsx scripts/generate-service-worker-config.ts",
     "test:e2e": "playwright test",
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css}\" --ignore-path .prettierignore",
     "postinstall": "prisma generate",
     "reset": "prisma migrate reset --force && prisma db seed",
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
-    "studio": "prisma studio"
+    "studio": "prisma studio",
+    "check:constants": "tsx scripts/check-application-constants.ts"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.0.0",

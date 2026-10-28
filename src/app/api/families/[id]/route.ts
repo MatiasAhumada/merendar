@@ -1,28 +1,32 @@
+
+
+import { PRIVATE_RESPONSE_HEADERS, HTTP_CACHE_CONTROL, HTTP_HEADERS } from "@/constants/http.constant";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";
+import { FAMILY_API_MESSAGES, FAMILY_LIMITS, FAMILY_VALIDATION_MESSAGES } from "@/constants/family.constant";
 import { familyService } from "@/server/services/family.service";
 import { requireFamilyReadAccess, requireFamilyWriteAccess } from "@/server/services/family-access";
 import { isSameOriginRequest } from "@/server/services/origin.service";
-import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
 import { familyDeactivationRequestSchema } from "@/validations/family.validation";
+import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
 
 const updateFamilySchema = z.object({
-  name: z.string().trim().min(2, "Ingresá el nombre del grupo familiar").max(120),
-  neighborhood: z.string().trim().min(2, "Seleccioná un barrio").max(100),
-  address: z.string().trim().min(2, "Ingresá el domicilio").max(180),
-  contactPhone: z.string().trim().max(40).transform((phone) => phone || undefined).optional(),
-  contactEmail: z.string().trim().toLowerCase().pipe(z.email("Ingresá un email válido")).optional(),
+  name: z.string().trim().min(FAMILY_LIMITS.NAME_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.NAME_REQUIRED).max(FAMILY_LIMITS.NAME_MAX_LENGTH),
+  neighborhood: z.string().trim().min(FAMILY_LIMITS.NEIGHBORHOOD_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.NEIGHBORHOOD_REQUIRED).max(FAMILY_LIMITS.NEIGHBORHOOD_MAX_LENGTH),
+  address: z.string().trim().min(FAMILY_LIMITS.ADDRESS_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.ADDRESS_REQUIRED).max(FAMILY_LIMITS.ADDRESS_MAX_LENGTH),
+  contactPhone: z.string().trim().max(FAMILY_LIMITS.PHONE_MAX_LENGTH).transform((phone) => phone || undefined).optional(),
+  contactEmail: z.string().trim().toLowerCase().pipe(z.email(FAMILY_VALIDATION_MESSAGES.EMAIL_INVALID)).optional(),
   baseVersion: z.number().int().nonnegative(),
 }).strict();
-const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
+const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 
 function handleError(error: unknown, request: NextRequest) {
   const apiError = error instanceof ApiError
     ? error
-    : new ApiError({ status: 500, message: "No se pudo completar la operación con familias", isOperational: false });
-  const response = apiErrorHandler({ error: apiError, request, fallbackMessage: "No se pudo completar la operación con familias" });
-  response.headers.set("Cache-Control", privateHeaders["Cache-Control"]);
+    : new ApiError({ status: 500, message: FAMILY_API_MESSAGES.OPERATION_FAILED, isOperational: false });
+  const response = apiErrorHandler({ error: apiError, request, fallbackMessage: FAMILY_API_MESSAGES.OPERATION_FAILED });
+  response.headers.set(HTTP_HEADERS.CACHE_CONTROL, HTTP_CACHE_CONTROL.PRIVATE_NO_STORE);
   return response;
 }
 
@@ -40,7 +44,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     if (!isSameOriginRequest(request)) {
-      throw new ApiError({ status: 403, message: "La solicitud no pertenece a este sitio" });
+      throw new ApiError({ status: 403, message: FAMILY_API_MESSAGES.WRONG_ORIGIN });
     }
 
     await requireFamilyWriteAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
@@ -49,13 +53,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json({ error: { message: "El cuerpo de la solicitud no es válido" } }, { status: 400, headers: privateHeaders });
+      return NextResponse.json({ error: { message: FAMILY_API_MESSAGES.REQUEST_BODY_INVALID } }, { status: 400, headers: privateHeaders });
     }
 
     const parsedInput = updateFamilySchema.safeParse(body);
 
     if (!parsedInput.success) {
-      return NextResponse.json({ error: { message: "Revisá los campos del formulario", details: parsedInput.error.flatten().fieldErrors } }, { status: 400, headers: privateHeaders });
+      return NextResponse.json({ error: { message: FAMILY_API_MESSAGES.FORM_FIELDS_INVALID, details: parsedInput.error.flatten().fieldErrors } }, { status: 400, headers: privateHeaders });
     }
 
     const { id } = await params;
@@ -69,7 +73,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     if (!isSameOriginRequest(request)) {
-      throw new ApiError({ status: 403, message: "La solicitud no pertenece a este sitio" });
+      throw new ApiError({ status: 403, message: FAMILY_API_MESSAGES.WRONG_ORIGIN });
     }
 
     const user = await requireFamilyWriteAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
@@ -78,13 +82,13 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json({ error: { message: "El cuerpo de la solicitud no es válido" } }, { status: 400, headers: privateHeaders });
+      return NextResponse.json({ error: { message: FAMILY_API_MESSAGES.REQUEST_BODY_INVALID } }, { status: 400, headers: privateHeaders });
     }
 
     const parsedInput = familyDeactivationRequestSchema.safeParse(body);
 
     if (!parsedInput.success || parsedInput.data.target.kind !== "family") {
-      return NextResponse.json({ error: { message: "Revisá los datos para dar de baja la familia" } }, { status: 400, headers: privateHeaders });
+      return NextResponse.json({ error: { message: FAMILY_API_MESSAGES.DEACTIVATION_INVALID } }, { status: 400, headers: privateHeaders });
     }
 
     const { id } = await params;

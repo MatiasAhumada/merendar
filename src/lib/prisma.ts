@@ -1,3 +1,4 @@
+import { APPLICATION_ERROR_MESSAGES } from "@/constants/error-messages.constant";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 
@@ -9,7 +10,7 @@ function createPrismaClient() {
   const databaseUrl = process.env.DATABASE_URL;
 
   if (!databaseUrl) {
-    throw new Error("DATABASE_URL es obligatoria para iniciar la aplicación.");
+    throw new Error(APPLICATION_ERROR_MESSAGES.DATABASE_URL_ES_OBLIGATORIA_PARA_INICIAR_LA_APLICACION);
   }
 
   const adapter = new PrismaPg({ connectionString: databaseUrl });

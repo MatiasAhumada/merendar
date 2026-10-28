@@ -1,10 +1,12 @@
+import { PRIVATE_DOCUMENT_RESPONSE_HEADERS } from "@/constants/http.constant";
+import { RENDITION_ERROR_MESSAGES } from "@/constants/rendition.constant";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { prisma } from "@/lib/prisma";
 import { requireRenditionReadAccess } from "@/server/services/merchandise-access";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 
-const privateHeaders = { "Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff" };
+const privateHeaders = PRIVATE_DOCUMENT_RESPONSE_HEADERS;
 
 export async function GET(request: NextRequest, context: RouteContext<"/api/renditions/documents/[id]">) {
   try {
@@ -16,7 +18,7 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/rend
     });
 
     if (!document) {
-      return NextResponse.json({ error: { message: "No encontramos el documento solicitado." } }, { status: 404, headers: privateHeaders });
+      return NextResponse.json({ error: { message: RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_DOCUMENTO_SOLICITADO } }, { status: 404, headers: privateHeaders });
     }
 
     const disposition = request.nextUrl.searchParams.get("inline") === "1" ? "inline" : "attachment";
@@ -30,7 +32,7 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/rend
     });
   } catch (error) {
     const status = error instanceof ApiError ? error.status : 500;
-    const message = error instanceof ApiError ? error.message : "No se pudo consultar el documento.";
+    const message = error instanceof ApiError ? error.message : RENDITION_ERROR_MESSAGES.NO_SE_PUDO_CONSULTAR_EL_DOCUMENTO;
     return NextResponse.json({ error: { message } }, { status, headers: privateHeaders });
   }
 }

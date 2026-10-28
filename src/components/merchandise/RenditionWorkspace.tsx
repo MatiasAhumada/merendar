@@ -1,7 +1,12 @@
 "use client";
 
+import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
+import { COMMON_UI_TEXT } from "@/constants/common-ui.constant";
+import { MERCHANDISE_UI_TEXT, MERCHANDISE_ERROR_MESSAGES } from "@/constants/merchandise.constant";
+import { RENDITION_UI_TEXT, RENDITION_DOCUMENT_LABELS, RENDITION_DOCUMENT_TYPES, RENDITION_LIMITS } from "@/constants/rendition.constant";
+import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
+import { API_ROUTES } from "@/constants/routes.constant";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { CheckmarkCircle01Icon, File01Icon, RefreshIcon, Upload01Icon } from "@hugeicons/core-free-icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -12,9 +17,11 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RENDITION_DOCUMENT_LABELS, RENDITION_DOCUMENT_TYPES, RENDITION_LIMITS } from "@/constants/rendition.constant";
 import { synchronizeOfflineQueue, enqueueOfflineOperation, listOfflineOperations, retryOfflineOperation, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import { z } from "zod";
+import Link from "next/link";
+
 import type { MerchandisePeriodRecord } from "@/interfaces/merchandise.interface";
 import type { OfflinePreparedDocument } from "@/services/offline-preparation.service";
 import type { OfflineOperation } from "@/types/offline-operation";
@@ -24,7 +31,6 @@ import {
   renditionReviewPayloadSchema,
   type RenditionDocumentPayload,
 } from "@/validations/rendition.validation";
-import { z } from "zod";
 
 interface RenditionWorkspaceProps {
   periods: MerchandisePeriodRecord[];
@@ -46,7 +52,7 @@ const documentTypeSchema = z.enum([
 ]);
 
 function formatFileSize(byteSize: number) {
-  return `${Math.max(1, Math.round(byteSize / 1024))} KiB`;
+  return COMMON_UI_TEXT.FILE_SIZE_IN_KIB(byteSize);
 }
 
 function formatDate(value: string) {
@@ -58,16 +64,16 @@ function errorMessage(error: unknown) {
     return error.message;
   }
 
-  return "No se pudo guardar el documento.";
+  return MERCHANDISE_ERROR_MESSAGES.NO_SE_PUDO_GUARDAR_EL_DOCUMENTO;
 }
 
 async function encodePdf(file: File) {
   if (!file.size || file.size > RENDITION_LIMITS.MAX_DOCUMENT_BYTES) {
-    throw new Error("Cada PDF debe pesar hasta 512 KiB y no puede estar vacío.");
+    throw new Error(MERCHANDISE_ERROR_MESSAGES.CADA_PDF_DEBE_PESAR_HASTA_512_KIB_Y_NO_PUEDE_ESTAR_VACIO);
   }
 
-  if (file.type !== "application/pdf" || !file.name.toLowerCase().endsWith(".pdf")) {
-    throw new Error("Elegí un archivo PDF. Las imágenes no reemplazan la planilla escaneada.");
+  if (file.type !== HTTP_CONTENT_TYPES.PDF || !file.name.toLowerCase().endsWith(".pdf")) {
+    throw new Error(MERCHANDISE_ERROR_MESSAGES.ELEGI_UN_ARCHIVO_PDF_LAS_IMAGENES_NO_REEMPLAZAN_LA_PLANILLA_ESCANEADA);
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
@@ -75,7 +81,7 @@ async function encodePdf(file: File) {
   const footer = new TextDecoder("latin1").decode(bytes.slice(Math.max(0, bytes.length - 1024)));
 
   if (header !== "%PDF-" || !footer.includes("%%EOF")) {
-    throw new Error("El contenido no parece un PDF completo. Volvé a exportarlo y seleccionalo de nuevo.");
+    throw new Error(MERCHANDISE_ERROR_MESSAGES.EL_CONTENIDO_NO_PARECE_UN_PDF_COMPLETO_VOLVE_A_EXPORTARLO_Y_SELECCIONA);
   }
 
   let binary = "";
@@ -85,7 +91,7 @@ async function encodePdf(file: File) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
   }
 
-  return { originalName: file.name, contentType: "application/pdf" as const, contentBase64: btoa(binary) };
+  return { originalName: file.name, contentType: HTTP_CONTENT_TYPES.PDF, contentBase64: btoa(binary) };
 }
 
 function renditionOperations(operations: OfflineOperation[]) {
@@ -125,14 +131,14 @@ function pendingReviewOperations(operations: OfflineOperation[]) {
 
 function operationLabel(status: OfflineOperation["status"]) {
   if (status === "error" || status === "conflict") {
-    return "Error de carga";
+    return MERCHANDISE_UI_TEXT.ERROR_DE_CARGA;
   }
 
   if (status === "syncing") {
-    return "Subiendo…";
+    return MERCHANDISE_UI_TEXT.SUBIENDO;
   }
 
-  return "Pendiente offline";
+  return MERCHANDISE_UI_TEXT.PENDIENTE_OFFLINE;
 }
 
 function PreparedRenditionDocumentLink({ document, label, download = false }: { document: OfflinePreparedDocument; label: string; download?: boolean }) {
@@ -147,35 +153,35 @@ function SheetDocumentLink({ sheetId, offlineMode, preparedDocuments }: { sheetI
   if (offlineMode) {
     const preparedDocument = preparedDocuments.find((document) => document.id === sheetId);
     if (!preparedDocument) {
-      return <p className="text-xs text-muted-foreground">La planilla no está guardada en esta preparación offline.</p>;
+      return <p className="text-xs text-muted-foreground">{RENDITION_UI_TEXT.LA_PLANILLA_NO_ESTA_GUARDADA_EN_ESTA_PREPARACION_OFFLINE}</p>;
     }
-    return <PreparedRenditionDocumentLink document={preparedDocument} label="Abrir planilla preparada" download />;
+    return <PreparedRenditionDocumentLink document={preparedDocument} label={RENDITION_UI_TEXT.ABRIR_PLANILLA_PREPARADA} download />;
   }
 
-  return <Button asChild size="sm" variant="outline"><a href={`/api/records/sheets/${encodeURIComponent(sheetId)}`}><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} data-icon="inline-start" /> Descargar para imprimir</a></Button>;
+  return <Button asChild size="sm" variant="outline"><a href={API_ROUTES.RECORD_SHEET(sheetId)}><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} data-icon="inline-start" /> {RENDITION_UI_TEXT.DESCARGAR_PARA_IMPRIMIR}</a></Button>;
 }
 
 function RenditionDocumentActions({ documentId, preparedDocument, offlineMode }: { documentId: string; preparedDocument: OfflinePreparedDocument | undefined; offlineMode: boolean }) {
   if (offlineMode) {
     if (!preparedDocument) {
-      return <Badge variant="warning">PDF no preparado</Badge>;
+      return <Badge variant="warning">{RENDITION_UI_TEXT.PDF_NO_PREPARADO}</Badge>;
     }
-    return <><PreparedRenditionDocumentLink document={preparedDocument} label="Previsualizar" /><PreparedRenditionDocumentLink document={preparedDocument} label="Descargar" download /></>;
+    return <><PreparedRenditionDocumentLink document={preparedDocument} label={RENDITION_UI_TEXT.PREVISUALIZAR} /><PreparedRenditionDocumentLink document={preparedDocument} label={RENDITION_UI_TEXT.DESCARGAR} download /></>;
   }
 
-  return <><Button asChild size="sm" variant="outline"><a href={`/api/renditions/documents/${encodeURIComponent(documentId)}?inline=1`} target="_blank" rel="noreferrer">Previsualizar</a></Button><Button asChild size="sm" variant="secondary"><a href={`/api/renditions/documents/${encodeURIComponent(documentId)}`}>Descargar</a></Button></>;
+  return <><Button asChild size="sm" variant="outline"><a href={API_ROUTES.RENDITION_DOCUMENT_PREVIEW(documentId)} target="_blank" rel="noreferrer">{RENDITION_UI_TEXT.PREVISUALIZAR}</a></Button><Button asChild size="sm" variant="secondary"><a href={API_ROUTES.RENDITION_DOCUMENT(documentId)}>{RENDITION_UI_TEXT.DESCARGAR}</a></Button></>;
 }
 
 function reviewLabel(status: "PENDIENTE" | "REVISADA" | "OBSERVADA") {
   if (status === "REVISADA") {
-    return "Revisada manualmente";
+    return MERCHANDISE_UI_TEXT.REVISADA_MANUALMENTE;
   }
 
   if (status === "OBSERVADA") {
-    return "Requiere corrección";
+    return MERCHANDISE_UI_TEXT.REQUIERE_CORRECCION;
   }
 
-  return "Pendiente de revisión";
+  return MERCHANDISE_UI_TEXT.PENDIENTE_DE_REVISION;
 }
 
 function createReviewPayload(status: "REVISADA" | "OBSERVADA", notes: string) {
@@ -240,11 +246,11 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
   if (periodStatus === "loading") {
     periodAvailabilityMessage = "Cargando períodos…";
   } else if (periodStatus === "error") {
-    periodAvailabilityMessage = "No se pudo confirmar si hay períodos. Reintentá la carga antes de seleccionar.";
+    periodAvailabilityMessage = MERCHANDISE_UI_TEXT.NO_SE_PUDO_CONFIRMAR_SI_HAY_PERIODOS_REINTENTA_LA_CARGA_ANTES_DE_SELECCION;
   } else if (periodStatus === "offline-unprepared") {
-    periodAvailabilityMessage = "No hay períodos preparados en esta vista sin conexión.";
+    periodAvailabilityMessage = MERCHANDISE_UI_TEXT.NO_HAY_PERIODOS_PREPARADOS_EN_ESTA_VISTA_SIN_CONEXION;
   } else if (periodStatus === "empty") {
-    periodAvailabilityMessage = "No hay períodos cargados.";
+    periodAvailabilityMessage = MERCHANDISE_UI_TEXT.NO_HAY_PERIODOS_CARGADOS;
   }
 
   useEffect(() => {
@@ -277,23 +283,23 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
 
     try {
       if (!selectedPeriod || !selectedSheet) {
-        throw new Error("Seleccioná un período y una planilla emitida antes de adjuntar documentos.");
+        throw new Error(MERCHANDISE_ERROR_MESSAGES.SELECCIONA_UN_PERIODO_Y_UNA_PLANILLA_EMITIDA_ANTES_DE_ADJUNTAR_DOCUMEN);
       }
 
       const files = form.getAll("documents").filter((entry): entry is File => entry instanceof File && entry.size > 0);
 
       if (!files.length || files.length > RENDITION_LIMITS.MAX_DOCUMENTS_PER_UPLOAD) {
-        throw new Error("Seleccioná entre 1 y 5 archivos PDF por carga.");
+        throw new Error(MERCHANDISE_ERROR_MESSAGES.SELECCIONA_ENTRE_1_Y_5_ARCHIVOS_PDF_POR_CARGA);
       }
 
       if (files.length > 1 && selectedReplacementId) {
-        throw new Error("Para corregir una versión anterior, seleccioná un solo archivo PDF.");
+        throw new Error(MERCHANDISE_ERROR_MESSAGES.PARA_CORREGIR_UNA_VERSION_ANTERIOR_SELECCIONA_UN_SOLO_ARCHIVO_PDF);
       }
 
       const selectedBytes = files.reduce((total, file) => total + file.size, 0);
 
       if (selectedBytes > RENDITION_LIMITS.MAX_UPLOAD_BYTES) {
-        throw new Error("La selección completa no puede superar 700 KiB por carga.");
+        throw new Error(MERCHANDISE_ERROR_MESSAGES.LA_SELECCION_COMPLETA_NO_PUEDE_SUPERAR_700_KIB_POR_CARGA);
       }
 
       const documents = await Promise.all(files.map(async (file) => ({
@@ -312,7 +318,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
       const parsedPayload = renditionDocumentPayloadSchema.safeParse(payload);
 
       if (!parsedPayload.success) {
-        throw new Error(parsedPayload.error.issues[0]?.message ?? "La selección supera el límite permitido.");
+        throw new Error(parsedPayload.error.issues[0]?.message ?? MERCHANDISE_ERROR_MESSAGES.LA_SELECCION_SUPERA_EL_LIMITE_PERMITIDO);
       }
 
       const operation = await enqueueOfflineOperation(userId, sessionExpiresAt, {
@@ -345,7 +351,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
     const parsedReview = renditionReviewPayloadSchema.safeParse(review);
 
     if (!parsedReview.success) {
-      setReviewMessage(parsedReview.error.issues[0]?.message ?? "Revisá los datos de revisión.");
+      setReviewMessage(parsedReview.error.issues[0]?.message ?? MERCHANDISE_UI_TEXT.REVISA_LOS_DATOS_DE_REVISION);
       return;
     }
 
@@ -364,9 +370,9 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         payload: z.json().parse(JSON.parse(JSON.stringify(payload))),
       });
       setReviewNotes("");
-      let savedReviewMessage = "Revisión pendiente en este dispositivo; se confirmará cuando el servidor valide la sesión y los permisos.";
+      let savedReviewMessage: string = MERCHANDISE_ERROR_MESSAGES.REVISION_PENDIENTE_EN_ESTE_DISPOSITIVO_SE_CONFIRMARA_CUANDO_EL_SERVIDOR_VA;
       if (isOnline) {
-        savedReviewMessage = "Revisión guardada y enviada para validación del servidor.";
+        savedReviewMessage = MERCHANDISE_UI_TEXT.REVISION_GUARDADA_Y_ENVIADA_PARA_VALIDACION_DEL_SERVIDOR;
       }
       setReviewMessage(savedReviewMessage);
       await refreshQueue();
@@ -383,42 +389,42 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
     <CardHeader>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <CardTitle id="renditions-title" className="font-display text-xl">Rendición documental</CardTitle>
-          <CardDescription>Vinculá los PDF escaneados con la planilla emitida y el período correspondiente.</CardDescription>
+          <CardTitle id="renditions-title" className="font-display text-xl">{RENDITION_UI_TEXT.RENDICION_DOCUMENTAL}</CardTitle>
+          <CardDescription>{RENDITION_UI_TEXT.VINCULA_LOS_PDF_ESCANEADOS_CON_LA_PLANILLA_EMITIDA_Y_EL_PERIODO_CORRESPO}</CardDescription>
         </div>
         {selectedRendition ? <Badge variant={selectedRendition.reviewStatus === "REVISADA" ? "success" : selectedRendition.reviewStatus === "OBSERVADA" ? "warning" : "secondary"}>{reviewLabel(selectedRendition.reviewStatus)}</Badge> : null}
       </div>
     </CardHeader>
     <CardContent className="space-y-5">
-      {!isOnline ? <Alert variant="info"><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} /><AlertTitle>La carga queda pendiente en este dispositivo</AlertTitle><AlertDescription>El PDF se conserva asociado a esta cuenta y a la planilla elegida. No se considera guardado en el servidor ni habilita una presentación hasta que termine la sincronización.</AlertDescription></Alert> : null}
+      {!isOnline ? <Alert variant="info"><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} /><AlertTitle>{RENDITION_UI_TEXT.LA_CARGA_QUEDA_PENDIENTE_EN_ESTE_DISPOSITIVO}</AlertTitle><AlertDescription>{RENDITION_UI_TEXT.EL_PDF_SE_CONSERVA_ASOCIADO_A_ESTA_CUENTA_Y_A_LA_PLANILLA_ELEGIDA_NO_SE}</AlertDescription></Alert> : null}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field>
-          <FieldLabel htmlFor="rendition-period">Módulo o período</FieldLabel>
+          <FieldLabel htmlFor="rendition-period">{RENDITION_UI_TEXT.MODULO_O_PERIODO}</FieldLabel>
           <Select value={selectedPeriod?.id ?? ""} onValueChange={setSelectedPeriodId} disabled={periodStatus !== "ready"}>
-            <SelectTrigger id="rendition-period"><SelectValue placeholder="Elegí un período" /></SelectTrigger>
-            <SelectContent>{periods.map((period) => <SelectItem key={period.id} value={period.id}>{period.label} · {period.agency}</SelectItem>)}</SelectContent>
+            <SelectTrigger id="rendition-period"><SelectValue placeholder={RENDITION_UI_TEXT.ELEGI_UN_PERIODO} /></SelectTrigger>
+            <SelectContent>{periods.map((period) => <SelectItem key={period.id} value={period.id}>{period.label} {APPLICATION_UI_TEXT.TEXT}{period.agency}</SelectItem>)}</SelectContent>
           </Select>
-          {periodAvailabilityMessage ? <div className="mt-2 flex flex-col items-start gap-2"><FieldDescription>{periodAvailabilityMessage}</FieldDescription>{periodStatus === "empty" && canCreatePeriods ? <Button asChild variant="outline" size="sm"><Link href="#periodos">Ir a Períodos y solicitudes</Link></Button> : null}{periodStatus === "empty" && !canCreatePeriods ? <FieldDescription>Pedile a Presidencia o Secretaría que cargue un período.</FieldDescription> : null}</div> : null}
+          {periodAvailabilityMessage ? <div className="mt-2 flex flex-col items-start gap-2"><FieldDescription>{periodAvailabilityMessage}</FieldDescription>{periodStatus === "empty" && canCreatePeriods ? <Button asChild variant="outline" size="sm"><Link href="#periodos">{RENDITION_UI_TEXT.IR_A_PERIODOS_Y_SOLICITUDES}</Link></Button> : null}{periodStatus === "empty" && !canCreatePeriods ? <FieldDescription>{APPLICATION_UI_TEXT.PEDILE_A_PRESIDENCIA_O_SECRETARIA_QUE_CARGUE_UN_PERIODO}</FieldDescription> : null}</div> : null}
         </Field>
         <Field>
-          <FieldLabel htmlFor="rendition-sheet">Planilla emitida</FieldLabel>
+          <FieldLabel htmlFor="rendition-sheet">{RENDITION_UI_TEXT.PLANILLA_EMITIDA}</FieldLabel>
           <Select value={selectedSheet?.id ?? ""} onValueChange={setSelectedSheetId} disabled={!selectedPeriod?.beneficiarySheets.length}>
-            <SelectTrigger id="rendition-sheet"><SelectValue placeholder="Seleccioná una planilla" /></SelectTrigger>
-            <SelectContent>{selectedPeriod?.beneficiarySheets.map((sheet) => <SelectItem key={sheet.id} value={sheet.id}>Versión {sheet.version} · {sheet.beneficiaryCount} beneficiarios · {formatDate(sheet.createdAt)}</SelectItem>)}</SelectContent>
+            <SelectTrigger id="rendition-sheet"><SelectValue placeholder={RENDITION_UI_TEXT.SELECCIONA_UNA_PLANILLA} /></SelectTrigger>
+            <SelectContent>{selectedPeriod?.beneficiarySheets.map((sheet) => <SelectItem key={sheet.id} value={sheet.id}>{APPLICATION_UI_TEXT.VERSION}{sheet.version} {APPLICATION_UI_TEXT.TEXT}{sheet.beneficiaryCount} {RENDITION_UI_TEXT.BENEFICIARIOS}{formatDate(sheet.createdAt)}</SelectItem>)}</SelectContent>
           </Select>
-          {!selectedPeriod?.beneficiarySheets.length ? <FieldDescription>Este período todavía no tiene una planilla emitida. Generala desde Registro de beneficiarios.</FieldDescription> : null}
+          {!selectedPeriod?.beneficiarySheets.length ? <FieldDescription>{RENDITION_UI_TEXT.ESTE_PERIODO_TODAVIA_NO_TIENE_UNA_PLANILLA_EMITIDA_GENERALA_DESDE_REGIST}</FieldDescription> : null}
         </Field>
       </div>
 
       {selectedSheet ? <div className="flex flex-col justify-between gap-3 rounded-xl border bg-muted/40 p-3 sm:flex-row sm:items-center">
-        <p className="text-sm"><strong>Referencia vinculada:</strong> planilla versión {selectedSheet.version} · {selectedSheet.beneficiaryCount} beneficiarios · emitida el {formatDate(selectedSheet.createdAt)}.</p>
+        <p className="text-sm"><strong>{RENDITION_UI_TEXT.REFERENCIA_VINCULADA}</strong> {RENDITION_UI_TEXT.PLANILLA_VERSION}{selectedSheet.version} {APPLICATION_UI_TEXT.TEXT}{selectedSheet.beneficiaryCount} {RENDITION_UI_TEXT.BENEFICIARIOS_EMITIDA_EL}{formatDate(selectedSheet.createdAt)}{RENDITION_UI_TEXT.TEXT}</p>
         <SheetDocumentLink sheetId={selectedSheet.id} offlineMode={offlineMode} preparedDocuments={preparedDocuments} />
       </div> : null}
 
       {canWrite && selectedSheet ? <form className="space-y-4 rounded-2xl border p-4" onSubmit={(event) => void submitDocuments(event)}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field>
-            <FieldLabel htmlFor="rendition-document-type">Tipo de documento</FieldLabel>
+            <FieldLabel htmlFor="rendition-document-type">{RENDITION_UI_TEXT.TIPO_DE_DOCUMENTO}</FieldLabel>
             <Select name="documentType" value={selectedType} onValueChange={onTypeChange}>
               <SelectTrigger id="rendition-document-type"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -429,19 +435,19 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
             </Select>
           </Field>
           <Field>
-            <FieldLabel htmlFor="rendition-replacement">Corregir documento anterior (opcional)</FieldLabel>
+            <FieldLabel htmlFor="rendition-replacement">{RENDITION_UI_TEXT.CORREGIR_DOCUMENTO_ANTERIOR_OPCIONAL}</FieldLabel>
             <Select value={selectedReplacementId || "none"} onValueChange={(value) => setSelectedReplacementId(value === "none" ? "" : value)}>
-              <SelectTrigger id="rendition-replacement"><SelectValue placeholder="Cargar una nueva versión" /></SelectTrigger>
+              <SelectTrigger id="rendition-replacement"><SelectValue placeholder={RENDITION_UI_TEXT.CARGAR_UNA_NUEVA_VERSION} /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">Cargar como nueva versión</SelectItem>
-                {currentDocuments.filter((document) => document.documentType === selectedType).map((document) => <SelectItem key={document.id} value={document.id}>Reemplazar {document.originalName} · v{document.version}</SelectItem>)}
+                <SelectItem value="none">{RENDITION_UI_TEXT.CARGAR_COMO_NUEVA_VERSION}</SelectItem>
+                {currentDocuments.filter((document) => document.documentType === selectedType).map((document) => <SelectItem key={document.id} value={document.id}>{RENDITION_UI_TEXT.REEMPLAZAR}{document.originalName} {RENDITION_UI_TEXT.V}{document.version}</SelectItem>)}
               </SelectContent>
             </Select>
-            <FieldDescription>La versión anterior se conserva y queda vinculada a la corrección.</FieldDescription>
+            <FieldDescription>{RENDITION_UI_TEXT.LA_VERSION_ANTERIOR_SE_CONSERVA_Y_QUEDA_VINCULADA_A_LA_CORRECCION}</FieldDescription>
           </Field>
         </div>
         <Field>
-          <FieldLabel htmlFor="rendition-documents">Archivos PDF</FieldLabel>
+          <FieldLabel htmlFor="rendition-documents">{RENDITION_UI_TEXT.ARCHIVOS_PDF}</FieldLabel>
           <Input
             id="rendition-documents"
             name="documents"
@@ -451,52 +457,52 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
             required
             onChange={(event) => setSelectedFileNames(Array.from(event.currentTarget.files ?? []).map((file) => file.name))}
           />
-          <FieldDescription>PDF de varias páginas permitido · máximo 512 KiB por archivo y 5 archivos por carga. No se toman fotos ni se capturan firmas en pantalla.</FieldDescription>
-          {selectedFileNames.length ? <p className="text-xs text-muted-foreground" aria-live="polite">Seleccionados: {selectedFileNames.join(", ")}</p> : null}
+          <FieldDescription>{RENDITION_UI_TEXT.PDF_DE_VARIAS_PAGINAS_PERMITIDO_MAXIMO_512_KIB_POR_ARCHIVO_Y_5_ARCHIVOS}</FieldDescription>
+          {selectedFileNames.length ? <p className="text-xs text-muted-foreground" aria-live="polite">{RENDITION_UI_TEXT.SELECCIONADOS}{selectedFileNames.join(", ")}</p> : null}
         </Field>
-        {actionMessage ? <Alert variant="destructive"><AlertTitle>No se confirmó la carga</AlertTitle><AlertDescription>{actionMessage}</AlertDescription></Alert> : null}
+        {actionMessage ? <Alert variant="destructive"><AlertTitle>{RENDITION_UI_TEXT.NO_SE_CONFIRMO_LA_CARGA}</AlertTitle><AlertDescription>{actionMessage}</AlertDescription></Alert> : null}
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-muted-foreground">{isOnline ? "Al guardar, el servidor volverá a validar y conservar el archivo." : "Se guarda localmente con esta cuenta hasta recuperar conexión."}</p>
-          <Button type="submit" disabled={isUploading}><HugeiconsIcon icon={Upload01Icon} strokeWidth={1.8} data-icon="inline-start" />{isUploading ? "Subiendo…" : "Guardar documentos"}</Button>
+          <p className="text-xs text-muted-foreground">{isOnline ? MERCHANDISE_UI_TEXT.AL_GUARDAR_EL_SERVIDOR_VOLVERA_A_VALIDAR_Y_CONSERVAR_EL_ARCHIVO : MERCHANDISE_UI_TEXT.SE_GUARDA_LOCALMENTE_CON_ESTA_CUENTA_HASTA_RECUPERAR_CONEXION}</p>
+          <Button type="submit" disabled={isUploading}><HugeiconsIcon icon={Upload01Icon} strokeWidth={1.8} data-icon="inline-start" />{isUploading ? MERCHANDISE_UI_TEXT.SUBIENDO : MERCHANDISE_UI_TEXT.GUARDAR_DOCUMENTOS}</Button>
         </div>
       </form> : null}
 
-      {currentDocuments.length || queuedUploads.length ? <section aria-label="Documentación recibida" className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">Archivos de esta planilla</h3><Badge variant="secondary">{currentDocuments.length} confirmados · {pendingDocumentCount} pendientes</Badge></div>
+      {currentDocuments.length || queuedUploads.length ? <section aria-label={RENDITION_UI_TEXT.DOCUMENTACION_RECIBIDA} className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{RENDITION_UI_TEXT.ARCHIVOS_DE_ESTA_PLANILLA}</h3><Badge variant="secondary">{currentDocuments.length} {RENDITION_UI_TEXT.CONFIRMADOS}{pendingDocumentCount} {RENDITION_UI_TEXT.PENDIENTES}</Badge></div>
         <ul className="space-y-2">
           {visibleDocuments.map((document) => {
             const replaced = visibleDocuments.some((candidate) => candidate.supersedesId === document.id);
             const preparedDocument = preparedDocuments.find((candidate) => candidate.id === document.id);
             return <li key={document.id} className="flex flex-col gap-2 rounded-xl border p-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-w-0 items-start gap-3"><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-primary" /><div className="min-w-0"><p className="break-words text-sm font-medium">{RENDITION_DOCUMENT_LABELS[document.documentType]} · {document.originalName}</p><p className="text-xs text-muted-foreground">Versión {document.version} · {formatFileSize(document.byteSize)} · {formatDate(document.createdAt)}{replaced ? " · Reemplazada, historial conservado" : " · Guardado en servidor"}</p></div></div>
+              <div className="flex min-w-0 items-start gap-3"><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-primary" /><div className="min-w-0"><p className="break-words text-sm font-medium">{RENDITION_DOCUMENT_LABELS[document.documentType]} {APPLICATION_UI_TEXT.TEXT}{document.originalName}</p><p className="text-xs text-muted-foreground">{APPLICATION_UI_TEXT.VERSION}{document.version} {APPLICATION_UI_TEXT.TEXT}{formatFileSize(document.byteSize)} {APPLICATION_UI_TEXT.TEXT}{formatDate(document.createdAt)}{replaced ? MERCHANDISE_UI_TEXT.REEMPLAZADA_HISTORIAL_CONSERVADO : MERCHANDISE_UI_TEXT.GUARDADO_EN_SERVIDOR}</p></div></div>
               <div className="flex flex-wrap gap-2">
                 <RenditionDocumentActions documentId={document.id} preparedDocument={preparedDocument} offlineMode={offlineMode} />
               </div>
             </li>;
           })}
           {queuedUploads.flatMap(({ operation, payload }) => payload.documents.map((document) => <li key={`${operation.operationId}-${document.id}`} className="flex flex-col gap-2 rounded-xl border border-dashed p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-start gap-3"><HugeiconsIcon icon={RefreshIcon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-warning" /><div className="min-w-0"><p className="break-words text-sm font-medium">{RENDITION_DOCUMENT_LABELS[document.type]} · {document.originalName}</p><p className="text-xs text-muted-foreground">{operationLabel(operation.status)}{operation.message ? ` · ${operation.message}` : " · Todavía no se guardó en el servidor."}</p></div></div>
-            {operation.status === "error" ? <Button size="sm" variant="outline" onClick={() => void retryOfflineOperation(userId, operation.operationId).then(async () => { await Promise.all([refreshQueue(), onRefresh()]); })}>Reintentar carga</Button> : <Badge variant="secondary">{operation.status === "syncing" ? "Subiendo" : "Pendiente offline"}</Badge>}
+            <div className="flex min-w-0 items-start gap-3"><HugeiconsIcon icon={RefreshIcon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-warning" /><div className="min-w-0"><p className="break-words text-sm font-medium">{RENDITION_DOCUMENT_LABELS[document.type]} {APPLICATION_UI_TEXT.TEXT}{document.originalName}</p><p className="text-xs text-muted-foreground">{operationLabel(operation.status)}{operation.message ? `${APPLICATION_UI_TEXT.TEXT}${operation.message}` : MERCHANDISE_UI_TEXT.TODAVIA_NO_SE_GUARDO_EN_EL_SERVIDOR}</p></div></div>
+            {operation.status === "error" ? <Button size="sm" variant="outline" onClick={() => void retryOfflineOperation(userId, operation.operationId).then(async () => { await Promise.all([refreshQueue(), onRefresh()]); })}>{RENDITION_UI_TEXT.REINTENTAR_CARGA}</Button> : <Badge variant="secondary">{operation.status === "syncing" ? MERCHANDISE_UI_TEXT.UPLOADING_STATUS : MERCHANDISE_UI_TEXT.PENDIENTE_OFFLINE}</Badge>}
           </li>))}
         </ul>
-      </section> : <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">Todavía no se guardaron documentos para esta planilla. La falta de un PDF se muestra como documentación pendiente.</p>}
+      </section> : <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">{RENDITION_UI_TEXT.TODAVIA_NO_SE_GUARDARON_DOCUMENTOS_PARA_ESTA_PLANILLA_LA_FALTA_DE_UN_PDF}</p>}
 
       {canReview && selectedRendition ? <div className="space-y-3 rounded-2xl bg-muted/50 p-4">
-        <div className="flex items-start gap-3"><HugeiconsIcon icon={CheckmarkCircle01Icon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-primary" /><div><h3 className="font-semibold">Revisión documental manual</h3><p className="mt-1 text-sm text-muted-foreground">La app no verifica firmas ni validez ante el organismo. Revisar registra una actuación manual y no presenta ni cierra la rendición.</p>{selectedRendition.reviewNotes ? <p className="mt-2 text-sm">Observación: {selectedRendition.reviewNotes}</p> : null}</div></div>
+        <div className="flex items-start gap-3"><HugeiconsIcon icon={CheckmarkCircle01Icon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-primary" /><div><h3 className="font-semibold">{RENDITION_UI_TEXT.REVISION_DOCUMENTAL_MANUAL}</h3><p className="mt-1 text-sm text-muted-foreground">{RENDITION_UI_TEXT.LA_APP_NO_VERIFICA_FIRMAS_NI_VALIDEZ_ANTE_EL_ORGANISMO_REVISAR_REGISTRA}</p>{selectedRendition.reviewNotes ? <p className="mt-2 text-sm">{RENDITION_UI_TEXT.OBSERVACION}{selectedRendition.reviewNotes}</p> : null}</div></div>
         <form className="space-y-3" onSubmit={(event) => void saveReview(event, selectedRendition.id)}>
           <Field>
-            <FieldLabel htmlFor="rendition-review-status">Resultado de revisión</FieldLabel>
+            <FieldLabel htmlFor="rendition-review-status">{RENDITION_UI_TEXT.RESULTADO_DE_REVISION}</FieldLabel>
             <Select value={reviewStatus} onValueChange={(value) => {
               const parsedStatus = z.enum(["REVISADA", "OBSERVADA"]).safeParse(value);
               if (parsedStatus.success) setReviewStatus(parsedStatus.data);
             }}>
               <SelectTrigger id="rendition-review-status"><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="REVISADA">Revisada manualmente</SelectItem><SelectItem value="OBSERVADA">Solicitar corrección</SelectItem></SelectContent>
+              <SelectContent><SelectItem value="REVISADA">{RENDITION_UI_TEXT.REVISADA_MANUALMENTE}</SelectItem><SelectItem value="OBSERVADA">{RENDITION_UI_TEXT.SOLICITAR_CORRECCION}</SelectItem></SelectContent>
             </Select>
           </Field>
-          {reviewStatus === "OBSERVADA" ? <Field><FieldLabel htmlFor="rendition-review-notes">Qué debe corregirse *</FieldLabel><Textarea id="rendition-review-notes" value={reviewNotes} onChange={(event) => setReviewNotes(event.currentTarget.value)} maxLength={1000} rows={3} required /></Field> : null}
+          {reviewStatus === "OBSERVADA" ? <Field><FieldLabel htmlFor="rendition-review-notes">{RENDITION_UI_TEXT.QUE_DEBE_CORREGIRSE}</FieldLabel><Textarea id="rendition-review-notes" value={reviewNotes} onChange={(event) => setReviewNotes(event.currentTarget.value)} maxLength={1000} rows={3} required /></Field> : null}
           {reviewMessage ? <p role={reviewMessage.includes("pendiente") ? "status" : "alert"} className="text-sm text-muted-foreground">{reviewMessage}</p> : null}
-          {queuedReview ? <Alert variant={queuedReview.operation.status === "error" || queuedReview.operation.status === "conflict" ? "destructive" : "info"}><AlertTitle>{queuedReview.operation.status === "error" || queuedReview.operation.status === "conflict" ? "La revisión necesita atención" : "Revisión pendiente de validación"}</AlertTitle><AlertDescription>{queuedReview.operation.message ?? "El servidor confirmará la revisión cuando valide la sesión, el permiso y la planilla firmada."}</AlertDescription></Alert> : null}
+          {queuedReview ? <Alert variant={queuedReview.operation.status === "error" || queuedReview.operation.status === "conflict" ? "destructive" : "info"}><AlertTitle>{queuedReview.operation.status === "error" || queuedReview.operation.status === "conflict" ? MERCHANDISE_UI_TEXT.LA_REVISION_NECESITA_ATENCION : MERCHANDISE_UI_TEXT.REVISION_PENDIENTE_DE_VALIDACION}</AlertTitle><AlertDescription>{queuedReview.operation.message ?? MERCHANDISE_UI_TEXT.EL_SERVIDOR_CONFIRMARA_LA_REVISION_CUANDO_VALIDE_LA_SESION_EL_PERMISO_Y_LA}</AlertDescription></Alert> : null}
           {queuedReview && (queuedReview.operation.status === "error" || queuedReview.operation.status === "conflict") ? <Button type="button" size="sm" variant="outline" onClick={() => {
             let retry: Promise<void>;
             if (queuedReview.operation.status === "error") {
@@ -508,11 +514,11 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
             void retry.then(async () => {
               await Promise.all([refreshQueue(), onRefresh()]);
             }).catch((error: unknown) => setReviewMessage(errorMessage(error)));
-          }}>Reintentar validación</Button> : null}
-          <Button type="submit" size="sm" variant="outline" disabled={!hasSignedSheet || pendingDocumentCount > 0 || Boolean(queuedReview)}>{queuedReview ? "Revisión pendiente" : "Registrar revisión manual"}</Button>
-          {!hasSignedSheet ? <p className="text-xs text-muted-foreground">La revisión se habilita después de guardar una planilla firmada en el servidor.</p> : null}
-          {pendingDocumentCount > 0 ? <p className="text-xs text-muted-foreground">Sincronizá primero los documentos que todavía están en este dispositivo.</p> : null}
-          {!isOnline && hasSignedSheet && pendingDocumentCount === 0 ? <p className="text-xs text-muted-foreground">La intención queda en esta cuenta y no se confirma oficialmente hasta que el servidor vuelva a validar el acceso.</p> : null}
+          }}>{RENDITION_UI_TEXT.REINTENTAR_VALIDACION}</Button> : null}
+          <Button type="submit" size="sm" variant="outline" disabled={!hasSignedSheet || pendingDocumentCount > 0 || Boolean(queuedReview)}>{queuedReview ? MERCHANDISE_UI_TEXT.REVISION_PENDIENTE : MERCHANDISE_UI_TEXT.REGISTRAR_REVISION_MANUAL}</Button>
+          {!hasSignedSheet ? <p className="text-xs text-muted-foreground">{RENDITION_UI_TEXT.LA_REVISION_SE_HABILITA_DESPUES_DE_GUARDAR_UNA_PLANILLA_FIRMADA_EN_EL_SE}</p> : null}
+          {pendingDocumentCount > 0 ? <p className="text-xs text-muted-foreground">{RENDITION_UI_TEXT.SINCRONIZA_PRIMERO_LOS_DOCUMENTOS_QUE_TODAVIA_ESTAN_EN_ESTE_DISPOSITIVO}</p> : null}
+          {!isOnline && hasSignedSheet && pendingDocumentCount === 0 ? <p className="text-xs text-muted-foreground">{RENDITION_UI_TEXT.LA_INTENCION_QUEDA_EN_ESTA_CUENTA_Y_NO_SE_CONFIRMA_OFICIALMENTE_HASTA_QU}</p> : null}
         </form>
       </div> : null}
     </CardContent>

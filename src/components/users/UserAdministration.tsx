@@ -1,18 +1,20 @@
 "use client";
 
+import { USERS_UI_TEXT, USER_ERROR_MESSAGES } from "@/constants/user.constant";
+import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
 import { useCallback, useEffect, useState } from "react";
-import { UserRole } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { API_ROUTES } from "@/constants/routes";
-import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
-import clientAxios from "@/utils/clientAxios.util";
+import { API_ROUTES } from "@/constants/routes.constant";
+import { USER_ROLE_OPTIONS, USER_ROLE_LABELS } from "@/constants/user-role.constant";
 import { clientErrorHandler } from "@/utils/handlers/clientHandler";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { getManagedUsers } from "@/services/client/user-administration-data.service";
+import clientAxios from "@/utils/clientAxios.util";
+
 import type { ManagedUser } from "@/validations/user-administration.validation";
 
 export function UserAdministration({ userId }: { userId: string }) {
@@ -31,7 +33,7 @@ export function UserAdministration({ userId }: { userId: string }) {
       setUsers(result.data.users);
       setError("");
     } catch (cause) {
-      setError("No se pudieron cargar las cuentas.");
+      setError(USER_ERROR_MESSAGES.NO_SE_PUDIERON_CARGAR_LAS_CUENTAS);
       clientErrorHandler(cause);
     } finally { setLoading(false); }
   }, [isOnline, search, userId]);
@@ -51,14 +53,14 @@ export function UserAdministration({ userId }: { userId: string }) {
       formElement.reset();
       await loadUsers();
     } catch (cause) {
-      setFormError("Revisá los datos e intentá nuevamente. Verificá que el email no esté registrado.");
+      setFormError(USER_ERROR_MESSAGES.REVISA_LOS_DATOS_E_INTENTA_NUEVAMENTE_VERIFICA_QUE_EL_EMAIL_NO_ESTE_REGIST);
       clientErrorHandler(cause);
     } finally { setSaving(false); }
   }
 
   async function changeStatus(user: ManagedUser) {
     const next = !user.isActive;
-    if (!next && !window.confirm(`¿Desactivar la cuenta de ${user.name}? Sus sesiones serán revocadas.`)) return;
+    if (!next && !window.confirm(USERS_UI_TEXT.CONFIRM_DEACTIVATION(user.name))) return;
     try {
       await clientAxios.patch(`${API_ROUTES.USERS}/${user.id}`, { isActive: next });
       await loadUsers();
@@ -66,25 +68,25 @@ export function UserAdministration({ userId }: { userId: string }) {
   }
 
   return <div className="flex flex-col gap-5">
-    <header><h1 className="font-display text-2xl font-bold">Administración de usuarios</h1><p className="text-sm text-muted-foreground">Creá y administrá las cuentas del equipo.</p></header>
-    {!isOnline ? <p role="status" className="rounded-lg border bg-muted p-3 text-sm text-muted-foreground">Consulta de la última preparación autorizada. Crear cuentas y cambiar estados requieren conexión.</p> : null}
-    <Card><CardHeader><CardTitle>Crear cuenta</CardTitle></CardHeader><CardContent>
+    <header><h1 className="font-display text-2xl font-bold">{USERS_UI_TEXT.ADMINISTRACION_DE_USUARIOS}</h1><p className="text-sm text-muted-foreground">{USERS_UI_TEXT.CREA_Y_ADMINISTRA_LAS_CUENTAS_DEL_EQUIPO}</p></header>
+    {!isOnline ? <p role="status" className="rounded-lg border bg-muted p-3 text-sm text-muted-foreground">{USERS_UI_TEXT.CONSULTA_DE_LA_ULTIMA_PREPARACION_AUTORIZADA_CREAR_CUENTAS_Y_CAMBIAR_EST}</p> : null}
+    <Card><CardHeader><CardTitle>{USERS_UI_TEXT.CREAR_CUENTA}</CardTitle></CardHeader><CardContent>
       <fieldset disabled={!isOnline} className="grid gap-3 sm:grid-cols-2 disabled:opacity-60">
         <form className="contents" onSubmit={createUser}>
-        <Input name="name" placeholder="Nombre y apellido" aria-label="Nombre y apellido" required minLength={2} maxLength={120} />
-        <Input name="email" type="email" placeholder="Email" aria-label="Email" required />
+        <Input name="name" placeholder={USERS_UI_TEXT.NOMBRE_Y_APELLIDO} aria-label={USERS_UI_TEXT.NOMBRE_Y_APELLIDO} required minLength={2} maxLength={120} />
+        <Input name="email" type="email" placeholder={APPLICATION_UI_TEXT.EMAIL} aria-label={APPLICATION_UI_TEXT.EMAIL} required />
         <Select name="role" required>
-          <SelectTrigger aria-label="Rol"><SelectValue placeholder="Seleccioná un rol" /></SelectTrigger>
-          <SelectContent>{Object.values(UserRole).map((role) => <SelectItem key={role} value={role}>{USER_ROLE_LABELS[role]}</SelectItem>)}</SelectContent>
+          <SelectTrigger aria-label={USERS_UI_TEXT.ROL}><SelectValue placeholder={USERS_UI_TEXT.SELECCIONA_UN_ROL} /></SelectTrigger>
+          <SelectContent>{USER_ROLE_OPTIONS.map((role) => <SelectItem key={role} value={role}>{USER_ROLE_LABELS[role]}</SelectItem>)}</SelectContent>
         </Select>
-        <Input name="password" type="password" placeholder="Contraseña inicial (10 caracteres mínimo)" aria-label="Contraseña inicial" required minLength={10} maxLength={128} />
+        <Input name="password" type="password" placeholder={USERS_UI_TEXT.CONTRASENA_INICIAL_10_CARACTERES_MINIMO} aria-label={USERS_UI_TEXT.CONTRASENA_INICIAL} required minLength={10} maxLength={128} />
         {formError ? <p role="alert" className="text-sm text-destructive sm:col-span-2">{formError}</p> : null}
-        <Button type="submit" disabled={saving} className="sm:col-span-2">{saving ? "Creando…" : "Crear usuario"}</Button>
+        <Button type="submit" disabled={saving} className="sm:col-span-2">{saving ? USERS_UI_TEXT.CREANDO : USERS_UI_TEXT.CREAR_USUARIO}</Button>
         </form>
       </fieldset>
     </CardContent></Card>
-    <Card><CardHeader className="gap-3 sm:flex-row sm:items-center sm:justify-between"><CardTitle>Equipo</CardTitle><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nombre o email" aria-label="Buscar usuarios" className="sm:max-w-xs" /></CardHeader><CardContent>
-      {loading ? <p role="status">Cargando usuarios…</p> : error ? <div className="flex items-center gap-3"><p role="alert">{error}</p><Button variant="outline" onClick={() => void loadUsers()}>Reintentar</Button></div> : users.length === 0 ? <p className="text-sm text-muted-foreground">No hay usuarios para mostrar.</p> : <ul className="divide-y">{users.filter((user) => `${user.name} ${user.email ?? ""}`.toLocaleLowerCase("es").includes(search.trim().toLocaleLowerCase("es"))).map((user) => <li key={user.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-medium">{user.name}</p><p className="break-all text-sm text-muted-foreground">{user.email ?? "Sin email"} · {user.role ? USER_ROLE_LABELS[user.role] : "Sin rol"}</p></div><div className="flex items-center gap-3"><Badge variant={user.isActive ? "success" : "secondary"}>{user.isActive ? "Activo" : "Inactivo"}</Badge><Button variant={user.isActive ? "outline" : "secondary"} size="sm" disabled={!isOnline} onClick={() => void changeStatus(user)}>{user.isActive ? "Desactivar" : "Activar"}</Button></div></li>)}</ul>}
+    <Card><CardHeader className="gap-3 sm:flex-row sm:items-center sm:justify-between"><CardTitle>{USERS_UI_TEXT.EQUIPO}</CardTitle><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={USERS_UI_TEXT.BUSCAR_POR_NOMBRE_O_EMAIL} aria-label={USERS_UI_TEXT.BUSCAR_USUARIOS} className="sm:max-w-xs" /></CardHeader><CardContent>
+      {loading ? <p role="status">{USERS_UI_TEXT.CARGANDO_USUARIOS}</p> : error ? <div className="flex items-center gap-3"><p role="alert">{error}</p><Button variant="outline" onClick={() => void loadUsers()}>{APPLICATION_UI_TEXT.REINTENTAR}</Button></div> : users.length === 0 ? <p className="text-sm text-muted-foreground">{USERS_UI_TEXT.NO_HAY_USUARIOS_PARA_MOSTRAR}</p> : <ul className="divide-y">{users.filter((user) => `${user.name} ${user.email ?? ""}`.toLocaleLowerCase("es").includes(search.trim().toLocaleLowerCase("es"))).map((user) => <li key={user.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-medium">{user.name}</p><p className="break-all text-sm text-muted-foreground">{user.email ?? USERS_UI_TEXT.SIN_EMAIL} {APPLICATION_UI_TEXT.TEXT}{user.role ? USER_ROLE_LABELS[user.role] : USERS_UI_TEXT.SIN_ROL}</p></div><div className="flex items-center gap-3"><Badge variant={user.isActive ? "success" : "secondary"}>{user.isActive ? USERS_UI_TEXT.ACTIVO : USERS_UI_TEXT.INACTIVO}</Badge><Button variant={user.isActive ? "outline" : "secondary"} size="sm" disabled={!isOnline} onClick={() => void changeStatus(user)}>{user.isActive ? USERS_UI_TEXT.DESACTIVAR : USERS_UI_TEXT.ACTIVAR}</Button></div></li>)}</ul>}
     </CardContent></Card>
   </div>;
 }

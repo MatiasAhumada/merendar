@@ -1,3 +1,7 @@
+
+
+import { PRIVATE_RESPONSE_HEADERS } from "@/constants/http.constant";
+import { USER_ERROR_MESSAGES } from "@/constants/user.constant";
 import { AccessCapability, UserRole } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -7,7 +11,7 @@ import { accessPolicyRepository } from "@/server/repository/access-policy.reposi
 import { requireAdministrativeCapability } from "@/server/services/access-policy.service";
 import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
 
-const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
+const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 const policySchema = z.object({
   roles: z.array(z.object({
     role: z.enum(UserRole),
@@ -22,7 +26,7 @@ function isCompletePolicySet(roles: Array<{ role: UserRole; capabilities: Access
 
 export async function GET(request: NextRequest) {
   try {
-    await requireAdministrativeCapability(request.cookies.get(AUTH.SESSION_COOKIE)?.value, "access-policy.manage", "No tenés permiso para administrar permisos");
+    await requireAdministrativeCapability(request.cookies.get(AUTH.SESSION_COOKIE)?.value, "access-policy.manage", USER_ERROR_MESSAGES.NO_TENES_PERMISO_PARA_ADMINISTRAR_PERMISOS);
     const snapshot = await accessPolicyRepository.findManagementSnapshot();
     const policyRecords = snapshot.policies.map((policy) => ({
       role: policy.role,
@@ -49,17 +53,17 @@ export async function GET(request: NextRequest) {
     }));
     return NextResponse.json({ policies: policyRecords, usersByRole, history }, { headers: privateHeaders });
   } catch (error) {
-    return apiErrorHandler({ error: error instanceof ApiError ? error : new ApiError({ status: 500, message: "No se pudo consultar la política de permisos", isOperational: false }), request });
+    return apiErrorHandler({ error: error instanceof ApiError ? error : new ApiError({ status: 500, message: USER_ERROR_MESSAGES.NO_SE_PUDO_CONSULTAR_LA_POLITICA_DE_PERMISOS, isOperational: false }), request });
   }
 }
 
 export async function PUT(request: NextRequest) {
   try {
-    const actor = await requireAdministrativeCapability(request.cookies.get(AUTH.SESSION_COOKIE)?.value, "access-policy.manage", "No tenés permiso para administrar permisos");
+    const actor = await requireAdministrativeCapability(request.cookies.get(AUTH.SESSION_COOKIE)?.value, "access-policy.manage", USER_ERROR_MESSAGES.NO_TENES_PERMISO_PARA_ADMINISTRAR_PERMISOS);
     const parsedBody = policySchema.safeParse(await request.json());
 
     if (!parsedBody.success || !isCompletePolicySet(parsedBody.data.roles)) {
-      return NextResponse.json({ error: { message: "La matriz debe incluir una sola configuración completa por rol" } }, { status: 400, headers: privateHeaders });
+      return NextResponse.json({ error: { message: USER_ERROR_MESSAGES.LA_MATRIZ_DEBE_INCLUIR_UNA_SOLA_CONFIGURACION_COMPLETA_POR_ROL } }, { status: 400, headers: privateHeaders });
     }
 
     const records = parsedBody.data.roles.flatMap((rolePolicy) => Object.values(AccessCapability).map((capability) => ({
@@ -70,6 +74,6 @@ export async function PUT(request: NextRequest) {
     await accessPolicyRepository.saveRolePolicies(actor.id, records);
     return NextResponse.json({ saved: true }, { headers: privateHeaders });
   } catch (error) {
-    return apiErrorHandler({ error: error instanceof ApiError ? error : new ApiError({ status: 409, message: "No se pudieron guardar los permisos. Volvé a cargar la matriz e intentá otra vez." }), request });
+    return apiErrorHandler({ error: error instanceof ApiError ? error : new ApiError({ status: 409, message: USER_ERROR_MESSAGES.NO_SE_PUDIERON_GUARDAR_LOS_PERMISOS_VOLVE_A_CARGAR_LA_MATRIZ_E_INTENTA }), request });
   }
 }

@@ -1,3 +1,4 @@
+import { PRIVATE_RESPONSE_HEADERS } from "@/constants/http.constant";
 import { z } from "zod";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH, AUTH_MESSAGES } from "@/constants/auth.constant";
@@ -11,7 +12,7 @@ const loginSchema = z
   })
   .strict();
 
-const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
+const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 
 function jsonResponse(body: unknown, status: number) {
   return NextResponse.json(body, { status, headers: privateHeaders });

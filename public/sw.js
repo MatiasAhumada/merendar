@@ -1,27 +1,19 @@
-const CACHE_NAME = "merendar-public-v6";
-const CANONICAL_ROUTES = ["/", "/familias", "/mercaderia", "/entrega", "/usuarios", "/permisos"];
-const PUBLIC_ASSETS = [
-  "/icon-192.png",
-  "/icon-512.png",
-  "/icon-maskable-512.png",
-  "/apple-icon.png",
-  "/merendar-logo.png",
-  "/brand/merendar-isotipo.png",
-  "/brand/ministerio-desarrollo-social-tucuman.png",
-];
+importScripts("/sw-config.js");
+
+const CONFIG = self.MERENDAR_SERVICE_WORKER_CONFIG;
 
 function isPublicResponse(response) {
-  const cacheControl = response.headers.get("cache-control") || "";
-  return response.ok && !response.redirected && !cacheControl.includes("private") && !cacheControl.includes("no-store");
+  const cacheControl = response.headers.get(CONFIG.HTTP_POLICY.CACHE_CONTROL_HEADER) || "";
+  return response.ok && !response.redirected && !cacheControl.includes(CONFIG.HTTP_POLICY.PRIVATE_CACHE_MARKER) && !cacheControl.includes(CONFIG.HTTP_POLICY.NO_STORE_CACHE_MARKER);
 }
 
 function isCanonicalRoute(pathname) {
-  return CANONICAL_ROUTES.includes(pathname);
+  return CONFIG.CANONICAL_ROUTES.includes(pathname);
 }
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PUBLIC_ASSETS)).then(() => self.skipWaiting()),
+    caches.open(CONFIG.CACHE_NAME).then((cache) => cache.addAll(CONFIG.PUBLIC_ASSETS)).then(() => self.skipWaiting()),
   );
 });
 
@@ -29,7 +21,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => Promise.all(
       cacheNames
-        .filter((cacheName) => cacheName.startsWith("merendar-public-") && cacheName !== CACHE_NAME)
+        .filter((cacheName) => cacheName.startsWith(CONFIG.PUBLIC_CACHE_PREFIX) && cacheName !== CONFIG.CACHE_NAME)
         .map((cacheName) => caches.delete(cacheName)),
     )).then(() => self.clients.claim()),
   );
@@ -38,20 +30,20 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const requestUrl = new URL(event.request.url);
 
-  if (event.request.method !== "GET" || requestUrl.origin !== self.location.origin) {
+  if (event.request.method !== CONFIG.HTTP_POLICY.GET_METHOD || requestUrl.origin !== self.location.origin) {
     return;
   }
 
-  if (event.request.mode === "navigate" && isCanonicalRoute(requestUrl.pathname)) {
+  if (event.request.mode === CONFIG.HTTP_POLICY.NAVIGATE_MODE && isCanonicalRoute(requestUrl.pathname)) {
     event.respondWith(fetch(event.request).then(async (networkResponse) => {
-      const responseType = networkResponse.headers.get("content-type") || "";
-      if (isPublicResponse(networkResponse) && responseType.includes("text/html")) {
-        const cache = await caches.open(CACHE_NAME);
+      const responseType = networkResponse.headers.get(CONFIG.HTTP_POLICY.CONTENT_TYPE_HEADER) || "";
+      if (isPublicResponse(networkResponse) && responseType.includes(CONFIG.HTTP_POLICY.HTML_CONTENT_TYPE)) {
+        const cache = await caches.open(CONFIG.CACHE_NAME);
         await cache.put(requestUrl.pathname, networkResponse.clone());
       }
       return networkResponse;
     }).catch(async () => {
-      const cache = await caches.open(CACHE_NAME);
+      const cache = await caches.open(CONFIG.CACHE_NAME);
       const cachedShell = await cache.match(requestUrl.pathname);
       if (cachedShell) {
         return cachedShell;
@@ -61,11 +53,11 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (!requestUrl.pathname.startsWith("/_next/static/") && !PUBLIC_ASSETS.includes(requestUrl.pathname)) {
+  if (!requestUrl.pathname.startsWith(CONFIG.STATIC_ASSET_PREFIX) && !CONFIG.PUBLIC_ASSETS.includes(requestUrl.pathname)) {
     return;
   }
 
-  event.respondWith(caches.open(CACHE_NAME).then(async (cache) => {
+  event.respondWith(caches.open(CONFIG.CACHE_NAME).then(async (cache) => {
     const cachedResponse = await cache.match(event.request);
 
     if (cachedResponse) {
