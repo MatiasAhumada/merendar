@@ -162,7 +162,13 @@ function pendingRecords(operations: OfflineOperation[]): PendingRecord[] {
 
 function queueState(operation: OfflineOperation) {
   if (operation.status === "error" || operation.status === "conflict") {
-    return { label: operation.status === "conflict" ? MERCHANDISE_UI_TEXT.CONFLICTO : MERCHANDISE_UI_TEXT.REQUIERE_ATENCION, variant: "warning" as const };
+    let label: string = MERCHANDISE_UI_TEXT.REQUIERE_ATENCION;
+
+    if (operation.status === "conflict") {
+      label = MERCHANDISE_UI_TEXT.CONFLICTO;
+    }
+
+    return { label, variant: "warning" as const };
   }
 
   if (operation.status === "syncing") {
@@ -263,7 +269,15 @@ function queuedRemittance(
 function addQueuedRecords(periods: MerchandisePeriodRecord[], records: PendingRecord[]) {
   const displayedPeriods = periods.map((period) => ({
     ...period,
-    requests: period.requests.map((request) => ({ ...request, quota: request.quota ? { ...request.quota } : null, remittances: request.remittances.map((remittance) => ({ ...remittance })) })),
+    requests: period.requests.map((request) => {
+      let quota = null;
+
+      if (request.quota) {
+        quota = { ...request.quota };
+      }
+
+      return { ...request, quota, remittances: request.remittances.map((remittance) => ({ ...remittance })) };
+    }),
   }));
 
   for (const record of records) {
@@ -398,6 +412,58 @@ function addQueuedRecords(periods: MerchandisePeriodRecord[], records: PendingRe
   return displayedPeriods.sort((left, right) => right.startsAt.localeCompare(left.startsAt));
 }
 
+function periodStatusBadgeVariant(status: MerchandisePeriodRecord["status"], isLocal: boolean) {
+  if (status === "ANULADO") {
+    return "destructive" as const;
+  }
+
+  if (isLocal) {
+    return "warning" as const;
+  }
+
+  return "success" as const;
+}
+
+function periodStatusLabel(status: MerchandisePeriodRecord["status"], isLocal: boolean) {
+  if (status === "ANULADO") {
+    return MERCHANDISE_UI_TEXT.PERIODO_ANULADO;
+  }
+
+  if (isLocal) {
+    return MERCHANDISE_UI_TEXT.SOLO_EN_ESTE_DISPOSITIVO;
+  }
+
+  return MERCHANDISE_UI_TEXT.CONFIRMADO_EN_SERVIDOR;
+}
+
+function requestStatusBadgeVariant(status: MerchandiseRequestRecord["status"]) {
+  if (status === "APROBADA") {
+    return "success" as const;
+  }
+
+  if (status === "RECHAZADA" || status === "CANCELADA") {
+    return "destructive" as const;
+  }
+
+  return "secondary" as const;
+}
+
+function requestStatusLabel(status: MerchandiseRequestRecord["status"]) {
+  if (status === "APROBADA") {
+    return MERCHANDISE_UI_TEXT.CUPO_APROBADO;
+  }
+
+  if (status === "RECHAZADA") {
+    return MERCHANDISE_UI_TEXT.REJECTED;
+  }
+
+  if (status === "CANCELADA") {
+    return MERCHANDISE_UI_TEXT.CANCELLED;
+  }
+
+  return MERCHANDISE_UI_TEXT.PENDIENTE_DE_CUPO;
+}
+
 interface SaveSheetProps {
   title: string;
   description: string;
@@ -446,15 +512,23 @@ function SaveSheet({
       {triggerLabel}
     </Button>
   );
+  let formMessage: React.ReactNode = null;
+  if (message) {
+    formMessage = <Alert variant="destructive"><AlertTitle>{MERCHANDISE_UI_TEXT.NO_SE_GUARDO}</AlertTitle><AlertDescription>{message}</AlertDescription></Alert>;
+  }
+  let submitButtonLabel = submitLabel;
+  if (saving) {
+    submitButtonLabel = MERCHANDISE_UI_TEXT.GUARDANDO;
+  }
   const dialogForm = (
     <form className="flex min-h-0 flex-1 flex-col overflow-hidden" onSubmit={(event) => void handleSubmit(event)}>
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 pb-4">
         <FieldGroup className="gap-4">{children}</FieldGroup>
-        {message ? <Alert variant="destructive"><AlertTitle>{MERCHANDISE_UI_TEXT.NO_SE_GUARDO}</AlertTitle><AlertDescription>{message}</AlertDescription></Alert> : null}
+        {formMessage}
       </div>
       <div className="flex shrink-0 flex-row justify-end gap-2 border-t px-6 py-4">
         <Button type="button" variant="outline" onClick={() => setOpen(false)}>{APPLICATION_UI_TEXT.CANCELAR}</Button>
-        <Button type="submit" disabled={saving}>{saving ? MERCHANDISE_UI_TEXT.GUARDANDO : submitLabel}</Button>
+        <Button type="submit" disabled={saving}>{submitButtonLabel}</Button>
       </div>
     </form>
   );
@@ -631,9 +705,15 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
     const newQuantityText = optionalText(formData, "receivedQuantity");
     const correctedPayload: MerchandisePayload = {
       ...payload,
-      ...(newNumber ? { remittanceNumber: newNumber } : {}),
-      ...(newQuantityText ? { receivedQuantity: Number(newQuantityText) } : {}),
     };
+
+    if (newNumber) {
+      correctedPayload.remittanceNumber = newNumber;
+    }
+
+    if (newQuantityText) {
+      correctedPayload.receivedQuantity = Number(newQuantityText);
+    }
     const payloadJson = jsonValueSchema.parse(JSON.stringify(correctedPayload));
     await updateOfflineOperationPayload(userId, operation.operationId, payloadJson);
     await Promise.all([refreshQueue(), synchronize()]);
@@ -824,7 +904,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
             return <Card key={period.id} className="overflow-hidden">
               <CardHeader className="gap-4 border-b bg-muted/40 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex gap-3"><span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="size-6" /></span><div className="min-w-0"><CardTitle><h3 className="font-display text-lg font-semibold">{period.label}</h3></CardTitle><p className="text-sm text-muted-foreground">{period.agency} {APPLICATION_UI_TEXT.TEXT}{formatDate(period.startsAt)} {MERCHANDISE_UI_TEXT.TEXT}{formatDate(period.endsAt)}</p></div></div>
-                <div className="flex flex-col items-start gap-2 sm:items-end"><Badge variant={period.status === "ANULADO" ? "destructive" : periodIsLocal ? "warning" : "success"}>{period.status === "ANULADO" ? MERCHANDISE_UI_TEXT.PERIODO_ANULADO : periodIsLocal ? MERCHANDISE_UI_TEXT.SOLO_EN_ESTE_DISPOSITIVO : MERCHANDISE_UI_TEXT.CONFIRMADO_EN_SERVIDOR}</Badge>{canWriteMerchandise && period.status === "VIGENTE" && !periodIsLocal ? <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex flex-col items-start gap-2 sm:items-end"><Badge variant={periodStatusBadgeVariant(period.status, periodIsLocal)}>{periodStatusLabel(period.status, periodIsLocal)}</Badge>{canWriteMerchandise && period.status === "VIGENTE" && !periodIsLocal ? <div className="flex flex-col gap-2 sm:flex-row">
                   <SaveSheet title={MERCHANDISE_UI_TEXT.CORREGIR_PERIODO} description={MERCHANDISE_UI_TEXT.LOS_CAMBIOS_SE_APLICARAN_AL_RECUPERAR_CONEXION_Y_SE_VALIDARA_QUE_NO_HAYA} triggerLabel={MERCHANDISE_UI_TEXT.CORREGIR_PERIODO} triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "period", id: period.id, label: String(formData.get("label") ?? ""), agency: String(formData.get("agency") ?? ""), startsAt: String(formData.get("startsAt") ?? ""), endsAt: String(formData.get("endsAt") ?? "") }, period.version)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CORRECCION}>
                     <Field><FieldLabel htmlFor={`period-edit-label-${period.id}`}>{MERCHANDISE_UI_TEXT.NOMBRE_DEL_PERIODO}</FieldLabel><Input id={`period-edit-label-${period.id}`} name="label" defaultValue={period.label} maxLength={80} required /></Field>
                     <Field><FieldLabel htmlFor={`period-edit-agency-${period.id}`}>{MERCHANDISE_UI_TEXT.ORGANISMO}</FieldLabel><Input id={`period-edit-agency-${period.id}`} name="agency" defaultValue={period.agency} maxLength={120} required /></Field>
@@ -880,12 +960,13 @@ function RemittanceConflictCorrection({ operation, payload, onCorrect }: Remitta
     return null;
   }
 
-  const conflictMessage = receiptLimitConflict.success
-    ? MERCHANDISE_UI_TEXT.QUOTA_LIMIT_ERROR(receiptLimitConflict.data.approvedQuantity, receiptLimitConflict.data.receivedSoFar)
-    : MERCHANDISE_ERROR_MESSAGES.ESE_NUMERO_DE_REMITO_YA_ESTA_REGISTRADO_INGRESA_EL_NUMERO_CORRECTO_PARA_VO;
-  const maximumQuantity = receiptLimitConflict.success
-    ? receiptLimitConflict.data.approvedQuantity - receiptLimitConflict.data.receivedSoFar
-    : payload.receivedQuantity;
+  let conflictMessage: string = MERCHANDISE_ERROR_MESSAGES.ESE_NUMERO_DE_REMITO_YA_ESTA_REGISTRADO_INGRESA_EL_NUMERO_CORRECTO_PARA_VO;
+  let maximumQuantity = payload.receivedQuantity;
+
+  if (receiptLimitConflict.success) {
+    conflictMessage = MERCHANDISE_UI_TEXT.QUOTA_LIMIT_ERROR(receiptLimitConflict.data.approvedQuantity, receiptLimitConflict.data.receivedSoFar);
+    maximumQuantity = receiptLimitConflict.data.approvedQuantity - receiptLimitConflict.data.receivedSoFar;
+  }
 
   async function submitCorrection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -950,13 +1031,23 @@ function RequestCard({ period, request, operations, createQuota, receiveRemittan
     const pendingQuotaUpdate = operation.operation === "update" && updatePayload.success && updatePayload.data.kind === "quota" && updatePayload.data.id === request.quota?.id;
     return operation.resource === "remittances" && operation.status !== "synced" && (pendingQuotaCreate || pendingQuotaUpdate);
   });
-  const pendingCount = request.remittances.reduce((total, remittance) => remittance.status === "VIGENTE" ? total + remittance.receivedQuantity : total, 0);
+  const pendingCount = request.remittances.reduce((total, remittance) => {
+    if (remittance.status === "VIGENTE") {
+      return total + remittance.receivedQuantity;
+    }
+
+    return total;
+  }, 0);
   const quota = request.quota;
-  const availableQuantity = quota ? quota.approvedQuantity - pendingCount : 0;
+  let availableQuantity = 0;
+
+  if (quota) {
+    availableQuantity = quota.approvedQuantity - pendingCount;
+  }
 
   return <article className="rounded-2xl border p-4 sm:p-5">
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} /></span><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold">{MERCHANDISE_UI_TEXT.SOLICITUD}{request.requestNumber}</h4><Badge variant={request.status === "APROBADA" ? "success" : request.status === "RECHAZADA" || request.status === "CANCELADA" ? "destructive" : "secondary"}>{request.status === "APROBADA" ? MERCHANDISE_UI_TEXT.CUPO_APROBADO : request.status === "RECHAZADA" ? MERCHANDISE_UI_TEXT.REJECTED : request.status === "CANCELADA" ? MERCHANDISE_UI_TEXT.CANCELLED : MERCHANDISE_UI_TEXT.PENDIENTE_DE_CUPO}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{formatDate(request.requestedAt)} {APPLICATION_UI_TEXT.TEXT}{request.requestedQuantity} {MERCHANDISE_UI_TEXT.MODULOS_REGISTRO}{request.createdBy.name}</p><p className="mt-1 text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.PERIODO}{period.label}</p></div></div>
+      <div className="flex gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} /></span><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold">{MERCHANDISE_UI_TEXT.SOLICITUD}{request.requestNumber}</h4><Badge variant={requestStatusBadgeVariant(request.status)}>{requestStatusLabel(request.status)}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{formatDate(request.requestedAt)} {APPLICATION_UI_TEXT.TEXT}{request.requestedQuantity} {MERCHANDISE_UI_TEXT.MODULOS_REGISTRO}{request.createdBy.name}</p><p className="mt-1 text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.PERIODO}{period.label}</p></div></div>
       <div className="flex flex-wrap gap-2">
         {canWrite && !quota && request.status !== "RECHAZADA" && request.status !== "CANCELADA" ? <SaveSheet title={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO_APROBADO} description={MERCHANDISE_UI_TEXT.REQUEST_DESCRIPTION(request.requestNumber, request.requestedQuantity)} triggerLabel={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO} triggerVariant="outline" onSave={(formData) => createQuota(request, formData)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CUPO}>
           <Field><FieldLabel htmlFor={`quota-quantity-${request.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_APROBADA}</FieldLabel><Input id={`quota-quantity-${request.id}`} name="approvedQuantity" type="number" min="1" max={request.requestedQuantity} required /><FieldDescription>{MERCHANDISE_UI_TEXT.EL_CUPO_NO_PUEDE_SUPERAR_LOS}{request.requestedQuantity} {MERCHANDISE_UI_TEXT.MODULOS_SOLICITADOS_2}</FieldDescription></Field>

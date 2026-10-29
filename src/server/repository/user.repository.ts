@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
 interface CreateUserDto {
   name: string;
@@ -42,11 +43,11 @@ export const userRepository = {
   },
 
   async findAll(search?: string) {
-    const where = search
-      ? {
-          OR: [{ name: { contains: search } }, { email: { contains: search } }],
-        }
-      : {};
+    let where: Prisma.UserWhereInput = {};
+
+    if (search) {
+      where = { OR: [{ name: { contains: search } }, { email: { contains: search } }] };
+    }
 
     return prisma.user.findMany({
       where,

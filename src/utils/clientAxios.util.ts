@@ -7,7 +7,13 @@ function notifyConnectionStatus(isOnline: boolean) {
     return;
   }
 
-  window.dispatchEvent(new CustomEvent(isOnline ? "merendar-network-reachable" : "merendar-network-unreachable"));
+  let eventName = "merendar-network-unreachable";
+
+  if (isOnline) {
+    eventName = "merendar-network-reachable";
+  }
+
+  window.dispatchEvent(new CustomEvent(eventName));
 }
 
 const clientAxios = axios.create({

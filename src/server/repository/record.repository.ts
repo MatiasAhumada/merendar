@@ -9,16 +9,28 @@ export async function findRecordPeriods() {
 }
 
 export async function findDistributionRecords(periodId?: string) {
+  let where: PrismaTypes.DistributionRecordWhereInput = {};
+
+  if (periodId) {
+    where = { periodId };
+  }
+
   return prisma.distributionRecord.findMany({
-    where: periodId ? { periodId } : {},
+    where,
     include: { familyMember: { include: { person: { select: { id: true, firstName: true, lastName: true, dni: true } }, family: { select: { id: true, name: true } } } } },
     orderBy: { createdAt: "desc" },
   });
 }
 
 export async function findBeneficiarySheets(periodId?: string) {
+  let where: PrismaTypes.BeneficiarySheetWhereInput = {};
+
+  if (periodId) {
+    where = { periodId };
+  }
+
   return prisma.beneficiarySheet.findMany({
-    where: periodId ? { periodId } : {},
+    where,
     select: { id: true, periodId: true, version: true, createdAt: true },
     orderBy: { version: "desc" },
   });

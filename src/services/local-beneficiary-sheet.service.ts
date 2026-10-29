@@ -38,7 +38,11 @@ function wrapText(text: string, font: PDFFont, fontSize: number, maxWidth: numbe
     wordParts.push(remainingWord);
 
     for (const wordPart of wordParts) {
-      const nextLine = line ? `${line} ${wordPart}` : wordPart;
+      let nextLine = wordPart;
+
+      if (line) {
+        nextLine = `${line} ${wordPart}`;
+      }
 
       if (font.widthOfTextAtSize(nextLine, fontSize) > maxWidth && line) {
         lines.push(line);
@@ -98,7 +102,11 @@ export async function createLocalBeneficiarySheetPdf(draft: BeneficiarySheetDraf
     labels.forEach((label, index) => {
       const left = tableBounds[index] ?? 0;
       const right = tableBounds[index + 1] ?? left;
-      const fontSize = index === 1 ? 7.1 : 6.7;
+      let fontSize = 6.7;
+
+      if (index === 1) {
+        fontSize = 7.1;
+      }
 
       if (index === 5) {
         const firstLineWidth = boldFont.widthOfTextAtSize("FECHA DE", fontSize);

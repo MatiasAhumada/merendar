@@ -13,9 +13,11 @@ import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
 const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 
 function handleError(error: unknown, request: NextRequest) {
-  const apiError = error instanceof ApiError
-    ? error
-    : new ApiError({ status: 500, message: FAMILY_API_MESSAGES.MEMBER_UPDATE_FAILED, isOperational: false });
+    let apiError = new ApiError({ status: 500, message: FAMILY_API_MESSAGES.MEMBER_UPDATE_FAILED, isOperational: false });
+
+    if (error instanceof ApiError) {
+      apiError = error;
+    }
   const response = apiErrorHandler({ error: apiError, request, fallbackMessage: FAMILY_API_MESSAGES.MEMBER_UPDATE_FAILED });
   response.headers.set(HTTP_HEADERS.CACHE_CONTROL, HTTP_CACHE_CONTROL.PRIVATE_NO_STORE);
   return response;

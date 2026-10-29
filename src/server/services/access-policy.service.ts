@@ -61,3 +61,45 @@ export async function requireAdministrativeCapability(
 ) {
   return requireCapability(token, capabilityKey, USER_ERROR_MESSAGES.INICIA_SESION_PARA_CONTINUAR, forbiddenMessage);
 }
+
+export async function getAccessPolicyManagement() {
+  const snapshot = await accessPolicyRepository.findManagementSnapshot();
+  const policies = snapshot.policies.map((policy) => ({
+    role: policy.role,
+    capability: policy.capability,
+    capabilityKey: ACCESS_CAPABILITY_KEYS[policy.capability],
+    enabled: policy.enabled,
+  }));
+  const usersByRole = Object.values(UserRole).map((role) => ({
+    role,
+    users: snapshot.users.filter((user) => user.role === role).map((user) => ({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      isActive: user.isActive,
+    })),
+  }));
+  const history = snapshot.changes.map((change) => ({
+    role: change.role,
+    capabilityKey: ACCESS_CAPABILITY_KEYS[change.capability],
+    previousValue: change.previousValue,
+    newValue: change.newValue,
+    actorName: change.actor.name,
+    createdAt: change.createdAt.toISOString(),
+  }));
+
+  return { policies, usersByRole, history };
+}
+
+export async function saveAccessPolicy(
+  actorId: string,
+  rolePolicies: Array<{ role: UserRole; capabilities: AccessCapability[] }>,
+) {
+  const records = rolePolicies.flatMap((rolePolicy) => Object.values(AccessCapability).map((capability) => ({
+    role: rolePolicy.role,
+    capability,
+    enabled: rolePolicy.capabilities.includes(capability),
+  })));
+
+  await accessPolicyRepository.saveRolePolicies(actorId, records);
+}

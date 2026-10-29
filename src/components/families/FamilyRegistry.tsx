@@ -323,9 +323,11 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
       relationship,
       missingDocuments,
     };
-    const parsedMember = member
-      ? familyMemberInputSchema.safeParse(memberInput)
-      : newFamilyMemberInputSchema.safeParse(memberInput);
+    let parsedMember = familyMemberInputSchema.safeParse(memberInput);
+
+    if (!member) {
+      parsedMember = newFamilyMemberInputSchema.safeParse(memberInput);
+    }
 
     if (!parsedMember.success) {
       const errors: Record<string, string[]> = {};
@@ -385,7 +387,7 @@ function FamilyMemberForm({ family, member, onClose, onSave }: {
               <div className="grid gap-2 sm:grid-cols-2">
                 {FAMILY_DOCUMENT_OPTIONS.map((document) => {
                   const isMissing = missingDocuments.includes(document.value);
-                  return <label key={document.value} className="flex min-h-10 items-center gap-2 text-sm"><Checkbox checked={isMissing} onCheckedChange={(checked) => setMissingDocuments(checked ? [...missingDocuments, document.value] : missingDocuments.filter((currentDocument) => currentDocument !== document.value))} />{document.label}</label>;
+                  return <label key={document.value} className="flex min-h-10 items-center gap-2 text-sm"><Checkbox checked={isMissing} onCheckedChange={(checked) => { if (checked) { setMissingDocuments([...missingDocuments, document.value]); return; } setMissingDocuments(missingDocuments.filter((currentDocument) => currentDocument !== document.value)); }} />{document.label}</label>;
                 })}
               </div>
             </fieldset>
@@ -673,22 +675,36 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       contactPhone: String(formData.get("contactPhone") ?? "") || undefined,
       contactEmail: String(formData.get("contactEmail") ?? "") || undefined,
       referenceMemberIndex: members.findIndex((member) => member.localId === referenceMemberId),
-      members: members.map((member) => ({
-        personId: member.personId,
-        membershipId: member.membershipId,
-        firstName: member.firstName,
-        lastName: member.lastName,
-        dni: member.dni || (editingOperation ? undefined : ""),
-        email: member.email || undefined,
-        phone: member.phone || undefined,
-        relationship: member.relationship,
-        missingDocuments: member.missingDocuments,
-      })),
+      members: members.map((member) => {
+        let dni: string | undefined = "";
+
+        if (editingOperation) {
+          dni = undefined;
+        }
+
+        if (member.dni) {
+          dni = member.dni;
+        }
+
+        return {
+          personId: member.personId,
+          membershipId: member.membershipId,
+          firstName: member.firstName,
+          lastName: member.lastName,
+          dni,
+          email: member.email || undefined,
+          phone: member.phone || undefined,
+          relationship: member.relationship,
+          missingDocuments: member.missingDocuments,
+        };
+      }),
     };
 
-    const parsedPayload = editingOperation
-      ? familyPayloadSchema.safeParse(payload)
-      : newFamilyPayloadSchema.safeParse(payload);
+    let parsedPayload = familyPayloadSchema.safeParse(payload);
+
+    if (!editingOperation) {
+      parsedPayload = newFamilyPayloadSchema.safeParse(payload);
+    }
 
     if (!parsedPayload.success) {
       const errors: Record<string, string[]> = {};
@@ -899,13 +915,20 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
       });
 
       const currentOperations = await refreshOfflineFamilies();
-      const operationsWithChange = currentOperations.some((operation) => operation.operationId === queuedOperation.operationId)
-        ? currentOperations
-        : [...currentOperations, queuedOperation];
+      let operationsWithChange = [...currentOperations];
+
+      if (!currentOperations.some((operation) => operation.operationId === queuedOperation.operationId)) {
+        operationsWithChange = [...currentOperations, queuedOperation];
+      }
+
       setOfflineOperations(operationsWithChange);
-      setSelectedFamily((currentFamily) => currentFamily && currentFamily.id === selectedFamilyView.id
-        ? applyPendingMemberChanges(currentFamily, operationsWithChange)
-        : currentFamily);
+      setSelectedFamily((currentFamily) => {
+        if (currentFamily && currentFamily.id === selectedFamilyView.id) {
+          return applyPendingMemberChanges(currentFamily, operationsWithChange);
+        }
+
+        return currentFamily;
+      });
 
       if (navigator.onLine) {
         await synchronizeOfflineQueue(userId);
@@ -1043,7 +1066,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
                         <div className="grid gap-2 sm:grid-cols-2">
                           {FAMILY_DOCUMENT_OPTIONS.map((document) => {
                             const isMissing = member.missingDocuments.includes(document.value);
-                            return <label key={document.value} className="flex min-h-10 items-center gap-2 text-sm"><Checkbox checked={isMissing} onCheckedChange={(checked) => updateMember(member.localId, (currentMember) => ({ ...currentMember, missingDocuments: checked ? [...currentMember.missingDocuments, document.value] : currentMember.missingDocuments.filter((currentDocument) => currentDocument !== document.value) }))} />{document.label}</label>;
+                            return <label key={document.value} className="flex min-h-10 items-center gap-2 text-sm"><Checkbox checked={isMissing} onCheckedChange={(checked) => updateMember(member.localId, (currentMember) => { let missingDocuments = currentMember.missingDocuments.filter((currentDocument) => currentDocument !== document.value); if (checked) { missingDocuments = [...currentMember.missingDocuments, document.value]; } return { ...currentMember, missingDocuments }; })} />{document.label}</label>;
                           })}
                         </div>
                       </fieldset>

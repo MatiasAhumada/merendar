@@ -170,7 +170,7 @@ export function AccessPolicyAdministration({ userId }: { userId: string }) {
             return <section key={rolePolicy.role} className="space-y-2 rounded-lg border p-3">
               <h3 className="font-semibold">{USER_ROLE_LABELS[rolePolicy.role]} {APPLICATION_UI_TEXT.TEXT}{roleUsers.length} {USERS_UI_TEXT.CUENTA_S_AFECTADA_S}</h3>
               <ul className="list-inside list-disc text-sm text-muted-foreground">{changedCapabilities.map((capability) => <li key={capability}>{rolePolicy.capabilities.includes(capability) ? USERS_UI_TEXT.HABILITAR : USERS_UI_TEXT.REVOCAR}{USERS_UI_TEXT.TEXT}{ACCESS_CAPABILITY_LABELS[capability]}</li>)}</ul>
-              {roleUsers.length ? <p className="text-sm">{roleUsers.map((user) => `${user.name}${user.email ? ` (${user.email})` : ""}${user.isActive ? "" : USERS_UI_TEXT.INACTIVA}`).join("; ")}</p> : <p className="text-sm text-muted-foreground">{USERS_UI_TEXT.NO_HAY_CUENTAS_CON_ESTE_ROL}</p>}
+              {roleUsers.length ? <p className="text-sm">{roleUsers.map((user) => { let emailText = ""; if (user.email) { emailText = ` (${user.email})`; } let activeText: string = USERS_UI_TEXT.INACTIVA; if (user.isActive) { activeText = ""; } return `${user.name}${emailText}${activeText}`; }).join("; ")}</p> : <p className="text-sm text-muted-foreground">{USERS_UI_TEXT.NO_HAY_CUENTAS_CON_ESTE_ROL}</p>}
             </section>;
           })}
         </div>

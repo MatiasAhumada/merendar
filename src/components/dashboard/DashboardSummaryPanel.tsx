@@ -41,18 +41,36 @@ export function DashboardSummaryPanel({ userId, initialSummary }: { userId: stri
       }
     }).catch((cause: unknown) => {
       if (!cancelled) {
-        setError(cause instanceof Error ? cause.message : DASHBOARD_ERROR_MESSAGES.NO_SE_PUDIERON_CARGAR_LAS_METRICAS_DEL_INICIO);
+        if (cause instanceof Error) {
+          setError(cause.message);
+        } else {
+          setError(DASHBOARD_ERROR_MESSAGES.NO_SE_PUDIERON_CARGAR_LAS_METRICAS_DEL_INICIO);
+        }
       }
     });
 
     return () => { cancelled = true; };
   }, [isOnline, userId]);
 
-  const authorizedSummary = summaryResult?.authorized ? summaryResult.summary : null;
+  let authorizedSummary: Extract<DashboardSummaryResult, { authorized: true }>["summary"] | null = null;
+
+  if (summaryResult?.authorized) {
+    authorizedSummary = summaryResult.summary;
+  }
+
   let periodHeading = authorizedSummary?.activePeriodLabel ?? DASHBOARD_UI_TEXT.GESTION_COMUNITARIA;
-  let periodDescription: string = authorizedSummary?.activePeriodLabel ? DASHBOARD_UI_TEXT.PERIODO_OPERATIVO_VIGENTE : DASHBOARD_UI_TEXT.CONSULTA_LOS_MODULOS_HABILITADOS_PARA_TU_ROL;
-  let sourceBadge = source === "indexeddb" ? "Captura local" : "Datos del servidor";
-  let sourceBadgeVariant: "success" | "secondary" | "destructive" = source === "indexeddb" ? "secondary" : "success";
+  let periodDescription: string = DASHBOARD_UI_TEXT.CONSULTA_LOS_MODULOS_HABILITADOS_PARA_TU_ROL;
+  let sourceBadge = "Datos del servidor";
+  let sourceBadgeVariant: "success" | "secondary" | "destructive" = "success";
+
+  if (authorizedSummary?.activePeriodLabel) {
+    periodDescription = DASHBOARD_UI_TEXT.PERIODO_OPERATIVO_VIGENTE;
+  }
+
+  if (source === "indexeddb") {
+    sourceBadge = "Captura local";
+    sourceBadgeVariant = "secondary";
+  }
 
   if (error && !(source === "indexeddb" && authorizedSummary)) {
     sourceBadge = DASHBOARD_UI_TEXT.DATOS_NO_DISPONIBLES;
@@ -65,9 +83,11 @@ export function DashboardSummaryPanel({ userId, initialSummary }: { userId: stri
   }
 
   if (source === "indexeddb") {
-    periodDescription = capturedAt
-      ? DASHBOARD_UI_TEXT.CONSULTA_LOCAL_CAPTURADA(formatLastUpdated(capturedAt))
-      : DASHBOARD_UI_TEXT.CONSULTA_LOCAL_PREPARADA_PARA_ESTA_CUENTA;
+    if (capturedAt) {
+      periodDescription = DASHBOARD_UI_TEXT.CONSULTA_LOCAL_CAPTURADA(formatLastUpdated(capturedAt));
+    } else {
+      periodDescription = DASHBOARD_UI_TEXT.CONSULTA_LOCAL_PREPARADA_PARA_ESTA_CUENTA;
+    }
   }
 
   if (!authorizedSummary) {
@@ -93,18 +113,30 @@ export function DashboardSummaryPanel({ userId, initialSummary }: { userId: stri
             let metricDescription: string = DASHBOARD_UI_TEXT.NO_DISPONIBLE;
             if (metric.label === "Familias") {
               metricValue = String(authorizedSummary.familyCount);
-              metricDescription = authorizedSummary.familyCount ? metric.description : DASHBOARD_UI_TEXT.TODAVIA_NO_HAY_FAMILIAS;
+              if (authorizedSummary.familyCount) {
+                metricDescription = metric.description;
+              } else {
+                metricDescription = DASHBOARD_UI_TEXT.TODAVIA_NO_HAY_FAMILIAS;
+              }
             }
             if (metric.label === "Personas") {
               metricValue = String(authorizedSummary.personCount);
-              metricDescription = authorizedSummary.personCount ? metric.description : DASHBOARD_UI_TEXT.TODAVIA_NO_HAY_PERSONAS;
+              if (authorizedSummary.personCount) {
+                metricDescription = metric.description;
+              } else {
+                metricDescription = DASHBOARD_UI_TEXT.TODAVIA_NO_HAY_PERSONAS;
+              }
             }
             if (metric.label === DASHBOARD_UI_TEXT.CUPOS_APROBADOS) {
               if (!authorizedSummary.activePeriodLabel) {
                 metricDescription = DASHBOARD_UI_TEXT.NO_HAY_UN_PERIODO_VIGENTE;
               } else {
                 metricValue = String(authorizedSummary.approvedQuotaCount ?? 0);
-                metricDescription = authorizedSummary.approvedQuotaCount ? metric.description : DASHBOARD_UI_TEXT.SIN_CUPOS_APROBADOS_EN_EL_PERIODO;
+                if (authorizedSummary.approvedQuotaCount) {
+                  metricDescription = metric.description;
+                } else {
+                  metricDescription = DASHBOARD_UI_TEXT.SIN_CUPOS_APROBADOS_EN_EL_PERIODO;
+                }
               }
             }
             return <Card key={metric.label} size="sm"><CardContent className="flex flex-col gap-2"><div className="flex items-center justify-between gap-2"><span className="text-xs font-medium">{metric.label}</span><span className="flex size-8 items-center justify-center rounded-full bg-accent text-accent-foreground"><HugeiconsIcon icon={metric.icon} strokeWidth={1.8} /></span></div><p className="font-display text-3xl font-bold tabular-nums">{metricValue}</p><p className="text-xs text-muted-foreground">{metricDescription}</p></CardContent></Card>;

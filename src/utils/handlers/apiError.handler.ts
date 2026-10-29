@@ -40,6 +40,14 @@ export class ApiError extends Error {
   }
 }
 
+export function normalizeApiError(error: unknown, status: number, message: string, isOperational = false) {
+  if (error instanceof ApiError) {
+    return error;
+  }
+
+  return new ApiError({ status, message, isOperational });
+}
+
 type ResponseError = {
   message: string;
   status: number;

@@ -1,10 +1,12 @@
 import { Prisma } from "@prisma/client";
 import { DELIVERY_ERROR_MESSAGES } from "@/constants/delivery.constant";
 import { familyRepository } from "@/server/repository/family.repository";
+import { createBeneficiarySheetPdf } from "@/server/services/beneficiary-sheet.service";
 import {
   countBeneficiarySheets,
   createBeneficiarySheet,
   createSerializableTransaction,
+  findBeneficiarySheet,
   findBeneficiarySheets,
   findCurrentFamilyMemberships,
   findDistributionRecords,
@@ -15,13 +17,34 @@ import {
 } from "@/server/repository/record.repository";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 
+export async function createIssuedBeneficiarySheetPdf(id: string) {
+  const sheet = await findBeneficiarySheet(id);
+
+  if (!sheet) {
+    throw new ApiError({ status: 404, message: DELIVERY_ERROR_MESSAGES.NO_ENCONTRAMOS_ESA_PLANILLA });
+  }
+
+  const pdf = await createBeneficiarySheetPdf(sheet.snapshot);
+  const fileName = sheet.period.label.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+
+  return { pdf, fileName, version: sheet.version };
+}
+
 export async function getRecordWorkbench(periodId?: string, includePeriodDetails = false) {
   const includeDetails = Boolean(periodId || includePeriodDetails);
+  let distributionRecordsPromise: ReturnType<typeof findDistributionRecords> | Promise<[]> = Promise.resolve([]);
+  let beneficiarySheetsPromise: ReturnType<typeof findBeneficiarySheets> | Promise<[]> = Promise.resolve([]);
+
+  if (includeDetails) {
+    distributionRecordsPromise = findDistributionRecords(periodId || undefined);
+    beneficiarySheetsPromise = findBeneficiarySheets(periodId || undefined);
+  }
+
   const [periods, families, records, sheets] = await Promise.all([
     findRecordPeriods(),
     familyRepository.findAll({}),
-    includeDetails ? findDistributionRecords(periodId || undefined) : Promise.resolve([]),
-    includeDetails ? findBeneficiarySheets(periodId || undefined) : Promise.resolve([]),
+    distributionRecordsPromise,
+    beneficiarySheetsPromise,
   ]);
 
   return {

@@ -8,7 +8,13 @@ const documentSchema = z.object({
   contentType: z.literal(HTTP_CONTENT_TYPES.PDF),
   contentBase64: z.string().max(700_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
 }).strict().superRefine((document, context) => {
-  const paddingLength = document.contentBase64.endsWith("==") ? 2 : document.contentBase64.endsWith("=") ? 1 : 0;
+  let paddingLength = 0;
+
+  if (document.contentBase64.endsWith("==")) {
+    paddingLength = 2;
+  } else if (document.contentBase64.endsWith("=")) {
+    paddingLength = 1;
+  }
   const contentByteSize = Math.floor(document.contentBase64.length * 3 / 4) - paddingLength;
 
   if (contentByteSize > RENDITION_LIMITS.MAX_DOCUMENT_BYTES) {

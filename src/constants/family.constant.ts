@@ -67,9 +67,9 @@ export const FAMILY_API_MESSAGES = {
   FAMILY_MEMBER_UPDATE_FAILED: "No se pudo actualizar la ficha del integrante",
 } as const;
 
-export const FAMILY_DOCUMENT_OPTIONS = Object.entries(FAMILY_DOCUMENT_LABELS).map(([value, label]) => ({
-  value: value as FamilyDocumentType,
-  label,
+export const FAMILY_DOCUMENT_OPTIONS = FAMILY_DOCUMENT_TYPES.map((value) => ({
+  value,
+  label: FAMILY_DOCUMENT_LABELS[value],
 }));
 
 export const FAMILY_NEIGHBORHOODS = [
@@ -204,7 +204,13 @@ export const FAMILY_UI_TEXT = {
   EL_CAMBIO_QUEDO_GUARDADO_NO_PUDIMOS_ACTUALIZAR_LA_LISTA_VOLVE_A_INTENTAR_S: "El cambio quedó guardado. No pudimos actualizar la lista; volvé a intentar sin volver a cargar los datos.",
   NO_SE_PUDO_GUARDAR_EL_INTEGRANTE: "No se pudo guardar el integrante.",
   NO_ENCONTRAMOS_ESE_INTEGRANTE_EN_ESTA_FAMILIA: "No encontramos ese integrante en esta familia.",
-  MEMBER_COUNT: (count: number) => `${count} ${count === 1 ? "integrante" : "integrantes"}`,
+  MEMBER_COUNT: (count: number) => {
+    if (count === 1) {
+      return `${count} integrante`;
+    }
+
+    return `${count} integrantes`;
+  },
   MEMBER_FALLBACK: (index: number) => `Integrante ${index}`,
   PENDING_SYNCHRONIZATION_COUNT: (count: number) => ` · ${count} pendientes de sincronización`,
   MEMBER_OPTION: (index: number) => `Integrante ${index}`,

@@ -182,6 +182,18 @@ function reviewLabel(status: "PENDIENTE" | "REVISADA" | "OBSERVADA") {
   return MERCHANDISE_UI_TEXT.PENDIENTE_DE_REVISION;
 }
 
+function reviewBadgeVariant(status: "PENDIENTE" | "REVISADA" | "OBSERVADA") {
+  if (status === "REVISADA") {
+    return "success" as const;
+  }
+
+  if (status === "OBSERVADA") {
+    return "warning" as const;
+  }
+
+  return "secondary" as const;
+}
+
 function createReviewPayload(status: "REVISADA" | "OBSERVADA", notes: string) {
   if (status === "OBSERVADA") {
     return { status, notes: notes.trim() };
@@ -300,12 +312,19 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         throw new Error(MERCHANDISE_ERROR_MESSAGES.LA_SELECCION_COMPLETA_NO_PUEDE_SUPERAR_700_KIB_POR_CARGA);
       }
 
-      const documents = await Promise.all(files.map(async (file) => ({
-        id: crypto.randomUUID(),
-        type: selectedType,
-        ...(selectedReplacementId ? { supersedesId: selectedReplacementId } : {}),
-        ...(await encodePdf(file)),
-      })));
+      const documents = await Promise.all(files.map(async (file) => {
+        const document: RenditionDocumentPayload["documents"][number] = {
+          id: crypto.randomUUID(),
+          type: selectedType,
+          ...(await encodePdf(file)),
+        };
+
+        if (selectedReplacementId) {
+          document.supersedesId = selectedReplacementId;
+        }
+
+        return document;
+      }));
       const payload: RenditionDocumentPayload = {
         kind: "rendition_documents",
         id: crypto.randomUUID(),
@@ -390,7 +409,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
           <CardTitle id="renditions-title" className="font-display text-xl">{RENDITION_UI_TEXT.RENDICION_DOCUMENTAL}</CardTitle>
           <CardDescription>{RENDITION_UI_TEXT.VINCULA_LOS_PDF_ESCANEADOS_CON_LA_PLANILLA_EMITIDA_Y_EL_PERIODO_CORRESPO}</CardDescription>
         </div>
-        {selectedRendition ? <Badge variant={selectedRendition.reviewStatus === "REVISADA" ? "success" : selectedRendition.reviewStatus === "OBSERVADA" ? "warning" : "secondary"}>{reviewLabel(selectedRendition.reviewStatus)}</Badge> : null}
+        {selectedRendition ? <Badge variant={reviewBadgeVariant(selectedRendition.reviewStatus)}>{reviewLabel(selectedRendition.reviewStatus)}</Badge> : null}
       </div>
     </CardHeader>
     <CardContent className="space-y-5">
@@ -434,7 +453,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
           </Field>
           <Field>
             <FieldLabel htmlFor="rendition-replacement">{RENDITION_UI_TEXT.CORREGIR_DOCUMENTO_ANTERIOR_OPCIONAL}</FieldLabel>
-            <Select value={selectedReplacementId || "none"} onValueChange={(value) => setSelectedReplacementId(value === "none" ? "" : value)}>
+            <Select value={selectedReplacementId || "none"} onValueChange={(value) => { if (value === "none") { setSelectedReplacementId(""); return; } setSelectedReplacementId(value); }}>
               <SelectTrigger id="rendition-replacement"><SelectValue placeholder={RENDITION_UI_TEXT.CARGAR_UNA_NUEVA_VERSION} /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">{RENDITION_UI_TEXT.CARGAR_COMO_NUEVA_VERSION}</SelectItem>

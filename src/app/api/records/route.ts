@@ -25,9 +25,11 @@ export async function GET(request: NextRequest) {
     const workbench = await getRecordWorkbench(periodId ?? undefined, includePeriodDetails);
     return NextResponse.json(workbench, { headers: privateHeaders });
   } catch (error) {
-    const apiError = error instanceof ApiError
-      ? error
-      : new ApiError({ status: 500, message: DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_CONSULTAR_EL_REGISTRO_DE_MODULOS, isOperational: false });
+    let apiError = new ApiError({ status: 500, message: DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_CONSULTAR_EL_REGISTRO_DE_MODULOS, isOperational: false });
+
+    if (error instanceof ApiError) {
+      apiError = error;
+    }
     const response = apiErrorHandler({ error: apiError, request, fallbackMessage: DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_CONSULTAR_EL_REGISTRO_DE_MODULOS });
     response.headers.set(HTTP_HEADERS.CACHE_CONTROL, HTTP_CACHE_CONTROL.PRIVATE_NO_STORE);
     return response;

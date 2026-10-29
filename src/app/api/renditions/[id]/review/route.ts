@@ -29,8 +29,13 @@ export async function PATCH(request: NextRequest, context: RouteContext<"/api/re
 
     return NextResponse.json({ rendition }, { headers: privateHeaders });
   } catch (error) {
-    const status = error instanceof ApiError ? error.status : 500;
-    const message = error instanceof ApiError ? error.message : RENDITION_ERROR_MESSAGES.NO_SE_PUDO_REGISTRAR_LA_REVISION_DOCUMENTAL;
+    let status = 500;
+    let message: string = RENDITION_ERROR_MESSAGES.NO_SE_PUDO_REGISTRAR_LA_REVISION_DOCUMENTAL;
+
+    if (error instanceof ApiError) {
+      status = error.status;
+      message = error.message;
+    }
     return NextResponse.json({ error: { message } }, { status, headers: privateHeaders });
   }
 }

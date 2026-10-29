@@ -1,11 +1,11 @@
 
 
-import { SYNC_SERVER_MESSAGES, OFFLINE_OPERATION_MESSAGES } from "@/constants/offline.constant";
+import { OFFLINE_OPERATION_MESSAGES, SYNC_SERVER_MESSAGES } from "@/constants/offline.constant";
 import { Prisma, type SyncResource } from "@prisma/client";
 import { currentRecordSchema, serializationConflictSchema } from "@/schemas/synchronization.schema";
 import { prisma } from "@/lib/prisma";
 import type { SubmittedSyncOperation, SynchronizationHandler } from "@/interfaces/synchronization.interface";
-import type { JsonValue } from "@/types/json-value";
+import { SynchronizationConflictError, SynchronizationDependencyError, SynchronizationKeyConflictError } from "@/server/errors/synchronization.error";
 
 function isRetryableTransactionError(error: unknown) {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -13,35 +13,6 @@ function isRetryableTransactionError(error: unknown) {
   }
 
   return serializationConflictSchema.safeParse(error).success;
-}
-
-export class SynchronizationConflictError extends Error {
-  readonly currentVersion: number;
-  readonly current: JsonValue;
-
-  constructor(message: string, currentVersion: number, current: JsonValue) {
-    super(message);
-    this.name = "SynchronizationConflictError";
-    this.currentVersion = currentVersion;
-    this.current = current;
-  }
-}
-
-export class SynchronizationKeyConflictError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SynchronizationKeyConflictError";
-  }
-}
-
-export class SynchronizationDependencyError extends Error {
-  readonly operationId: string;
-
-  constructor(operationId: string) {
-    super(OFFLINE_OPERATION_MESSAGES.EL_CAMBIO_ESPERA_A_QUE_SE_SINCRONICE_PRIMERO_UN_REGISTRO_RELACIONADO);
-    this.name = "SynchronizationDependencyError";
-    this.operationId = operationId;
-  }
 }
 
 function savedResponse(

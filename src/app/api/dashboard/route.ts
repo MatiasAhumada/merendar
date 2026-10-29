@@ -26,9 +26,11 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(result, { headers: privateHeaders });
   } catch (error) {
-    const apiError = error instanceof ApiError
-      ? error
-      : new ApiError({ status: 500, message: DASHBOARD_ERROR_MESSAGES.NO_SE_PUDO_CARGAR_EL_RESUMEN_DEL_INICIO, isOperational: false });
+    let apiError = new ApiError({ status: 500, message: DASHBOARD_ERROR_MESSAGES.NO_SE_PUDO_CARGAR_EL_RESUMEN_DEL_INICIO, isOperational: false });
+
+    if (error instanceof ApiError) {
+      apiError = error;
+    }
     const response = apiErrorHandler({ error: apiError, request, fallbackMessage: DASHBOARD_ERROR_MESSAGES.NO_SE_PUDO_CARGAR_EL_RESUMEN_DEL_INICIO });
     response.headers.set(HTTP_HEADERS.CACHE_CONTROL, HTTP_CACHE_CONTROL.PRIVATE_NO_STORE);
     return response;

@@ -120,7 +120,13 @@ async function applyRequest(transaction: Prisma.TransactionClient, operation: Su
   const period = await transaction.merchandisePeriod.findUnique({ where: { id: payload.periodId } });
 
   if (!period || period.status !== "VIGENTE") {
-    return conflict(period ? period.version : 0, { kind: "period_missing_or_cancelled", id: payload.periodId });
+    let currentVersion = 0;
+
+    if (period) {
+      currentVersion = period.version;
+    }
+
+    return conflict(currentVersion, { kind: "period_missing_or_cancelled", id: payload.periodId });
   }
 
   const request = await transaction.merchandiseRequest.create({
@@ -149,7 +155,13 @@ async function applyQuota(transaction: Prisma.TransactionClient, operation: Subm
   const request = await transaction.merchandiseRequest.findUnique({ where: { id: payload.requestId } });
 
   if (!request || request.status === "CANCELADA" || request.status === "RECHAZADA") {
-    return conflict(request ? request.version : 0, { kind: "request_missing_or_cancelled", id: payload.requestId });
+    let currentVersion = 0;
+
+    if (request) {
+      currentVersion = request.version;
+    }
+
+    return conflict(currentVersion, { kind: "request_missing_or_cancelled", id: payload.requestId });
   }
 
   if (payload.approvedQuantity > request.requestedQuantity) {
@@ -386,7 +398,13 @@ async function applyCancellation(transaction: Prisma.TransactionClient, operatio
       throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.LA_SOLICITUD_TIENE_CUPO_O_REMITOS_VINCULADOS_Y_NO_SE_PUEDE_ANULAR_LA_DOCUM);
     }
 
-    const updated = await transaction.merchandiseRequest.update({ where: { id: request.id }, data: { status: "CANCELADA", notes: `${request.notes ? `${request.notes}\n` : ""}Anulada: ${payload.reason}`, version: { increment: 1 } } });
+    let existingNotes = "";
+
+    if (request.notes) {
+      existingNotes = `${request.notes}\n`;
+    }
+
+    const updated = await transaction.merchandiseRequest.update({ where: { id: request.id }, data: { status: "CANCELADA", notes: `${existingNotes}Anulada: ${payload.reason}`, version: { increment: 1 } } });
     return { type: "synchronized", resourceVersion: resourceVersion(updated.version), result: { resourceId: updated.id, kind: "request", status: "CANCELADA" } } as const;
   }
 

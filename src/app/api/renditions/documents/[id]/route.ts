@@ -18,7 +18,11 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/rend
       return NextResponse.json({ error: { message: RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_DOCUMENTO_SOLICITADO } }, { status: 404, headers: privateHeaders });
     }
 
-    const disposition = request.nextUrl.searchParams.get("inline") === "1" ? "inline" : "attachment";
+    let disposition = "attachment";
+
+    if (request.nextUrl.searchParams.get("inline") === "1") {
+      disposition = "inline";
+    }
 
     return new NextResponse(document.content, {
       headers: {
@@ -28,8 +32,13 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/rend
       },
     });
   } catch (error) {
-    const status = error instanceof ApiError ? error.status : 500;
-    const message = error instanceof ApiError ? error.message : RENDITION_ERROR_MESSAGES.NO_SE_PUDO_CONSULTAR_EL_DOCUMENTO;
+    let status = 500;
+    let message: string = RENDITION_ERROR_MESSAGES.NO_SE_PUDO_CONSULTAR_EL_DOCUMENTO;
+
+    if (error instanceof ApiError) {
+      status = error.status;
+      message = error.message;
+    }
     return NextResponse.json({ error: { message } }, { status, headers: privateHeaders });
   }
 }

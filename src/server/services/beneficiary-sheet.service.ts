@@ -35,7 +35,11 @@ function wrapText(text: string, maxCharacters: number) {
   let line = "";
 
   for (const word of words) {
-    const nextLine = line ? `${line} ${word}` : word;
+    let nextLine = word;
+
+    if (line) {
+      nextLine = `${line} ${word}`;
+    }
 
     if (nextLine.length > maxCharacters && line) {
       lines.push(line);
@@ -76,7 +80,11 @@ function wrapToWidth(text: string, font: PDFFont, fontSize: number, maxWidth: nu
     parts.push(remainingWord);
 
     for (const part of parts) {
-      const nextLine = line ? `${line} ${part}` : part;
+      let nextLine = part;
+
+      if (line) {
+        nextLine = `${line} ${part}`;
+      }
 
       if (font.widthOfTextAtSize(nextLine, fontSize) > maxWidth && line) {
         lines.push(line);
@@ -107,7 +115,11 @@ function drawApprovedColumnHeaders(page: PDFPage, boldFont: PDFFont, y: number) 
   labels.forEach((label, index) => {
     const left = tableBounds[index] ?? 0;
     const right = tableBounds[index + 1] ?? left;
-    const fontSize = index === 1 ? 7.1 : 6.7;
+    let fontSize = 6.7;
+
+    if (index === 1) {
+      fontSize = 7.1;
+    }
 
     if (index === 5) {
       const labelWidth = boldFont.widthOfTextAtSize("FECHA DE", fontSize);
@@ -254,7 +266,13 @@ async function createLegacyBeneficiarySheetPdf(snapshot: BeneficiarySheetSnapsho
     y -= 16;
     page.drawLine({ start: { x: margin, y }, end: { x: pageWidth - margin, y }, thickness: 0.8, color: accent });
     y -= 20;
-    const columns = BENEFICIARY_SHEET_PDF.APPROVED_COLUMN_BOUNDS.map((boundary) => boundary === "margin" ? margin : boundary);
+    const columns = BENEFICIARY_SHEET_PDF.APPROVED_COLUMN_BOUNDS.map((boundary) => {
+      if (boundary === "margin") {
+        return margin;
+      }
+
+      return boundary;
+    });
     const headers = BENEFICIARY_SHEET_PDF.APPROVED_COLUMNS;
 
     headers.forEach((header, index) => page.drawText(header, { x: columns[index] ?? margin, y, size: 7, font: boldFont, color: ink }));

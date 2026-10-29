@@ -3,6 +3,7 @@
 import { USERS_UI_TEXT, USER_ERROR_MESSAGES } from "@/constants/user.constant";
 import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
 import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -60,11 +61,31 @@ export function UserAdministration({ userId }: { userId: string }) {
 
   async function changeStatus(user: ManagedUser) {
     const next = !user.isActive;
-    if (!next && !window.confirm(USERS_UI_TEXT.CONFIRM_DEACTIVATION(user.name))) return;
+
+    if (!next) {
+      const confirmed = window.confirm(USERS_UI_TEXT.CONFIRM_DEACTIVATION(user.name));
+
+      if (!confirmed) {
+        return;
+      }
+    }
+
     try {
       await clientAxios.patch(`${API_ROUTES.USERS}/${user.id}`, { isActive: next });
       await loadUsers();
     } catch (cause) { clientErrorHandler(cause); }
+  }
+
+  let usersContent: ReactNode;
+
+  if (loading) {
+    usersContent = <p role="status">{USERS_UI_TEXT.CARGANDO_USUARIOS}</p>;
+  } else if (error) {
+    usersContent = <div className="flex items-center gap-3"><p role="alert">{error}</p><Button variant="outline" onClick={() => void loadUsers()}>{APPLICATION_UI_TEXT.REINTENTAR}</Button></div>;
+  } else if (users.length === 0) {
+    usersContent = <p className="text-sm text-muted-foreground">{USERS_UI_TEXT.NO_HAY_USUARIOS_PARA_MOSTRAR}</p>;
+  } else {
+    usersContent = <ul className="divide-y">{users.filter((user) => `${user.name} ${user.email ?? ""}`.toLocaleLowerCase("es").includes(search.trim().toLocaleLowerCase("es"))).map((user) => <li key={user.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-medium">{user.name}</p><p className="break-all text-sm text-muted-foreground">{user.email ?? USERS_UI_TEXT.SIN_EMAIL} {APPLICATION_UI_TEXT.TEXT}{user.role ? USER_ROLE_LABELS[user.role] : USERS_UI_TEXT.SIN_ROL}</p></div><div className="flex items-center gap-3"><Badge variant={user.isActive ? "success" : "secondary"}>{user.isActive ? USERS_UI_TEXT.ACTIVO : USERS_UI_TEXT.INACTIVO}</Badge><Button variant={user.isActive ? "outline" : "secondary"} size="sm" disabled={!isOnline} onClick={() => void changeStatus(user)}>{user.isActive ? USERS_UI_TEXT.DESACTIVAR : USERS_UI_TEXT.ACTIVAR}</Button></div></li>)}</ul>;
   }
 
   return <div className="flex flex-col gap-5">
@@ -86,7 +107,7 @@ export function UserAdministration({ userId }: { userId: string }) {
       </fieldset>
     </CardContent></Card>
     <Card><CardHeader className="gap-3 sm:flex-row sm:items-center sm:justify-between"><CardTitle>{USERS_UI_TEXT.EQUIPO}</CardTitle><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={USERS_UI_TEXT.BUSCAR_POR_NOMBRE_O_EMAIL} aria-label={USERS_UI_TEXT.BUSCAR_USUARIOS} className="sm:max-w-xs" /></CardHeader><CardContent>
-      {loading ? <p role="status">{USERS_UI_TEXT.CARGANDO_USUARIOS}</p> : error ? <div className="flex items-center gap-3"><p role="alert">{error}</p><Button variant="outline" onClick={() => void loadUsers()}>{APPLICATION_UI_TEXT.REINTENTAR}</Button></div> : users.length === 0 ? <p className="text-sm text-muted-foreground">{USERS_UI_TEXT.NO_HAY_USUARIOS_PARA_MOSTRAR}</p> : <ul className="divide-y">{users.filter((user) => `${user.name} ${user.email ?? ""}`.toLocaleLowerCase("es").includes(search.trim().toLocaleLowerCase("es"))).map((user) => <li key={user.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-medium">{user.name}</p><p className="break-all text-sm text-muted-foreground">{user.email ?? USERS_UI_TEXT.SIN_EMAIL} {APPLICATION_UI_TEXT.TEXT}{user.role ? USER_ROLE_LABELS[user.role] : USERS_UI_TEXT.SIN_ROL}</p></div><div className="flex items-center gap-3"><Badge variant={user.isActive ? "success" : "secondary"}>{user.isActive ? USERS_UI_TEXT.ACTIVO : USERS_UI_TEXT.INACTIVO}</Badge><Button variant={user.isActive ? "outline" : "secondary"} size="sm" disabled={!isOnline} onClick={() => void changeStatus(user)}>{user.isActive ? USERS_UI_TEXT.DESACTIVAR : USERS_UI_TEXT.ACTIVAR}</Button></div></li>)}</ul>}
+      {usersContent}
     </CardContent></Card>
   </div>;
 }

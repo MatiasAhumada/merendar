@@ -31,6 +31,7 @@ import { getClientErrorMessage } from "@/utils/handlers/clientHandler";
 import type { OfflineOperation } from "@/types/offline-operation";
 
 import type { JsonValue } from "@/types/json-value";
+import { jsonValueSchema } from "@/schemas/offline.schema";
 
 type WorkbenchData = RecordsCollection;
 
@@ -112,7 +113,11 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
       .catch((loadError: unknown) => {
         if (!cancelled) {
           setLoadFailed(true);
-          setError(loadError instanceof Error ? loadError.message : DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_CARGAR_EL_REGISTRO);
+          if (loadError instanceof Error) {
+            setError(loadError.message);
+          } else {
+            setError(DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_CARGAR_EL_REGISTRO);
+          }
         }
       })
       .finally(() => {
@@ -198,7 +203,11 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
       await fetchData();
     } catch (loadError) {
       setLoadFailed(true);
-      setError(loadError instanceof Error ? loadError.message : DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_CARGAR_EL_REGISTRO);
+      if (loadError instanceof Error) {
+        setError(loadError.message);
+      } else {
+        setError(DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_CARGAR_EL_REGISTRO);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -209,9 +218,13 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
       return;
     }
 
-    setSelectedPersonIds((personIds) => checked
-      ? [...new Set([...personIds, beneficiaryId])]
-      : personIds.filter((id) => id !== beneficiaryId));
+    setSelectedPersonIds((personIds) => {
+      if (checked) {
+        return [...new Set([...personIds, beneficiaryId])];
+      }
+
+      return personIds.filter((id) => id !== beneficiaryId);
+    });
   }
 
   async function saveRecord(event: React.FormEvent<HTMLFormElement>) {
@@ -289,7 +302,11 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
         setNotice(DELIVERY_UI_TEXT.PENDIENTE_DE_SINCRONIZACION_EL_BORRADOR_QUEDO_GUARDADO_EN_ESTE_DISPOSITIVO);
       }
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_GUARDAR_EL_REGISTRO);
+      if (saveError instanceof Error) {
+        setError(saveError.message);
+      } else {
+        setError(DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_GUARDAR_EL_REGISTRO);
+      }
     } finally {
       setIsSaving(false);
     }
@@ -357,7 +374,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
             operation: "create",
             baseVersion: null,
             dependencies: [],
-            payload: parsedDraft.data as JsonValue,
+            payload: jsonValueSchema.parse(parsedDraft.data),
           });
         } catch (queueError) {
           await removeOfflinePreparedDocument(userId, localDocumentId);
@@ -428,7 +445,11 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
       await fetchData();
       setNotice(DELIVERY_UI_TEXT.SE_REVISARON_LOS_CAMBIOS_PENDIENTES_LAS_PLANILLAS_LOCALES_MANTIENEN_SU_CON);
     } catch (syncError) {
-      setError(syncError instanceof Error ? syncError.message : DELIVERY_ERROR_MESSAGES.NO_SE_PUDIERON_SINCRONIZAR_LOS_CAMBIOS_PENDIENTES);
+      if (syncError instanceof Error) {
+        setError(syncError.message);
+      } else {
+        setError(DELIVERY_ERROR_MESSAGES.NO_SE_PUDIERON_SINCRONIZAR_LOS_CAMBIOS_PENDIENTES);
+      }
       setOfflineOperations(await listOfflineOperations(userId));
     } finally {
       setIsSynchronizing(false);

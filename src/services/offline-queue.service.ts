@@ -506,9 +506,13 @@ export async function resolveOfflineConflict(userId: string, operationId: string
             if (operation.operationId !== selectedOperation.operationId && operation.dependencies.includes(selectedOperation.operationId)) {
               store.put({
                 ...operation,
-                dependencies: operation.dependencies.map((dependencyId) =>
-                  dependencyId === selectedOperation.operationId ? replacementOperation.operationId : dependencyId,
-                ),
+                dependencies: operation.dependencies.map((dependencyId) => {
+                  if (dependencyId === selectedOperation.operationId) {
+                    return replacementOperation.operationId;
+                  }
+
+                  return dependencyId;
+                }),
               });
             }
           }

@@ -169,7 +169,13 @@ export const MERCHANDISE_UI_TEXT = {
   SINCRONIZANDO_CON_ESTADO: "Sincronizando…",
   CONFLICTO: "Conflicto",
   REQUIERE_ATENCION: "Requiere atención",
-  PERIODO_COUNT: (count: number) => `${count} período${count === 1 ? "" : "s"}`,
+  PERIODO_COUNT: (count: number) => {
+    if (count === 1) {
+      return `${count} período`;
+    }
+
+    return `${count} períodos`;
+  },
   REQUEST_DESCRIPTION: (requestNumber: string, requestedQuantity: number) => `Solicitud ${requestNumber}: se solicitaron ${requestedQuantity} módulos.`,
   QUOTA_DESCRIPTION: (availableQuantity: number) => `Quedan ${availableQuantity} módulos disponibles del cupo aprobado.`,
   PERIOD_REQUEST_DESCRIPTION: (periodLabel: string) => `La solicitud quedará asociada a ${periodLabel}.`,

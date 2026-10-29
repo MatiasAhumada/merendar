@@ -129,7 +129,13 @@ export const DELIVERY_UI_TEXT = {
   PLANILLA_EMITIDA_NO_DESCARGADA: (version: number) => `La planilla versión ${version} quedó emitida, pero no se pudo descargar. Reintentá desde Versiones sin volver a emitir.`,
   PLANILLA_EMITIDA_LISTA_DESACTUALIZADA: (version: number) => `La planilla versión ${version} quedó emitida, pero no se pudo actualizar la lista. Reintentá la carga sin volver a emitir.`,
   DETALLE_REGISTRO: (familyName: string, moduleType: string, quantity: number) => `${familyName} · ${moduleType} · ${quantity} unidad(es)`,
-  DOWNLOAD_PDF: (selectedCount: number) => `Descargar PDF${selectedCount ? ` · ${selectedCount}` : ""}`,
+  DOWNLOAD_PDF: (selectedCount: number) => {
+    if (selectedCount) {
+      return `Descargar PDF · ${selectedCount}`;
+    }
+
+    return "Descargar PDF";
+  },
   BENEFICIARY_ACCESSIBLE_LABEL: (name: string) => `Incluir a ${name} en la planilla`,
   PERSON_DNI: (dni: string) => ` · DNI ${dni}`,
   SINCRONIZANDO_STATUS: "Sincronizando",

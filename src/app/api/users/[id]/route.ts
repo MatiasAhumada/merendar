@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { userService } from "@/server/services/user.service";
 import { requireAdministrativeCapability } from "@/server/services/access-policy.service";
-import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
+import apiErrorHandler, { normalizeApiError } from "@/utils/handlers/apiError.handler";
 import { updateUserStatusRequestSchema } from "@/schemas/user.schema";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -18,6 +18,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     await userService.updateStatus(id, user.id, input.data.isActive);
     return new NextResponse(null, { status: 204, headers: PRIVATE_RESPONSE_HEADERS });
   } catch (error) {
-    return apiErrorHandler({ error: error instanceof ApiError ? error : new ApiError({ status: 500, message: USER_ERROR_MESSAGES.NO_SE_PUDO_ACTUALIZAR_EL_USUARIO, isOperational: false }), request });
+    const apiError = normalizeApiError(error, 500, USER_ERROR_MESSAGES.NO_SE_PUDO_ACTUALIZAR_EL_USUARIO);
+    return apiErrorHandler({ error: apiError, request });
   }
 }

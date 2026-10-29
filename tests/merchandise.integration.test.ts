@@ -9,7 +9,7 @@ import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interf
 import { GET as getPrivateDocument } from "@/app/api/merchandise/documents/[id]/route";
 import { POST as postSynchronization } from "@/app/api/synchronizations/route";
 import { prisma } from "@/lib/prisma";
-import { SynchronizationConflictError } from "@/server/repository/synchronization.repository";
+import { SynchronizationConflictError } from "@/server/errors/synchronization.error";
 import { merchandiseSynchronizationHandler } from "@/server/services/merchandise-synchronization.service";
 import { synchronizationService } from "@/server/services/synchronization.service";
 import type { JsonValue } from "@/types/json-value";

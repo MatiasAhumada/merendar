@@ -5,6 +5,7 @@ import { APPLICATION_ERROR_MESSAGES } from "@/constants/error-messages.constant"
 import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
 import { APPLICATION_CONFIG } from "@/config/application.config";
 import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Logout01Icon, Menu01Icon } from "@hugeicons/core-free-icons";
@@ -77,7 +78,11 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
     let isMounted = true;
     let preparationDebounceTimer = 0;
     setPreparationError("");
-    setPreparationMessage(isOnline ? OFFLINE_OPERATION_MESSAGES.PREPARANDO_AUTOMATICAMENTE_LAS_VISTAS_HABILITADAS : OFFLINE_OPERATION_MESSAGES.COMPROBANDO_LA_PREPARACION_GUARDADA_PARA_ESTE_DISPOSITIVO);
+    if (isOnline) {
+      setPreparationMessage(OFFLINE_OPERATION_MESSAGES.PREPARANDO_AUTOMATICAMENTE_LAS_VISTAS_HABILITADAS);
+    } else {
+      setPreparationMessage(OFFLINE_OPERATION_MESSAGES.COMPROBANDO_LA_PREPARACION_GUARDADA_PARA_ESTE_DISPOSITIVO);
+    }
 
     async function prepareAuthorizedWorkspace(forceRefresh = false) {
       try {
@@ -90,9 +95,11 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
         setHasOfflinePreparation(Boolean(currentPreparation));
 
         if (!isOnline) {
-          setPreparationMessage(currentPreparation
-            ? APPLICATION_UI_TEXT.PREPARATION_AVAILABLE_UNTIL(new Intl.DateTimeFormat(APPLICATION_CONFIG.DATE_FORMAT_LOCALE, { dateStyle: "short", timeStyle: "short" }).format(new Date(currentPreparation.expiresAt)))
-            : OFFLINE_OPERATION_MESSAGES.CONECTATE_PARA_PREPARAR_LAS_VISTAS_AUTORIZADAS_PARA_USO_SIN_CONEXION);
+          if (currentPreparation) {
+            setPreparationMessage(APPLICATION_UI_TEXT.PREPARATION_AVAILABLE_UNTIL(new Intl.DateTimeFormat(APPLICATION_CONFIG.DATE_FORMAT_LOCALE, { dateStyle: "short", timeStyle: "short" }).format(new Date(currentPreparation.expiresAt))));
+          } else {
+            setPreparationMessage(OFFLINE_OPERATION_MESSAGES.CONECTATE_PARA_PREPARAR_LAS_VISTAS_AUTORIZADAS_PARA_USO_SIN_CONEXION);
+          }
           return;
         }
 
@@ -115,7 +122,11 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
         }
       } catch (error) {
         if (isMounted) {
-          const message = error instanceof Error ? error.message : SYNC_SERVER_MESSAGES.NO_SE_PUDO_COMPLETAR_LA_PREPARACION_AUTOMATICA;
+          let message: string = SYNC_SERVER_MESSAGES.NO_SE_PUDO_COMPLETAR_LA_PREPARACION_AUTOMATICA;
+
+          if (error instanceof Error) {
+            message = error.message;
+          }
           setPreparationError(message);
           setPreparationMessage("");
           clientErrorHandler(error, () => {}, { logToConsole: false, showToast: false });
@@ -224,6 +235,31 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
     void completeSignOut();
   }
 
+  let preparationNotice: ReactNode = null;
+
+  if (preparationError) {
+    let preparationDetails: string = APPLICATION_UI_TEXT.CONECTATE_PARA_VOLVER_A_INTENTARLO;
+
+    if (hasOfflinePreparation) {
+      preparationDetails = APPLICATION_UI_TEXT.SE_CONSERVA_LA_ULTIMA_PREPARACION_VALIDA;
+    }
+
+    preparationNotice = (
+      <div className="mx-auto w-full max-w-7xl px-4 pt-3 sm:px-6 lg:px-8">
+        <Alert variant="destructive" role="status">
+          <AlertTitle>{APPLICATION_UI_TEXT.NO_SE_COMPLETO_LA_PREPARACION_AUTOMATICA}</AlertTitle>
+          <AlertDescription>{preparationError}{preparationDetails}</AlertDescription>
+        </Alert>
+      </div>
+    );
+  } else if (preparationMessage) {
+    preparationNotice = (
+      <p className="mx-auto w-full max-w-7xl px-4 pt-2 text-xs text-muted-foreground sm:px-6 lg:px-8" role="status" aria-live="polite">
+        {preparationMessage}
+      </p>
+    );
+  }
+
   return (
     <div className="min-h-screen lg:flex">
       <aside className="hidden w-64 shrink-0 border-r border-sidebar-border bg-sidebar lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col">
@@ -321,18 +357,7 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
           onQueueStatusChange={onQueueStatusChange}
         />
 
-        {preparationError ? (
-          <div className="mx-auto w-full max-w-7xl px-4 pt-3 sm:px-6 lg:px-8">
-            <Alert variant="destructive" role="status">
-              <AlertTitle>{APPLICATION_UI_TEXT.NO_SE_COMPLETO_LA_PREPARACION_AUTOMATICA}</AlertTitle>
-              <AlertDescription>{preparationError}{hasOfflinePreparation ? APPLICATION_UI_TEXT.SE_CONSERVA_LA_ULTIMA_PREPARACION_VALIDA : APPLICATION_UI_TEXT.CONECTATE_PARA_VOLVER_A_INTENTARLO}</AlertDescription>
-            </Alert>
-          </div>
-        ) : preparationMessage ? (
-          <p className="mx-auto w-full max-w-7xl px-4 pt-2 text-xs text-muted-foreground sm:px-6 lg:px-8" role="status" aria-live="polite">
-            {preparationMessage}
-          </p>
-        ) : null}
+        {preparationNotice}
 
         <main className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5 pb-28 sm:px-6 lg:px-8 lg:py-8">
           {pageContent}

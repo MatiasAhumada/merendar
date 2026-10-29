@@ -22,9 +22,11 @@ export async function getManagedUsers(userId: string, isOnline: boolean, search 
     }
 
     const persistCompleteCollection = search.trim().length === 0;
-    const cacheUpdated = persistCompleteCollection
-      ? await updateOfflineSnapshot(userId, ROUTES.USERS, parsedResponse.data)
-      : false;
+    let cacheUpdated = false;
+
+    if (persistCompleteCollection) {
+      cacheUpdated = await updateOfflineSnapshot(userId, ROUTES.USERS, parsedResponse.data);
+    }
     return apiDataResult(parsedResponse.data, cacheUpdated);
   } catch (error) {
     if (!isTransportFailure(error)) {

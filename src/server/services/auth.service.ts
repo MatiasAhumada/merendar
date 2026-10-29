@@ -1,14 +1,25 @@
 
 
 import { createHash, randomBytes, scrypt as scryptCallback, scryptSync, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
 import { AUTH } from "@/constants/auth.constant";
 import { authRepository } from "@/server/repository/auth.repository";
 import type { UserRole } from "@prisma/client";
 
-const scrypt = promisify(scryptCallback);
 const DUMMY_SALT = "merendar-auth-dummy-salt";
 const DUMMY_PASSWORD_HASH = scryptSync("invalid-password", DUMMY_SALT, 64).toString("hex");
+
+function derivePasswordKey(password: string, salt: string) {
+  return new Promise<Buffer>((resolve, reject) => {
+    scryptCallback(password, salt, 64, (error, derivedKey) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve(derivedKey);
+    });
+  });
+}
 
 export interface AuthenticatedUser {
   id: string;
@@ -35,7 +46,7 @@ async function verifyPassword(password: string, encodedHash: string) {
   const [salt, expectedHash] = encodedHash.split(":");
   const selectedSalt = salt ?? DUMMY_SALT;
   const selectedHash = expectedHash ?? DUMMY_PASSWORD_HASH;
-  const calculatedHash = (await scrypt(password, selectedSalt, 64)) as Buffer;
+  const calculatedHash = await derivePasswordKey(password, selectedSalt);
   const expectedBuffer = Buffer.from(selectedHash, "hex");
 
   return expectedBuffer.length === calculatedHash.length && timingSafeEqual(expectedBuffer, calculatedHash);
@@ -43,7 +54,7 @@ async function verifyPassword(password: string, encodedHash: string) {
 
 export async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
-  const passwordHash = (await scrypt(password, salt, 64)) as Buffer;
+  const passwordHash = await derivePasswordKey(password, salt);
 
   return `${salt}:${passwordHash.toString("hex")}`;
 }

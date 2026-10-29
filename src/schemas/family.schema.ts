@@ -87,8 +87,16 @@ function validateRequiredFamilyContact(
   family: { contactPhone?: string; contactEmail?: string },
   context: z.RefinementCtx,
 ) {
-  const phoneIsValid = family.contactPhone ? argentinePhoneSchema.safeParse(family.contactPhone).success : false;
-  const emailIsValid = family.contactEmail ? z.email().safeParse(family.contactEmail).success : false;
+  let phoneIsValid = false;
+  let emailIsValid = false;
+
+  if (family.contactPhone) {
+    phoneIsValid = argentinePhoneSchema.safeParse(family.contactPhone).success;
+  }
+
+  if (family.contactEmail) {
+    emailIsValid = z.email().safeParse(family.contactEmail).success;
+  }
 
   if (!phoneIsValid && !emailIsValid) {
     context.addIssue({

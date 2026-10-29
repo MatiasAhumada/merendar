@@ -156,7 +156,11 @@ export async function readActiveOfflineAccount() {
       const request = database.transaction(ACCOUNT_STORE, "readonly").objectStore(ACCOUNT_STORE).get(ACTIVE_ACCOUNT_KEY);
       request.onsuccess = () => {
         const accountId = offlineAccountSchema.safeParse(request.result);
-        resolve(accountId.success ? accountId.data.userId : null);
+        if (accountId.success) {
+          resolve(accountId.data.userId);
+        } else {
+          resolve(null);
+        }
       };
       request.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.ACTIVE_ACCOUNT_READ_FAILED));
     });
@@ -356,11 +360,19 @@ async function savePreparation(preparation: OfflinePreparation, documents: Offli
       existingDocumentsRequest.onsuccess = () => {
         const existingDocuments = offlinePreparedDocumentsSchema.safeParse(existingDocumentsRequest.result);
         documentStore.clear();
-        const localSheetDocuments = existingDocuments.success
-          ? existingDocuments.data
+        let localSheetDocuments: typeof documents = [];
+
+        if (existingDocuments.success) {
+          localSheetDocuments = existingDocuments.data
             .filter((document) => document.documentType === "beneficiary-sheet-local")
-            .map((document) => document.id.startsWith("local:") ? document : { ...document, id: `local:${document.id}` })
-          : [];
+            .map((document) => {
+              if (document.id.startsWith("local:")) {
+                return document;
+              }
+
+              return { ...document, id: `local:${document.id}` };
+            });
+        }
         for (const document of [...documents, ...localSheetDocuments]) {
           documentStore.put(document);
         }
@@ -680,7 +692,13 @@ export function prepareOfflineWorkspace(
   sessionExpiresAt: string,
   forceRefresh = false,
 ) {
-  const key = `${preparationKey(userId, capabilities, sessionExpiresAt)}:${forceRefresh ? "refresh" : "normal"}`;
+  let refreshMode = "normal";
+
+  if (forceRefresh) {
+    refreshMode = "refresh";
+  }
+
+  const key = `${preparationKey(userId, capabilities, sessionExpiresAt)}:${refreshMode}`;
   const activePreparation = pendingPreparations.get(key);
 
   if (activePreparation) {

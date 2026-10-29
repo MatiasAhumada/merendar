@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { userService } from "@/server/services/user.service";
 import { requireAdministrativeCapability } from "@/server/services/access-policy.service";
-import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
+import apiErrorHandler, { normalizeApiError } from "@/utils/handlers/apiError.handler";
 import { createUserRequestSchema } from "@/schemas/user.schema";
 
 const privateHeaders = PRIVATE_RESPONSE_HEADERS;
@@ -21,7 +21,8 @@ export async function GET(request: NextRequest) {
     const search = request.nextUrl.searchParams.get("search") ?? undefined;
     return NextResponse.json({ users: await userService.findAll(search) }, { headers: privateHeaders });
   } catch (error) {
-    return apiErrorHandler({ error: error instanceof ApiError ? error : new ApiError({ status: 500, message: USER_ERROR_MESSAGES.NO_SE_PUDIERON_CARGAR_LOS_USUARIOS, isOperational: false }), request });
+    const apiError = normalizeApiError(error, 500, USER_ERROR_MESSAGES.NO_SE_PUDIERON_CARGAR_LOS_USUARIOS);
+    return apiErrorHandler({ error: apiError, request });
   }
 }
 
@@ -33,6 +34,7 @@ export async function POST(request: NextRequest) {
     const created = await userService.create(input.data);
     return NextResponse.json({ user: { id: created.id, name: created.name, email: created.email, role: created.role, isActive: created.isActive } }, { status: 201, headers: privateHeaders });
   } catch (error) {
-    return apiErrorHandler({ error: error instanceof ApiError ? error : new ApiError({ status: 500, message: USER_ERROR_MESSAGES.NO_SE_PUDO_CREAR_EL_USUARIO, isOperational: false }), request });
+    const apiError = normalizeApiError(error, 500, USER_ERROR_MESSAGES.NO_SE_PUDO_CREAR_EL_USUARIO);
+    return apiErrorHandler({ error: apiError, request });
   }
 }

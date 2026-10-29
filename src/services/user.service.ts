@@ -30,7 +30,12 @@ export const userService = {
   },
 
   async findAll(search?: string) {
-    const params = search ? { search } : {};
+    const params: { search?: string } = {};
+
+    if (search) {
+      params.search = search;
+    }
+
     const { data } = await clientAxios.get(API_ROUTES.USERS, { params });
     return data;
   },
