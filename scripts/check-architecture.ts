@@ -84,6 +84,41 @@ for (const filePath of collectFiles(sourceRoot)) {
     };
     inspectElements(sourceFile);
   }
+
+  const inspectTypeScriptConventions = (node: ts.Node) => {
+    if (node.kind === ts.SyntaxKind.AnyKeyword) {
+      violations.push(`${relativePath} declara any; usá un tipo específico.`);
+    }
+
+    if (
+      ts.isBinaryExpression(node) &&
+      [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(node.operatorToken.kind) &&
+      [node.left.getText(sourceFile), node.right.getText(sourceFile)].some((operand) => ["null", "undefined", "true", "false"].includes(operand))
+    ) {
+      violations.push(`${relativePath} compara explícitamente con null, undefined o booleanos.`);
+    }
+
+    if (node.kind === ts.SyntaxKind.TypeOfExpression) {
+      let ancestor: ts.Node | undefined = node.parent;
+      let insideZodPreprocess = false;
+
+      while (ancestor) {
+        if (ts.isCallExpression(ancestor) && ts.isPropertyAccessExpression(ancestor.expression) && ancestor.expression.name.text === "preprocess") {
+          insideZodPreprocess = true;
+          break;
+        }
+
+        ancestor = ancestor.parent;
+      }
+
+      if (!insideZodPreprocess) {
+        violations.push(`${relativePath} usa typeof fuera de zod.preprocess().`);
+      }
+    }
+
+    ts.forEachChild(node, inspectTypeScriptConventions);
+  };
+  inspectTypeScriptConventions(sourceFile);
 }
 
 if (violations.length) {

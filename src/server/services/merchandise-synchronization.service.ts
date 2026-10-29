@@ -14,6 +14,7 @@ import {
   merchandisePayloadSchema,
   merchandiseUpdatePayloadSchema,
 } from "@/schemas/merchandise.schema";
+import { nullableSchema } from "@/schemas/offline.schema";
 import type { MerchandiseOperationPayload, MerchandisePayload, MerchandiseUpdatePayload } from "@/types/schema-contracts";
 
 interface DocumentInput {
@@ -442,7 +443,7 @@ export const merchandiseSynchronizationHandler: SynchronizationHandler = {
     }
 
     if (operation.operation === "create") {
-      if (!merchandisePayloadSchema.safeParse(payload).success || operation.baseVersion !== null) {
+      if (!merchandisePayloadSchema.safeParse(payload).success || !nullableSchema.safeParse(operation.baseVersion).success) {
         throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_ALTA_DE_MERCADERIA_NO_TIENE_UNA_VERSION_BASE_VALIDA);
       }
 
