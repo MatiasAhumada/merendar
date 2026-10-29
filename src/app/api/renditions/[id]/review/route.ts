@@ -2,8 +2,8 @@ import { PRIVATE_RESPONSE_HEADERS } from "@/constants/http.constant";
 import { RENDITION_ERROR_MESSAGES } from "@/constants/rendition.constant";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
-import { prisma } from "@/lib/prisma";
 import { requireRenditionReviewAccess } from "@/server/services/merchandise-access";
+import { reviewRenditionDocument } from "@/server/services/rendition.service";
 import { isSameOriginRequest } from "@/server/services/origin.service";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 import { renditionReviewPayloadSchema } from "@/schemas/rendition.schema";
@@ -25,28 +25,7 @@ export async function PATCH(request: NextRequest, context: RouteContext<"/api/re
     }
 
     const { id } = await context.params;
-    const existingRendition = await prisma.rendition.findUnique({ where: { id }, select: { id: true } });
-
-    if (!existingRendition) {
-      throw new ApiError({ status: 404, message: RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_RENDICION_SELECCIONADA });
-    }
-
-    const signedSheetCount = await prisma.renditionDocument.count({ where: { renditionId: id, documentType: "PLANILLA_FIRMADA", supersededBy: { none: {} } } });
-
-    if (!signedSheetCount) {
-      throw new ApiError({ status: 409, message: RENDITION_ERROR_MESSAGES.ADJUNTA_UNA_PLANILLA_FIRMADA_VIGENTE_ANTES_DE_REVISAR_LA_RENDICION });
-    }
-
-    const rendition = await prisma.rendition.update({
-      where: { id },
-      data: {
-        reviewStatus: review.data.status,
-        reviewNotes: review.data.notes ?? null,
-        reviewedAt: new Date(),
-        reviewedById: user.id,
-      },
-      select: { id: true, reviewStatus: true, reviewNotes: true, reviewedAt: true },
-    });
+    const rendition = await reviewRenditionDocument({ id, userId: user.id, ...review.data });
 
     return NextResponse.json({ rendition }, { headers: privateHeaders });
   } catch (error) {

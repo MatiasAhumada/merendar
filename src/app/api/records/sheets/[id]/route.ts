@@ -4,7 +4,7 @@ import { HTTP_CACHE_CONTROL, HTTP_HEADERS, HTTP_CONTENT_TYPES, PRIVATE_DOCUMENT_
 import { DELIVERY_ERROR_MESSAGES } from "@/constants/delivery.constant";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
-import { prisma } from "@/lib/prisma";
+import { findBeneficiarySheet } from "@/server/repository/record.repository";
 import { requireRecordReadAccess } from "@/server/services/record-access";
 import { createBeneficiarySheetPdf } from "@/server/services/beneficiary-sheet.service";
 import { ApiError } from "@/utils/handlers/apiError.handler";
@@ -14,7 +14,7 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/reco
   try {
     await requireRecordReadAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
     const { id } = await context.params;
-    const sheet = await prisma.beneficiarySheet.findUnique({ where: { id }, include: { period: { select: { label: true } } } });
+    const sheet = await findBeneficiarySheet(id);
 
     if (!sheet) {
       throw new ApiError({ status: 404, message: DELIVERY_ERROR_MESSAGES.NO_ENCONTRAMOS_ESA_PLANILLA });

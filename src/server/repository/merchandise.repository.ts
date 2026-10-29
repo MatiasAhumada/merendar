@@ -16,6 +16,13 @@ function beneficiaryCount(snapshot: unknown) {
 }
 
 export const merchandiseRepository = {
+  async findDocument(id: string) {
+    return prisma.merchandiseDocument.findUnique({
+      where: { id },
+      select: { originalName: true, contentType: true, content: true },
+    });
+  },
+
   async findAll() {
     const periods = await prisma.merchandisePeriod.findMany({
       include: {

@@ -2,7 +2,7 @@ import { PRIVATE_DOCUMENT_RESPONSE_HEADERS } from "@/constants/http.constant";
 import { MERCHANDISE_ERROR_MESSAGES } from "@/constants/merchandise.constant";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
-import { prisma } from "@/lib/prisma";
+import { merchandiseRepository } from "@/server/repository/merchandise.repository";
 import { requireMerchandiseReadAccess } from "@/server/services/merchandise-access";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 
@@ -12,10 +12,7 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/merc
   try {
     await requireMerchandiseReadAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
     const { id } = await context.params;
-    const document = await prisma.merchandiseDocument.findUnique({
-      where: { id },
-      select: { originalName: true, contentType: true, content: true },
-    });
+    const document = await merchandiseRepository.findDocument(id);
 
     if (!document) {
       return NextResponse.json({ error: { message: MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_COMPROBANTE_SOLICITADO } }, { status: 404, headers: privateHeaders });

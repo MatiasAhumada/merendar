@@ -3,7 +3,8 @@
 import { OFFLINE_OPERATION_MESSAGES, SYNC_SERVER_MESSAGES } from "@/constants/offline.constant";
 import { DELIVERY_ERROR_MESSAGES } from "@/constants/delivery.constant";
 import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
-import { Prisma, type Prisma as PrismaTypes } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import { lockFamilyRows } from "@/server/repository/record.repository";
 import { nullableSchema } from "@/schemas/offline.schema";
 import type { SynchronizationHandler } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
@@ -18,21 +19,6 @@ export class RecordSynchronizationError extends Error {
     this.code = code;
     this.status = status;
   }
-}
-
-export async function lockFamilyRows(transaction: PrismaTypes.TransactionClient, familyIds: string[]) {
-  const orderedFamilyIds = [...new Set(familyIds)].sort();
-
-  if (!orderedFamilyIds.length) {
-    return;
-  }
-
-  await transaction.$queryRaw(Prisma.sql`
-    SELECT "id" FROM "Family"
-    WHERE "id" IN (${Prisma.join(orderedFamilyIds)})
-    ORDER BY "id"
-    FOR UPDATE
-  `);
 }
 
 export const recordSynchronizationHandler: SynchronizationHandler = {
