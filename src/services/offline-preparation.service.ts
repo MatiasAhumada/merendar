@@ -1,74 +1,18 @@
+import type { z } from "zod";
 
 
 import { HTTP_CONTENT_TYPES, HTTP_REQUEST, HTTP_RESPONSE_TYPES, HTTP_CACHE_CONTROL, HTTP_HEADERS, NO_STORE_REQUEST_HEADERS } from "@/constants/http.constant";
-import { z } from "zod";
 import { OFFLINE_PREPARATION, OFFLINE_PREPARATION_MESSAGES, type OfflinePreparedRoute } from "@/constants/offline.constant";
 import { API_ROUTES, ROUTES } from "@/constants/routes.constant";
-import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
+import { dashboardSummaryResponseSchema } from "@/schemas/dashboard.schema";
+import { beneficiarySheetCollectionSchema, documentTypeSchema, jsonRecordSchema, jsonValueSchema, legacyOfflinePreparationSchema, nonEmptyStringSchema, offlineAccountSchema, offlinePreparationSchema, offlinePreparedDocumentSchema, offlinePreparedDocumentsSchema, previousOfflinePreparationSchema } from "@/schemas/offline.schema";
 import axios from "axios";
 
 import clientAxios from "@/utils/clientAxios.util";
 import type { JsonValue } from "@/types/json-value";
 
-const offlineSnapshotSchema = z.object({
-  schemaVersion: z.literal(OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION),
-  capturedAt: z.iso.datetime(),
-  data: z.json(),
-});
-const offlinePreparationSchema = z.object({
-  schemaVersion: z.literal(OFFLINE_PREPARATION.SNAPSHOT_SCHEMA_VERSION),
-  userId: z.string().min(1),
-  userName: z.string().min(1),
-  roleLabel: z.string().min(1),
-  capabilities: z.array(z.string()),
-  sessionExpiresAt: z.iso.datetime(),
-  expiresAt: z.iso.datetime(),
-  preparedAt: z.iso.datetime(),
-  snapshots: z.record(z.string(), offlineSnapshotSchema),
-});
-const legacyOfflinePreparationSchema = z.object({
-  userId: z.string().min(1),
-  userName: z.string().min(1),
-  roleLabel: z.string().min(1),
-  capabilities: z.array(z.string()),
-  sessionExpiresAt: z.iso.datetime(),
-  expiresAt: z.iso.datetime(),
-  preparedAt: z.iso.datetime(),
-  snapshots: z.record(z.string(), z.json()),
-});
-const previousOfflineSnapshotSchema = z.object({
-  schemaVersion: z.literal(3),
-  capturedAt: z.iso.datetime(),
-  data: z.json(),
-});
-const previousOfflinePreparationSchema = z.object({
-  schemaVersion: z.literal(3),
-  userId: z.string().min(1),
-  userName: z.string().min(1),
-  roleLabel: z.string().min(1),
-  capabilities: z.array(z.string()),
-  sessionExpiresAt: z.iso.datetime(),
-  expiresAt: z.iso.datetime(),
-  preparedAt: z.iso.datetime(),
-  snapshots: z.record(z.string(), previousOfflineSnapshotSchema),
-});
-const offlinePreparedDocumentSchema = z.object({
-  id: z.string().min(1),
-  originalName: z.string().min(1),
-  contentType: z.string().min(1),
-  byteSize: z.number().int().nonnegative(),
-  content: z.instanceof(Blob),
-  documentType: z.enum(["merchandise", "rendition", "beneficiary-sheet", "beneficiary-sheet-local"]).optional(),
-});
 const merchandiseDocumentUrl = API_ROUTES.MERCHANDISE_DOCUMENT;
 const renditionDocumentUrl = API_ROUTES.RENDITION_DOCUMENT;
-const beneficiarySheetCollectionSchema = z.object({
-  sheets: z.array(z.object({
-    id: z.string().min(1),
-    periodId: z.string().min(1),
-    version: z.number().int().positive(),
-  })),
-});
 
 export type OfflinePreparation = z.infer<typeof offlinePreparationSchema>;
 export type OfflinePreparedDocument = z.infer<typeof offlinePreparedDocumentSchema>;
@@ -211,7 +155,7 @@ export async function readActiveOfflineAccount() {
     return await new Promise<string | null>((resolve, reject) => {
       const request = database.transaction(ACCOUNT_STORE, "readonly").objectStore(ACCOUNT_STORE).get(ACTIVE_ACCOUNT_KEY);
       request.onsuccess = () => {
-        const accountId = z.object({ userId: z.string().min(1) }).safeParse(request.result);
+        const accountId = offlineAccountSchema.safeParse(request.result);
         resolve(accountId.success ? accountId.data.userId : null);
       };
       request.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.ACTIVE_ACCOUNT_READ_FAILED));
@@ -301,15 +245,15 @@ function collectDocumentReferences(value: JsonValue, references: OfflineDocument
     return;
   }
 
-  const parsedObject = z.record(z.string(), z.json()).safeParse(value);
+  const parsedObject = jsonRecordSchema.safeParse(value);
   if (!parsedObject.success) {
     return;
   }
 
-  const documentId = z.string().min(1).safeParse(parsedObject.data.id);
-  const originalName = z.string().min(1).safeParse(parsedObject.data.originalName);
-  const contentType = z.string().min(1).safeParse(parsedObject.data.contentType);
-  const documentType = z.enum(["PLANILLA_FIRMADA", "REMITO", "RESPALDO"]).safeParse(parsedObject.data.documentType);
+  const documentId = nonEmptyStringSchema.safeParse(parsedObject.data.id);
+  const originalName = nonEmptyStringSchema.safeParse(parsedObject.data.originalName);
+  const contentType = nonEmptyStringSchema.safeParse(parsedObject.data.contentType);
+  const documentType = documentTypeSchema.safeParse(parsedObject.data.documentType);
 
   if (documentId.success && originalName.success && contentType.success) {
     references.push({ id: documentId.data, originalName: originalName.data, url: merchandiseDocumentUrl(documentId.data), documentType: "merchandise" });
@@ -379,7 +323,7 @@ async function downloadPreparedDocuments(snapshots: OfflinePreparation["snapshot
     documents.push({
       id: reference.id,
       originalName: reference.originalName,
-      contentType: z.string().min(1).parse(contentType),
+      contentType: nonEmptyStringSchema.parse(contentType),
       byteSize: content.size,
       content,
       documentType: reference.documentType,
@@ -410,7 +354,7 @@ async function savePreparation(preparation: OfflinePreparation, documents: Offli
       const documentStore = transaction.objectStore(OFFLINE_PREPARATION.DOCUMENTS_STORE);
       const existingDocumentsRequest = documentStore.getAll();
       existingDocumentsRequest.onsuccess = () => {
-        const existingDocuments = z.array(offlinePreparedDocumentSchema).safeParse(existingDocumentsRequest.result);
+        const existingDocuments = offlinePreparedDocumentsSchema.safeParse(existingDocumentsRequest.result);
         documentStore.clear();
         const localSheetDocuments = existingDocuments.success
           ? existingDocuments.data
@@ -551,7 +495,7 @@ export async function readOfflinePreparation(userId: string): Promise<OfflinePre
 }
 
 export async function updateOfflinePreparedSnapshot(userId: string, route: OfflinePreparedRoute, data: unknown) {
-  const parsedData = z.json().safeParse(data);
+  const parsedData = jsonValueSchema.safeParse(data);
   if (!parsedData.success || !globalThis.indexedDB) {
     return false;
   }
@@ -619,7 +563,7 @@ export async function readOfflinePreparedDocuments(userId: string): Promise<Offl
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.READ_DOCUMENTS_FAILED));
     });
-    const parsedDocuments = z.array(offlinePreparedDocumentSchema).safeParse(storedDocuments);
+    const parsedDocuments = offlinePreparedDocumentsSchema.safeParse(storedDocuments);
     if (!parsedDocuments.success) {
       throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.DOCUMENT_FORMAT_UNRECOGNIZED);
     }
@@ -798,7 +742,7 @@ async function prepareOfflineWorkspaceOnce(
     const requiredCapabilities = OFFLINE_PREPARATION.ROUTE_CAPABILITIES[request.route];
     if (requiredCapabilities.some((capability) => capabilities.includes(capability))) {
       const response = await clientAxios.get<unknown>(request.endpoint, { headers: NO_STORE_REQUEST_HEADERS });
-      const parsedSnapshot = z.json().safeParse(response.data);
+      const parsedSnapshot = jsonValueSchema.safeParse(response.data);
 
       if (!parsedSnapshot.success) {
         throw new OfflinePreparationError(OFFLINE_PREPARATION_MESSAGES.SNAPSHOT_INVALID);

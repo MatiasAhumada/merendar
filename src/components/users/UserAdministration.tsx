@@ -15,7 +15,7 @@ import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { getManagedUsers } from "@/services/client/user-administration-data.service";
 import clientAxios from "@/utils/clientAxios.util";
 
-import type { ManagedUser } from "@/validations/user-administration.validation";
+import type { ManagedUser } from "@/types/schema-contracts";
 
 export function UserAdministration({ userId }: { userId: string }) {
   const isOnline = useNetworkStatus();

@@ -3,19 +3,22 @@
 import { OFFLINE_OPERATION_MESSAGES } from "@/constants/offline.constant";
 import { PRIVATE_RESPONSE_HEADERS } from "@/constants/http.constant";
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+
 import { AUTH } from "@/constants/auth.constant";
 import { authService } from "@/server/services/auth.service";
 import { isSameOriginRequest } from "@/server/services/origin.service";
 import { createSynchronizationHandlers, synchronizationService } from "@/server/services/synchronization.service";
-import { familyDeactivationTargetSchema, familyMemberChangeSchema, familyPayloadSchema } from "@/validations/family.validation";
+import { familyDeactivationTargetSchema, familyMemberChangeSchema, familyPayloadSchema } from "@/schemas/family.schema";
 import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
-import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/validations/record.validation";
-import { renditionSynchronizationPayloadSchema } from "@/validations/rendition.validation";
+import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
+import { renditionSynchronizationPayloadSchema } from "@/schemas/rendition.schema";
 import { RenditionDocumentError } from "@/server/services/rendition-synchronization.service";
 import { RecordSynchronizationError } from "@/server/services/record-synchronization.service";
 import { FamilyDeactivationSyncError } from "@/server/services/family-synchronization.service";
 import { hasEffectiveCapability } from "@/server/services/access-policy.service";
+import { synchronizationRequestSchema } from "@/schemas/synchronization.schema";
+import { nonNegativeIntegerSchema, nullableSchema } from "@/schemas/offline.schema";
+import { stringSchema } from "@/schemas/common.schema";
 import type { SyncResource as PrismaSyncResource } from "@prisma/client";
 
 import {
@@ -30,18 +33,7 @@ import {
   merchandiseCancellationPayloadSchema,
   merchandisePayloadSchema,
   merchandiseUpdatePayloadSchema,
-} from "@/validations/merchandise.validation";
-
-const synchronizationSchema = z.object({
-  operationId: z.uuid(),
-  userId: z.string().min(1),
-  resource: z.enum(["families", "remittances", "records", "renditions"]),
-  resourceId: z.string().min(1),
-  operation: z.enum(["create", "update", "delete"]),
-  baseVersion: z.number().int().nonnegative().nullable(),
-  dependencies: z.array(z.uuid()).max(100),
-  payload: z.json(),
-}).strict();
+} from "@/schemas/merchandise.schema";
 
 const prismaResourceByClientResource: Record<SyncResource, PrismaSyncResource> = {
   families: "FAMILIES",
@@ -82,7 +74,7 @@ export async function POST(request: NextRequest) {
     return errorResponse(400, "invalid_body", OFFLINE_OPERATION_MESSAGES.EL_CUERPO_DE_LA_OPERACION_NO_ES_VALIDO);
   }
 
-  const parsedOperation = synchronizationSchema.safeParse(body);
+  const parsedOperation = synchronizationRequestSchema.safeParse(body);
 
   if (!parsedOperation.success) {
     return errorResponse(400, "invalid_operation", OFFLINE_OPERATION_MESSAGES.REVISA_LOS_DATOS_DEL_CAMBIO_PENDIENTE);
@@ -94,7 +86,7 @@ export async function POST(request: NextRequest) {
 
   if (parsedOperation.data.resource === "families") {
     if (parsedOperation.data.operation === "create") {
-      const baseVersionValidation = z.null().safeParse(parsedOperation.data.baseVersion);
+      const baseVersionValidation = nullableSchema.safeParse(parsedOperation.data.baseVersion);
 
       if (!baseVersionValidation.success) {
         return errorResponse(400, "invalid_family_operation", OFFLINE_OPERATION_MESSAGES.EL_ALTA_DE_FAMILIA_NO_TIENE_UNA_VERSION_BASE_VALIDA);
@@ -109,7 +101,7 @@ export async function POST(request: NextRequest) {
       }
 
       parsedOperation.data.payload = parsedFamilyPayload.data;
-    } else if (parsedOperation.data.operation === "update" && z.number().int().nonnegative().safeParse(parsedOperation.data.baseVersion).success) {
+    } else if (parsedOperation.data.operation === "update" && nonNegativeIntegerSchema.safeParse(parsedOperation.data.baseVersion).success) {
       const parsedMemberChange = familyMemberChangeSchema.safeParse(parsedOperation.data.payload);
 
       if (!parsedMemberChange.success) {
@@ -119,7 +111,7 @@ export async function POST(request: NextRequest) {
       }
 
       parsedOperation.data.payload = parsedMemberChange.data;
-    } else if (parsedOperation.data.operation === "delete" && z.number().int().nonnegative().safeParse(parsedOperation.data.baseVersion).success) {
+    } else if (parsedOperation.data.operation === "delete" && nonNegativeIntegerSchema.safeParse(parsedOperation.data.baseVersion).success) {
       const parsedTarget = familyDeactivationTargetSchema.safeParse(parsedOperation.data.payload);
 
       if (!parsedTarget.success) {
@@ -137,7 +129,7 @@ export async function POST(request: NextRequest) {
 
     // Recover operations created by the earlier client serializer, which
     // stored the JSON representation one level too deep as a string.
-    const serializedPayload = z.string().safeParse(rawPayload);
+    const serializedPayload = stringSchema.safeParse(rawPayload);
 
     if (serializedPayload.success) {
       try {
@@ -150,7 +142,7 @@ export async function POST(request: NextRequest) {
     let normalizedPayload: JsonValue;
     let merchandiseId: string;
 
-    if (parsedOperation.data.operation === "create" && z.null().safeParse(parsedOperation.data.baseVersion).success) {
+    if (parsedOperation.data.operation === "create" && nullableSchema.safeParse(parsedOperation.data.baseVersion).success) {
       const parsedPayload = merchandisePayloadSchema.safeParse(rawPayload);
 
       if (!parsedPayload.success) {
@@ -159,7 +151,7 @@ export async function POST(request: NextRequest) {
 
       normalizedPayload = parsedPayload.data;
       merchandiseId = parsedPayload.data.id;
-    } else if (parsedOperation.data.operation === "update" && z.number().int().nonnegative().safeParse(parsedOperation.data.baseVersion).success) {
+    } else if (parsedOperation.data.operation === "update" && nonNegativeIntegerSchema.safeParse(parsedOperation.data.baseVersion).success) {
       const parsedPayload = merchandiseUpdatePayloadSchema.safeParse(rawPayload);
 
       if (!parsedPayload.success) {
@@ -168,7 +160,7 @@ export async function POST(request: NextRequest) {
 
       normalizedPayload = parsedPayload.data;
       merchandiseId = parsedPayload.data.id;
-    } else if (parsedOperation.data.operation === "delete" && z.number().int().nonnegative().safeParse(parsedOperation.data.baseVersion).success) {
+    } else if (parsedOperation.data.operation === "delete" && nonNegativeIntegerSchema.safeParse(parsedOperation.data.baseVersion).success) {
       const parsedPayload = merchandiseCancellationPayloadSchema.safeParse(rawPayload);
 
       if (!parsedPayload.success) {
@@ -189,7 +181,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (parsedOperation.data.resource === "records") {
-    const validBaseVersion = z.null().safeParse(parsedOperation.data.baseVersion);
+    const validBaseVersion = nullableSchema.safeParse(parsedOperation.data.baseVersion);
     const parsedRecordPayload = distributionRecordPayloadSchema.safeParse(parsedOperation.data.payload);
     const parsedSheetDraft = beneficiarySheetDraftSchema.safeParse(parsedOperation.data.payload);
 
@@ -208,7 +200,7 @@ export async function POST(request: NextRequest) {
 
   if (parsedOperation.data.resource === "renditions") {
     const parsedPayload = renditionSynchronizationPayloadSchema.safeParse(parsedOperation.data.payload);
-    const validBaseVersion = z.null().safeParse(parsedOperation.data.baseVersion);
+    const validBaseVersion = nullableSchema.safeParse(parsedOperation.data.baseVersion);
 
     if (!parsedPayload.success || parsedPayload.data.id !== parsedOperation.data.resourceId) {
       return errorResponse(400, "invalid_rendition_operation", OFFLINE_OPERATION_MESSAGES.REVISA_LOS_ARCHIVOS_O_LA_REVISION_PENDIENTE_ANTES_DE_SINCRONIZAR);

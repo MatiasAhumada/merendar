@@ -18,8 +18,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineOperation, listOfflineOperations, resolveOfflineConflict, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace";
-import { merchandiseCancellationPayloadSchema, merchandiseOperationPayloadSchema, merchandisePayloadSchema, merchandiseUpdatePayloadSchema, type MerchandiseCancellationPayload, type MerchandiseOperationPayload, type MerchandisePayload, type MerchandiseUpdatePayload } from "@/validations/merchandise.validation";
-import { z } from "zod";
+import { duplicateRemittanceConflictSchema, merchandiseCancellationPayloadSchema, merchandiseOperationPayloadSchema, merchandisePayloadSchema, merchandiseUpdatePayloadSchema, receiptLimitConflictSchema } from "@/schemas/merchandise.schema";
+import type { MerchandiseCancellationPayload, MerchandiseOperationPayload, MerchandisePayload, MerchandiseUpdatePayload } from "@/types/schema-contracts";
+import { jsonValueSchema } from "@/schemas/offline.schema";
 import { RENDITION_LIMITS } from "@/constants/rendition.constant";
 import { getMerchandiseCollection } from "@/services/client/merchandise-data.service";
 import {
@@ -78,18 +79,6 @@ interface PendingRecord {
   operation: OfflineOperation;
   payload: MerchandiseOperationPayload;
 }
-
-const receiptLimitConflictSchema = z.object({
-  kind: z.literal("receipt_exceeds_quota"),
-  approvedQuantity: z.number().int(),
-  receivedSoFar: z.number().int(),
-  attemptedQuantity: z.number().int(),
-});
-
-const duplicateRemittanceConflictSchema = z.object({
-  kind: z.literal("remittance_number_exists"),
-  remittanceNumber: z.string(),
-});
 
 function formatDate(date: string) {
   return new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(date));
@@ -615,7 +604,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
       operation,
       baseVersion,
       dependencies: queuedDependencies(currentOperations, dependencyRecordIds),
-      payload: z.json().parse(JSON.parse(JSON.stringify(parsedPayload.data))),
+      payload: jsonValueSchema.parse(JSON.parse(JSON.stringify(parsedPayload.data))),
     });
     setOperations((existingOperations) => [...existingOperations, queuedOperation]);
 
@@ -645,7 +634,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
       ...(newNumber ? { remittanceNumber: newNumber } : {}),
       ...(newQuantityText ? { receivedQuantity: Number(newQuantityText) } : {}),
     };
-    const payloadJson = z.json().parse(JSON.stringify(correctedPayload));
+    const payloadJson = jsonValueSchema.parse(JSON.stringify(correctedPayload));
     await updateOfflineOperationPayload(userId, operation.operationId, payloadJson);
     await Promise.all([refreshQueue(), synchronize()]);
   }

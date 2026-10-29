@@ -3,46 +3,12 @@
 import { NO_CACHE_REQUEST_HEADERS } from "@/constants/http.constant";
 import { OFFLINE_OPERATION_MESSAGES, OFFLINE_STORAGE, SYNC_MESSAGES, SYNC_ROUTES } from "@/constants/offline.constant";
 import { isOfflineOperationEnabled } from "@/constants/offline-contract.constant";
-import { z } from "zod";
 import type { JsonValue } from "@/types/json-value";
 import type { OfflineOperation, OfflineOperationInput, SynchronizationResult } from "@/types/offline-operation";
 import axios from "axios";
 import clientAxios from "@/utils/clientAxios.util";
+import { offlineOperationSchema, synchronizationErrorSchema, synchronizationResultSchema, offlineOperationsSchema } from "@/schemas/offline.schema";
 
-const synchronizationResultSchema = z.object({
-  operationId: z.uuid(),
-  resourceVersion: z.number().int().nonnegative(),
-  result: z.json(),
-  replayed: z.boolean(),
-});
-
-const synchronizationErrorSchema = z.object({
-  error: z.object({
-    code: z.string(),
-    message: z.string(),
-    currentVersion: z.number().int().nonnegative().optional(),
-    current: z.json().optional(),
-  }),
-});
-const offlineOperationSchema = z.object({
-  operationId: z.uuid(),
-  userId: z.string().min(1),
-  sessionExpiresAt: z.iso.datetime(),
-  resource: z.enum(["families", "remittances", "records", "renditions"]),
-  resourceId: z.string().min(1),
-  operation: z.enum(["create", "update", "delete"]),
-  baseVersion: z.number().int().nonnegative().nullable(),
-  dependencies: z.array(z.uuid()),
-  payload: z.json(),
-  createdAt: z.iso.datetime(),
-  status: z.enum(["pending", "syncing", "synced", "error", "conflict"]),
-  attempts: z.number().int().nonnegative(),
-  leaseExpiresAt: z.number().nullable(),
-  message: z.string().nullable(),
-  remoteVersion: z.number().int().nonnegative().nullable(),
-  remoteSnapshot: z.json().nullable(),
-  result: z.json().nullable(),
-});
 
 export class OfflineQueueError extends Error {
   constructor(message: string) {
@@ -175,7 +141,7 @@ export async function listOfflineOperations(userId: string): Promise<OfflineOper
         .objectStore(OFFLINE_STORAGE.OPERATIONS_STORE)
         .getAll();
       request.onsuccess = () => {
-        const parsedOperations = z.array(offlineOperationSchema).safeParse(request.result);
+        const parsedOperations = offlineOperationsSchema.safeParse(request.result);
 
         if (!parsedOperations.success) {
           reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_FORMAT_UNRECOGNIZED));
@@ -200,7 +166,7 @@ async function pruneCompletedOperations(userId: string) {
       const store = transaction.objectStore(OFFLINE_STORAGE.OPERATIONS_STORE);
       const request = store.getAll();
       request.onsuccess = () => {
-        const parsedOperations = z.array(offlineOperationSchema).safeParse(request.result);
+        const parsedOperations = offlineOperationsSchema.safeParse(request.result);
 
         if (!parsedOperations.success) {
           reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_FORMAT_UNRECOGNIZED));
@@ -278,7 +244,7 @@ async function claimNextOperation(userId: string): Promise<OfflineOperation | nu
       const store = transaction.objectStore(OFFLINE_STORAGE.OPERATIONS_STORE);
       const request = store.getAll();
       request.onsuccess = () => {
-        const parsedOperations = z.array(offlineOperationSchema).safeParse(request.result);
+        const parsedOperations = offlineOperationsSchema.safeParse(request.result);
 
         if (!parsedOperations.success) {
           reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_FORMAT_UNRECOGNIZED));
@@ -528,7 +494,7 @@ export async function resolveOfflineConflict(userId: string, operationId: string
         store.add(replacementOperation);
         const request = store.getAll();
         request.onsuccess = () => {
-          const parsedOperations = z.array(offlineOperationSchema).safeParse(request.result);
+          const parsedOperations = offlineOperationsSchema.safeParse(request.result);
 
           if (!parsedOperations.success) {
             reject(new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.QUEUE_FORMAT_UNRECOGNIZED));

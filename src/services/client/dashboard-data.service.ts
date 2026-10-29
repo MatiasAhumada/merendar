@@ -3,7 +3,7 @@
 import { NO_STORE_REQUEST_HEADERS } from "@/constants/http.constant";
 import { DASHBOARD_ERROR_MESSAGES } from "@/constants/dashboard.constant";
 import { API_ROUTES } from "@/constants/routes.constant";
-import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
+import { dashboardSummaryResponseSchema } from "@/schemas/dashboard.schema";
 import { apiDataResult, isTransportFailure, readOfflineSnapshot, updateOfflineSnapshot } from "@/services/client/offline-snapshot.service";
 import clientAxios from "@/utils/clientAxios.util";
 

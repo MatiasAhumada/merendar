@@ -12,10 +12,8 @@ import {
   merchandiseOperationPayloadSchema,
   merchandisePayloadSchema,
   merchandiseUpdatePayloadSchema,
-  type MerchandiseOperationPayload,
-  type MerchandisePayload,
-  type MerchandiseUpdatePayload,
-} from "@/validations/merchandise.validation";
+} from "@/schemas/merchandise.schema";
+import type { MerchandiseOperationPayload, MerchandisePayload, MerchandiseUpdatePayload } from "@/types/schema-contracts";
 
 interface DocumentInput {
   originalName: string;

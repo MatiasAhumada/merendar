@@ -17,7 +17,7 @@ import { clientErrorHandler } from "@/utils/handlers/clientHandler";
 import { getAccessPolicySnapshot } from "@/services/client/access-policy-data.service";
 import clientAxios from "@/utils/clientAxios.util";
 
-import type { PolicySnapshot } from "@/validations/access-policy-snapshot.validation";
+import type { PolicySnapshot } from "@/types/schema-contracts";
 
 interface PolicyRecord {
   role: UserRole;

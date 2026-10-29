@@ -3,7 +3,7 @@
 import { NO_STORE_REQUEST_HEADERS } from "@/constants/http.constant";
 import { FAMILY_ERROR_MESSAGES } from "@/constants/family.constant";
 import { API_ROUTES, ROUTES } from "@/constants/routes.constant";
-import { familyCollectionSchema } from "@/validations/family.validation";
+import { familyCollectionSchema } from "@/schemas/family.schema";
 import { apiDataResult, isTransportFailure, readOfflineSnapshot, updateOfflineSnapshot } from "@/services/client/offline-snapshot.service";
 import clientAxios from "@/utils/clientAxios.util";
 

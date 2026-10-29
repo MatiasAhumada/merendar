@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRenditionReviewAccess } from "@/server/services/merchandise-access";
 import { isSameOriginRequest } from "@/server/services/origin.service";
 import { ApiError } from "@/utils/handlers/apiError.handler";
-import { renditionReviewPayloadSchema } from "@/validations/rendition.validation";
+import { renditionReviewPayloadSchema } from "@/schemas/rendition.schema";
 
 const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 

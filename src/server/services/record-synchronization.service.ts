@@ -2,9 +2,9 @@
 
 import { OFFLINE_OPERATION_MESSAGES, SYNC_SERVER_MESSAGES } from "@/constants/offline.constant";
 import { DELIVERY_ERROR_MESSAGES } from "@/constants/delivery.constant";
-import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/validations/record.validation";
+import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
 import { Prisma, type Prisma as PrismaTypes } from "@prisma/client";
-import { z } from "zod";
+import { nullableSchema } from "@/schemas/offline.schema";
 import type { SynchronizationHandler } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
 
@@ -37,7 +37,7 @@ export async function lockFamilyRows(transaction: PrismaTypes.TransactionClient,
 
 export const recordSynchronizationHandler: SynchronizationHandler = {
   async apply(transaction, operation) {
-    const validBaseVersion = z.null().safeParse(operation.baseVersion);
+    const validBaseVersion = nullableSchema.safeParse(operation.baseVersion);
 
     if (operation.operation !== "create" || !validBaseVersion.success) {
       throw new Error(DELIVERY_ERROR_MESSAGES.EL_REGISTRO_SOLO_PERMITE_ALTAS_NUEVAS);

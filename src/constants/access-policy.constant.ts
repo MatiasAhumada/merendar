@@ -11,7 +11,7 @@ export const ACCESS_CAPABILITY_OPTIONS = [
   "RENDITIONS_READ",
   "RENDITIONS_WRITE",
   "RENDITIONS_REVIEW",
-] satisfies AccessCapability[];
+] as const satisfies readonly AccessCapability[];
 
 const ACCESS_CAPABILITY_FEATURE_LABELS = {
   DASHBOARD: "Inicio",

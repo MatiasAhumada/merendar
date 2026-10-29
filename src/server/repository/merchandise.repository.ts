@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { beneficiaryCountSchema } from "@/schemas/synchronization.schema";
 import { prisma } from "@/lib/prisma";
 
 const documentSummarySelect = {
@@ -9,7 +9,6 @@ const documentSummarySelect = {
   createdAt: true,
 } as const;
 
-const beneficiaryCountSchema = z.object({ beneficiaries: z.array(z.unknown()) });
 
 function beneficiaryCount(snapshot: unknown) {
   const parsedSnapshot = beneficiaryCountSchema.safeParse(snapshot);

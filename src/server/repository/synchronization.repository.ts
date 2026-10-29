@@ -2,21 +2,17 @@
 
 import { SYNC_SERVER_MESSAGES, OFFLINE_OPERATION_MESSAGES } from "@/constants/offline.constant";
 import { Prisma, type SyncResource } from "@prisma/client";
-import { z } from "zod";
+import { currentRecordSchema, serializationConflictSchema } from "@/schemas/synchronization.schema";
 import { prisma } from "@/lib/prisma";
 import type { SubmittedSyncOperation, SynchronizationHandler } from "@/interfaces/synchronization.interface";
 import type { JsonValue } from "@/types/json-value";
-
-const adapterSerializationConflictSchema = z.object({
-  cause: z.object({ originalCode: z.literal("40001") }).passthrough(),
-}).passthrough();
 
 function isRetryableTransactionError(error: unknown) {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     return error.code === SYNC_SERVER_MESSAGES.P2002 || error.code === SYNC_SERVER_MESSAGES.P2034;
   }
 
-  return adapterSerializationConflictSchema.safeParse(error).success;
+  return serializationConflictSchema.safeParse(error).success;
 }
 
 export class SynchronizationConflictError extends Error {
@@ -114,7 +110,7 @@ export const synchronizationRepository = {
 
           if (applied.type === "conflict") {
             let message: string = SYNC_SERVER_MESSAGES.EL_REGISTRO_CAMBIO_EN_OTRO_DISPOSITIVO;
-            const currentRecord = z.record(z.string(), z.json()).safeParse(applied.current);
+            const currentRecord = currentRecordSchema.safeParse(applied.current);
             if (currentRecord.success && currentRecord.data.kind === "already-recorded") {
               message = OFFLINE_OPERATION_MESSAGES.ESTE_BENEFICIARIO_YA_TIENE_UN_REGISTRO_CONFIRMADO_EN_EL_PERIODO_REVISA_LOS;
             }

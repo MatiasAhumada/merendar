@@ -4,23 +4,15 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { UserRole } from "@prisma/client";
 import { NextRequest } from "next/server";
-import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { GET, POST } from "@/app/api/families/route";
 import { DELETE as deactivateFamily, PATCH } from "@/app/api/families/[id]/route";
 import { POST as addFamilyMember } from "@/app/api/families/[id]/members/route";
 import { DELETE as deactivateFamilyMember, PATCH as updateFamilyMember } from "@/app/api/families/[id]/members/[memberId]/route";
 import { POST as synchronizeOperation } from "@/app/api/synchronizations/route";
-import { familyCollectionSchema, familyResponseSchema } from "@/validations/family.validation";
+import { familyCollectionSchema, familyResponseSchema } from "@/schemas/family.schema";
+import { familyErrorResponseSchema, familySynchronizationErrorSchema, familySynchronizationResponseSchema } from "./schemas/family-contract.schema";
 
-const errorSchema = z.object({ error: z.object({ message: z.string(), details: z.record(z.string(), z.array(z.string())).optional() }) });
-const synchronizationResponseSchema = z.object({
-  operationId: z.uuid(),
-  resourceVersion: z.number(),
-  replayed: z.boolean(),
-  result: z.object({ resourceId: z.string(), name: z.string() }),
-});
-const synchronizationErrorSchema = z.object({ error: z.object({ code: z.string() }) });
 
 function createRequest(url: string, method: string, token: string, body?: unknown, origin = "http://localhost:3000") {
   const headers = new Headers({ origin, host: "localhost:3000", cookie: `merendar_session=${token}` });
@@ -146,7 +138,7 @@ test("family registry persists records, rejects duplicate identities and enforce
       members: [{ ...familyInput.members[0], dni: "123" }],
     }));
     assert.equal(invalidResponse.status, 400);
-    const parsedInvalid = errorSchema.safeParse(await invalidResponse.json());
+    const parsedInvalid = familyErrorResponseSchema.safeParse(await invalidResponse.json());
     assert.equal(parsedInvalid.success, true);
 
     const missingDniResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, {
@@ -443,7 +435,7 @@ test("family registry persists records, rejects duplicate identities and enforce
     const synchronizedResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineOperation));
     assert.equal(synchronizedResponse.status, 200);
     assert.match(synchronizedResponse.headers.get("cache-control") ?? "", /no-store/);
-    const parsedSynchronization = synchronizationResponseSchema.safeParse(await synchronizedResponse.json());
+    const parsedSynchronization = familySynchronizationResponseSchema.safeParse(await synchronizedResponse.json());
     assert.equal(parsedSynchronization.success, true);
 
     if (!parsedSynchronization.success) {
@@ -453,7 +445,7 @@ test("family registry persists records, rejects duplicate identities and enforce
     assert.equal(parsedSynchronization.data.result.resourceId, offlineFamilyId);
     assert.equal(parsedSynchronization.data.replayed, false);
     const replayedResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineOperation));
-    const parsedReplay = synchronizationResponseSchema.safeParse(await replayedResponse.json());
+    const parsedReplay = familySynchronizationResponseSchema.safeParse(await replayedResponse.json());
     assert.equal(replayedResponse.status, 200);
     assert.equal(parsedReplay.success, true);
 
@@ -506,7 +498,7 @@ test("family registry persists records, rejects duplicate identities and enforce
     };
     const offlineMemberResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineMemberOperation));
     assert.equal(offlineMemberResponse.status, 200, await offlineMemberResponse.clone().text());
-    const parsedOfflineMemberResponse = synchronizationResponseSchema.safeParse(await offlineMemberResponse.json());
+    const parsedOfflineMemberResponse = familySynchronizationResponseSchema.safeParse(await offlineMemberResponse.json());
     assert.equal(parsedOfflineMemberResponse.success, true);
 
     if (!parsedOfflineMemberResponse.success) {
@@ -517,7 +509,7 @@ test("family registry persists records, rejects duplicate identities and enforce
     assert.equal(await prisma.familyMember.count({ where: { id: offlineMemberId, familyId: offlineFamilyId } }), 1);
     assert.equal(await prisma.person.count({ where: { id: offlinePersonId } }), 1);
     const replayedOfflineMemberResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineMemberOperation));
-    const parsedOfflineMemberReplay = synchronizationResponseSchema.safeParse(await replayedOfflineMemberResponse.json());
+    const parsedOfflineMemberReplay = familySynchronizationResponseSchema.safeParse(await replayedOfflineMemberResponse.json());
     assert.equal(replayedOfflineMemberResponse.status, 200);
     assert.equal(parsedOfflineMemberReplay.success, true);
 
@@ -541,7 +533,7 @@ test("family registry persists records, rejects duplicate identities and enforce
     };
     const duplicateOfflineResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", secretaryToken, duplicateOfflineOperation));
     const duplicateOfflineBody: unknown = await duplicateOfflineResponse.json();
-    const parsedDuplicateOffline = synchronizationErrorSchema.safeParse(duplicateOfflineBody);
+    const parsedDuplicateOffline = familySynchronizationErrorSchema.safeParse(duplicateOfflineBody);
     assert.equal(duplicateOfflineResponse.status, 409);
     assert.equal(parsedDuplicateOffline.success, true);
 
@@ -573,10 +565,10 @@ test("family registry persists records, rejects duplicate identities and enforce
     };
     const offlineDeactivationResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineDeactivation));
     assert.equal(offlineDeactivationResponse.status, 200);
-    const parsedOfflineDeactivation = synchronizationResponseSchema.safeParse(await offlineDeactivationResponse.json());
+    const parsedOfflineDeactivation = familySynchronizationResponseSchema.safeParse(await offlineDeactivationResponse.json());
     assert.equal(parsedOfflineDeactivation.success, true);
     const replayedOfflineDeactivation = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, offlineDeactivation));
-    const parsedOfflineDeactivationReplay = synchronizationResponseSchema.safeParse(await replayedOfflineDeactivation.json());
+    const parsedOfflineDeactivationReplay = familySynchronizationResponseSchema.safeParse(await replayedOfflineDeactivation.json());
     assert.equal(replayedOfflineDeactivation.status, 200);
     assert.equal(parsedOfflineDeactivationReplay.success, true);
     if (parsedOfflineDeactivationReplay.success) {

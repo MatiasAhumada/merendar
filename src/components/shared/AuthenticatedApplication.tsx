@@ -5,28 +5,16 @@ import { APPLICATION_ERROR_MESSAGES } from "@/constants/error-messages.constant"
 import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
 import { API_ROUTES } from "@/constants/routes.constant";
 import { useEffect, useState } from "react";
-import { z } from "zod";
 import { AppSessionContext, type AppSessionContextValue } from "@/components/shared/AppSessionContext";
 import { AppShell } from "@/components/shared/AppShell";
-import { USER_ROLE_LABELS, USER_ROLE_OPTIONS } from "@/constants/user-role.constant";
+import { USER_ROLE_LABELS } from "@/constants/user-role.constant";
+import { sessionResponseSchema, userRoleSchema } from "@/schemas/auth.schema";
 import { readActiveOfflineAccount, readOfflinePreparation, setActiveOfflineAccount } from "@/services/offline-preparation.service";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import axios from "axios";
 
 import clientAxios from "@/utils/clientAxios.util";
 import type { AuthenticatedUser } from "@/server/services/auth.service";
-
-const sessionResponseSchema = z.object({
-  user: z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    email: z.string().nullable(),
-    username: z.string().nullable(),
-    role: z.enum(USER_ROLE_OPTIONS),
-  }),
-  expiresAt: z.iso.datetime(),
-  capabilities: z.array(z.string()),
-});
 
 function isTransportFailure(error: unknown) {
   return axios.isAxiosError(error) && !error.response;
@@ -44,7 +32,7 @@ async function readLocalAppSession(): Promise<AppSessionContextValue> {
   }
 
   const roleEntry = Object.entries(USER_ROLE_LABELS).find(([, label]) => label === preparation.roleLabel);
-  const role = z.enum(USER_ROLE_OPTIONS).safeParse(roleEntry?.[0]);
+  const role = userRoleSchema.safeParse(roleEntry?.[0]);
   if (!role.success) {
     return { ready: true, user: null, sessionExpiresAt: null, capabilities: [] };
   }

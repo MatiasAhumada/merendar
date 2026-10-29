@@ -1,5 +1,4 @@
-import { FamilyDocumentType } from "@prisma/client";
-import { FAMILY_DNI_PATTERN, FAMILY_LIMITS, FAMILY_VALIDATION_MESSAGES } from "@/constants/family.constant";
+import { FAMILY_DNI_PATTERN, FAMILY_DOCUMENT_TYPES, FAMILY_LIMITS, FAMILY_VALIDATION_MESSAGES } from "@/constants/family.constant";
 import { z } from "zod";
 
 const familyPersonSchema = z.object({
@@ -11,7 +10,7 @@ const familyPersonSchema = z.object({
   email: z.string().trim().toLowerCase().pipe(z.email(FAMILY_VALIDATION_MESSAGES.EMAIL_INVALID)).optional(),
   phone: z.string().trim().max(FAMILY_LIMITS.PHONE_MAX_LENGTH).transform((phone) => phone || undefined).optional(),
   relationship: z.string().trim().min(1).max(FAMILY_LIMITS.RELATIONSHIP_MAX_LENGTH),
-  missingDocuments: z.array(z.enum(FamilyDocumentType)).max(FAMILY_LIMITS.MAX_MISSING_DOCUMENTS),
+  missingDocuments: z.array(z.enum(FAMILY_DOCUMENT_TYPES)).max(FAMILY_LIMITS.MAX_MISSING_DOCUMENTS),
 }).strict();
 
 const requiredDniSchema = z.string({ error: FAMILY_VALIDATION_MESSAGES.DNI_INVALID })
@@ -116,7 +115,7 @@ export const familyMemberInputSchema = z.object({
   email: z.string().trim().toLowerCase().pipe(z.email(FAMILY_VALIDATION_MESSAGES.EMAIL_INVALID)).optional(),
   phone: z.string().trim().max(FAMILY_LIMITS.PHONE_MAX_LENGTH).transform((phone) => phone || undefined).optional(),
   relationship: z.string().trim().min(1).max(FAMILY_LIMITS.RELATIONSHIP_MAX_LENGTH),
-  missingDocuments: z.array(z.enum(FamilyDocumentType)).max(FAMILY_LIMITS.MAX_MISSING_DOCUMENTS),
+  missingDocuments: z.array(z.enum(FAMILY_DOCUMENT_TYPES)).max(FAMILY_LIMITS.MAX_MISSING_DOCUMENTS),
 }).strict();
 
 export const newFamilyMemberInputSchema = familyMemberInputSchema.extend({
@@ -179,7 +178,7 @@ export const familyPersonRecordSchema = z.object({
   email: z.string().nullable(),
   phone: z.string().nullable(),
   relationship: z.string(),
-  missingDocuments: z.array(z.object({ id: z.string(), documentType: z.enum(FamilyDocumentType) })),
+  missingDocuments: z.array(z.object({ id: z.string(), documentType: z.enum(FAMILY_DOCUMENT_TYPES) })),
   membershipId: z.string(),
 });
 
@@ -221,4 +220,18 @@ export const createFamilyRequestSchema = z.object({
   validateRequiredFamilyContact(family, context);
 });
 
-export type FamilyPayload = z.infer<typeof familyPayloadSchema>;
+export const familySearchSchema = z.object({
+  search: z.string().trim().max(FAMILY_LIMITS.SEARCH_FILTER_MAX_LENGTH).optional(),
+  neighborhood: z.string().trim().max(FAMILY_LIMITS.NEIGHBORHOOD_MAX_LENGTH).optional(),
+  alerts: z.enum(["true", "false"]).optional(),
+});
+
+export const updateFamilyRequestSchema = z.object({
+  name: z.string().trim().min(FAMILY_LIMITS.NAME_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.NAME_REQUIRED).max(FAMILY_LIMITS.NAME_MAX_LENGTH),
+  neighborhood: z.string().trim().min(FAMILY_LIMITS.NEIGHBORHOOD_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.NEIGHBORHOOD_REQUIRED).max(FAMILY_LIMITS.NEIGHBORHOOD_MAX_LENGTH),
+  address: z.string().trim().min(FAMILY_LIMITS.ADDRESS_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.ADDRESS_REQUIRED).max(FAMILY_LIMITS.ADDRESS_MAX_LENGTH),
+  contactPhone: z.string().trim().max(FAMILY_LIMITS.PHONE_MAX_LENGTH).transform((phone) => phone || undefined).optional(),
+  contactEmail: z.string().trim().toLowerCase().pipe(z.email(FAMILY_VALIDATION_MESSAGES.EMAIL_INVALID)).optional(),
+  baseVersion: z.number().int().nonnegative(),
+}).strict();
+

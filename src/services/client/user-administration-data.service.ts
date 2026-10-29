@@ -2,7 +2,7 @@
 
 import { USER_ERROR_MESSAGES } from "@/constants/user.constant";
 import { API_ROUTES, ROUTES } from "@/constants/routes.constant";
-import { managedUsersSchema } from "@/validations/user-administration.validation";
+import { managedUsersSchema } from "@/schemas/user.schema";
 import { apiDataResult, isTransportFailure, readOfflineSnapshot, updateOfflineSnapshot } from "@/services/client/offline-snapshot.service";
 import clientAxios from "@/utils/clientAxios.util";
 

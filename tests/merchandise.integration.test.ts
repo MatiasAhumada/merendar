@@ -13,7 +13,7 @@ import { SynchronizationConflictError } from "@/server/repository/synchronizatio
 import { merchandiseSynchronizationHandler } from "@/server/services/merchandise-synchronization.service";
 import { synchronizationService } from "@/server/services/synchronization.service";
 import type { JsonValue } from "@/types/json-value";
-import { merchandisePayloadSchema } from "@/validations/merchandise.validation";
+import { merchandisePayloadSchema } from "@/schemas/merchandise.schema";
 
 test("merchandise document policy accepts valid PDFs up to 512 KiB and rejects images or larger files", () => {
   const validPdf = Buffer.alloc(512 * 1024, 32);

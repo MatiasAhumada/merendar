@@ -16,7 +16,7 @@ import { API_ROUTES, ROUTES } from "@/constants/routes.constant";
 import { PRIMARY_NAVIGATION } from "@/constants/navigation.constant";
 import { clientErrorHandler } from "@/utils/handlers/clientHandler";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { z } from "zod";
+import { loginResponseSchema } from "@/schemas/auth.schema";
 import axios from "axios";
 import Image from "next/image";
 
@@ -30,10 +30,6 @@ import {
 } from "@hugeicons/core-free-icons";
 
 import clientAxios from "@/utils/clientAxios.util";
-
-const loginResponseSchema = z.object({
-  capabilities: z.array(z.string()),
-});
 
 function getDestination(capabilities: string[]) {
   const requestedPath = new URLSearchParams(window.location.search).get("next");

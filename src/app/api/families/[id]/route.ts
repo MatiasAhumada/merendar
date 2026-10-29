@@ -2,23 +2,14 @@
 
 import { PRIVATE_RESPONSE_HEADERS, HTTP_CACHE_CONTROL, HTTP_HEADERS } from "@/constants/http.constant";
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";
-import { FAMILY_API_MESSAGES, FAMILY_LIMITS, FAMILY_VALIDATION_MESSAGES } from "@/constants/family.constant";
+import { FAMILY_API_MESSAGES } from "@/constants/family.constant";
 import { familyService } from "@/server/services/family.service";
 import { requireFamilyReadAccess, requireFamilyWriteAccess } from "@/server/services/family-access";
 import { isSameOriginRequest } from "@/server/services/origin.service";
-import { familyDeactivationRequestSchema } from "@/validations/family.validation";
+import { familyDeactivationRequestSchema, updateFamilyRequestSchema } from "@/schemas/family.schema";
 import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
 
-const updateFamilySchema = z.object({
-  name: z.string().trim().min(FAMILY_LIMITS.NAME_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.NAME_REQUIRED).max(FAMILY_LIMITS.NAME_MAX_LENGTH),
-  neighborhood: z.string().trim().min(FAMILY_LIMITS.NEIGHBORHOOD_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.NEIGHBORHOOD_REQUIRED).max(FAMILY_LIMITS.NEIGHBORHOOD_MAX_LENGTH),
-  address: z.string().trim().min(FAMILY_LIMITS.ADDRESS_MIN_LENGTH, FAMILY_VALIDATION_MESSAGES.ADDRESS_REQUIRED).max(FAMILY_LIMITS.ADDRESS_MAX_LENGTH),
-  contactPhone: z.string().trim().max(FAMILY_LIMITS.PHONE_MAX_LENGTH).transform((phone) => phone || undefined).optional(),
-  contactEmail: z.string().trim().toLowerCase().pipe(z.email(FAMILY_VALIDATION_MESSAGES.EMAIL_INVALID)).optional(),
-  baseVersion: z.number().int().nonnegative(),
-}).strict();
 const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 
 function handleError(error: unknown, request: NextRequest) {
@@ -56,7 +47,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       return NextResponse.json({ error: { message: FAMILY_API_MESSAGES.REQUEST_BODY_INVALID } }, { status: 400, headers: privateHeaders });
     }
 
-    const parsedInput = updateFamilySchema.safeParse(body);
+    const parsedInput = updateFamilyRequestSchema.safeParse(body);
 
     if (!parsedInput.success) {
       return NextResponse.json({ error: { message: FAMILY_API_MESSAGES.FORM_FIELDS_INVALID, details: parsedInput.error.flatten().fieldErrors } }, { status: 400, headers: privateHeaders });

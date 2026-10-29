@@ -1,5 +1,7 @@
 "use client";
 
+import type { z } from "zod";
+
 import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
 import { COMMON_UI_TEXT } from "@/constants/common-ui.constant";
 import { MERCHANDISE_UI_TEXT, MERCHANDISE_ERROR_MESSAGES } from "@/constants/merchandise.constant";
@@ -19,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { synchronizeOfflineQueue, enqueueOfflineOperation, listOfflineOperations, retryOfflineOperation, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { z } from "zod";
+import { jsonValueSchema } from "@/schemas/offline.schema";
 import Link from "next/link";
 
 import type { MerchandisePeriodRecord } from "@/interfaces/merchandise.interface";
@@ -29,8 +31,10 @@ import {
   renditionDocumentPayloadSchema,
   renditionReviewOperationPayloadSchema,
   renditionReviewPayloadSchema,
-  type RenditionDocumentPayload,
-} from "@/validations/rendition.validation";
+  renditionDocumentTypeSchema,
+  renditionReviewStatusSchema,
+} from "@/schemas/rendition.schema";
+import type { RenditionDocumentPayload } from "@/types/schema-contracts";
 
 interface RenditionWorkspaceProps {
   periods: MerchandisePeriodRecord[];
@@ -44,12 +48,6 @@ interface RenditionWorkspaceProps {
   offlineMode?: boolean;
   preparedDocuments?: OfflinePreparedDocument[];
 }
-
-const documentTypeSchema = z.enum([
-  RENDITION_DOCUMENT_TYPES.SIGNED_SHEET,
-  RENDITION_DOCUMENT_TYPES.REMITTANCE,
-  RENDITION_DOCUMENT_TYPES.SUPPORTING,
-]);
 
 function formatFileSize(byteSize: number) {
   return COMMON_UI_TEXT.FILE_SIZE_IN_KIB(byteSize);
@@ -196,7 +194,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
   const [selectedPeriodId, setSelectedPeriodId] = useState("");
   const [selectedSheetId, setSelectedSheetId] = useState("");
-  const [selectedType, setSelectedType] = useState<z.infer<typeof documentTypeSchema>>(RENDITION_DOCUMENT_TYPES.SIGNED_SHEET);
+  const [selectedType, setSelectedType] = useState<z.infer<typeof renditionDocumentTypeSchema>>(RENDITION_DOCUMENT_TYPES.SIGNED_SHEET);
   const [selectedReplacementId, setSelectedReplacementId] = useState("");
   const [selectedFileNames, setSelectedFileNames] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -266,7 +264,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
   }, [selectedPeriod, selectedSheetId]);
 
   function onTypeChange(value: string) {
-    const parsedType = documentTypeSchema.safeParse(value);
+    const parsedType = renditionDocumentTypeSchema.safeParse(value);
 
     if (parsedType.success) {
       setSelectedType(parsedType.data);
@@ -327,7 +325,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         operation: "create",
         baseVersion: null,
         dependencies: [],
-        payload: z.json().parse(JSON.parse(JSON.stringify(payload))),
+        payload: jsonValueSchema.parse(JSON.parse(JSON.stringify(payload))),
       });
       setOperations((existingOperations) => [...existingOperations, operation]);
       setSelectedFileNames([]);
@@ -367,7 +365,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         operation: "create",
         baseVersion: null,
         dependencies: [],
-        payload: z.json().parse(JSON.parse(JSON.stringify(payload))),
+        payload: jsonValueSchema.parse(JSON.parse(JSON.stringify(payload))),
       });
       setReviewNotes("");
       let savedReviewMessage: string = MERCHANDISE_ERROR_MESSAGES.REVISION_PENDIENTE_EN_ESTE_DISPOSITIVO_SE_CONFIRMARA_CUANDO_EL_SERVIDOR_VA;
@@ -493,7 +491,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
           <Field>
             <FieldLabel htmlFor="rendition-review-status">{RENDITION_UI_TEXT.RESULTADO_DE_REVISION}</FieldLabel>
             <Select value={reviewStatus} onValueChange={(value) => {
-              const parsedStatus = z.enum(["REVISADA", "OBSERVADA"]).safeParse(value);
+              const parsedStatus = renditionReviewStatusSchema.safeParse(value);
               if (parsedStatus.success) setReviewStatus(parsedStatus.data);
             }}>
               <SelectTrigger id="rendition-review-status"><SelectValue /></SelectTrigger>

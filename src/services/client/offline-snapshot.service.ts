@@ -1,7 +1,7 @@
 
 
 import { OFFLINE_OPERATION_MESSAGES, SYNC_SERVER_MESSAGES } from "@/constants/offline.constant";
-import { z } from "zod";
+import type { z } from "zod";
 import { readOfflinePreparation, updateOfflinePreparedSnapshot } from "@/services/offline-preparation.service";
 import axios from "axios";
 

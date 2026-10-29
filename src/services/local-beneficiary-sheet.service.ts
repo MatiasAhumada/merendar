@@ -2,7 +2,7 @@
 
 import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
 import { BENEFICIARY_SHEET_COLUMN_HEADERS, BENEFICIARY_SHEET_PDF } from "@/constants/delivery.constant";
-import type { BeneficiarySheetDraft } from "@/validations/record.validation";
+import type { BeneficiarySheetDraft } from "@/types/schema-contracts";
 
 const { TABLE_BOUNDS: tableBounds, TITLE: title, TABLE_HEADER_HEIGHT: tableHeaderHeight, MINIMUM_ROW_HEIGHT: minimumRowHeight, ROW_LINE_HEIGHT: rowLineHeight, PAGE_BOTTOM: pageBottom } = BENEFICIARY_SHEET_PDF;
 

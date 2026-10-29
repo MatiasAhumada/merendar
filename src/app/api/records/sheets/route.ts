@@ -9,7 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRecordWriteAccess } from "@/server/services/record-access";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 import { isSameOriginRequest } from "@/server/services/origin.service";
-import { beneficiarySheetSchema } from "@/validations/record.validation";
+import { beneficiarySheetSchema } from "@/schemas/record.schema";
 import { lockFamilyRows } from "@/server/services/record-synchronization.service";
 import apiErrorHandler from "@/utils/handlers/apiError.handler";
 

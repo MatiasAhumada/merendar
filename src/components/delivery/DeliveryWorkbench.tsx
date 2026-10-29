@@ -19,7 +19,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue } from "@/services/offline-queue.service";
 import { createLocalBeneficiarySheetPdf } from "@/services/local-beneficiary-sheet.service";
 import { readOfflinePreparedDocuments, removeOfflinePreparedDocument, saveOfflinePreparedDocument, type OfflinePreparedDocument } from "@/services/offline-preparation.service";
-import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema, type RecordsCollection } from "@/validations/record.validation";
+import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
+import type { RecordsCollection } from "@/types/schema-contracts";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { BRAND } from "@/constants/brand.constant";
 import { getDeliveryCollection } from "@/services/client/delivery-data.service";

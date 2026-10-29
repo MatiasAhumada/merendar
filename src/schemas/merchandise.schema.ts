@@ -1,5 +1,5 @@
-import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
 import { z } from "zod";
+import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
 import { RENDITION_LIMITS } from "@/constants/rendition.constant";
 import { MERCHANDISE_LIMITS, MERCHANDISE_VALIDATION_MESSAGES } from "@/constants/merchandise.constant";
 
@@ -69,7 +69,6 @@ export const merchandisePayloadSchema = z.discriminatedUnion("kind", [
   remittancePayloadSchema,
 ]);
 
-export type MerchandisePayload = z.infer<typeof merchandisePayloadSchema>;
 
 const merchandiseIdentitySchema = z.object({
   id: z.string().trim().min(1).max(80),
@@ -126,6 +125,107 @@ export const merchandiseOperationPayloadSchema = z.union([
   merchandiseCancellationPayloadSchema,
 ]);
 
-export type MerchandiseUpdatePayload = z.infer<typeof merchandiseUpdatePayloadSchema>;
-export type MerchandiseCancellationPayload = z.infer<typeof merchandiseCancellationPayloadSchema>;
-export type MerchandiseOperationPayload = z.infer<typeof merchandiseOperationPayloadSchema>;
+export const receiptLimitConflictSchema = z.object({
+  kind: z.literal("receipt_exceeds_quota"),
+  approvedQuantity: z.number().int(),
+  receivedSoFar: z.number().int(),
+  attemptedQuantity: z.number().int(),
+});
+export const duplicateRemittanceConflictSchema = z.object({
+  kind: z.literal("remittance_number_exists"),
+  remittanceNumber: z.string(),
+});
+
+
+export const merchandiseResponseSchema = z.object({
+  periods: z.array(z.object({
+    id: z.string(),
+    version: z.number().int().positive(),
+    label: z.string(),
+    agency: z.string(),
+    status: z.enum(["VIGENTE", "ANULADO"]),
+    startsAt: z.iso.datetime(),
+    endsAt: z.iso.datetime(),
+    beneficiarySheets: z.array(z.object({
+      id: z.string(),
+      version: z.number().int(),
+      createdAt: z.iso.datetime(),
+      beneficiaryCount: z.number().int().nonnegative(),
+    })),
+    renditions: z.array(z.object({
+      id: z.string(),
+      periodId: z.string(),
+      beneficiarySheetId: z.string(),
+      reviewStatus: z.enum(["PENDIENTE", "REVISADA", "OBSERVADA"]),
+      reviewNotes: z.string().nullable(),
+      reviewedAt: z.iso.datetime().nullable(),
+      beneficiarySheet: z.object({ id: z.string(), version: z.number().int(), createdAt: z.iso.datetime(), beneficiaryCount: z.number().int().nonnegative() }),
+      documents: z.array(z.object({
+        id: z.string(),
+        documentType: z.enum(["PLANILLA_FIRMADA", "REMITO", "RESPALDO"]),
+        version: z.number().int(),
+        supersedesId: z.string().nullable(),
+        originalName: z.string(),
+        byteSize: z.number().int(),
+        createdAt: z.iso.datetime(),
+      })),
+      createdAt: z.iso.datetime(),
+      updatedAt: z.iso.datetime(),
+    })),
+    requests: z.array(z.object({
+      id: z.string(),
+      version: z.number().int().positive(),
+      periodId: z.string(),
+      requestNumber: z.string(),
+      requestedAt: z.iso.datetime(),
+      requestedQuantity: z.number(),
+      status: z.enum(["PENDIENTE", "APROBADA", "RECHAZADA", "CANCELADA"]),
+      notes: z.string().nullable(),
+      createdBy: z.object({ id: z.string(), name: z.string() }),
+      quota: z.object({
+        id: z.string(),
+        version: z.number().int().positive(),
+        requestId: z.string(),
+        approvedQuantity: z.number(),
+        approvedAt: z.iso.datetime(),
+        notes: z.string().nullable(),
+        approvedBy: z.object({ id: z.string(), name: z.string() }),
+        createdAt: z.iso.datetime(),
+        updatedAt: z.iso.datetime(),
+      }).nullable(),
+      remittances: z.array(z.object({
+        id: z.string(),
+        version: z.number().int().positive(),
+        requestId: z.string(),
+        quotaId: z.string(),
+        remittanceNumber: z.string(),
+        receivedAt: z.iso.datetime(),
+        receivedQuantity: z.number(),
+        responsibleName: z.string(),
+        status: z.enum(["VIGENTE", "ANULADO"]),
+        notes: z.string().nullable(),
+        createdBy: z.object({ id: z.string(), name: z.string() }),
+        documents: z.array(z.object({
+          id: z.string(),
+          originalName: z.string(),
+          contentType: z.string(),
+          byteSize: z.number(),
+          createdAt: z.iso.datetime(),
+        })),
+        createdAt: z.iso.datetime(),
+        updatedAt: z.iso.datetime(),
+      })),
+      documents: z.array(z.object({
+        id: z.string(),
+        originalName: z.string(),
+        contentType: z.string(),
+        byteSize: z.number(),
+        createdAt: z.iso.datetime(),
+      })),
+      createdAt: z.iso.datetime(),
+      updatedAt: z.iso.datetime(),
+    })),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+  })),
+});

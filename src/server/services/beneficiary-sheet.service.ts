@@ -3,11 +3,11 @@
 import { BENEFICIARY_SHEET_COLUMN_HEADERS, BENEFICIARY_SHEET_PDF, DELIVERY_ERROR_MESSAGES, DELIVERY_UI_TEXT } from "@/constants/delivery.constant";
 import { readFile } from "node:fs/promises";
 import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
-import { z } from "zod";
+import { beneficiarySheetSnapshotSchema } from "@/schemas/record.schema";
 import path from "node:path";
 import fontkit from "@pdf-lib/fontkit";
 
-import type { BeneficiarySheetSnapshot } from "@/validations/record.validation";
+import type { BeneficiarySheetSnapshot } from "@/interfaces/beneficiary-sheet.interface";
 
 type PrintableRow = {
   beneficiary: BeneficiarySheetSnapshot["beneficiaries"][number];
@@ -26,21 +26,6 @@ type ApprovedPrintableRow = {
   neighborhoodLines: string[];
   height: number;
 };
-
-const snapshotSchema = z.object({
-  period: z.object({ label: z.string(), agency: z.string(), startsAt: z.string(), endsAt: z.string() }),
-  version: z.number().int().positive(),
-  createdAt: z.string(),
-  templateVersion: z.literal(2).optional(),
-  beneficiaries: z.array(z.object({
-    personId: z.string(),
-    name: z.string(),
-    dni: z.string(),
-    familyName: z.string(),
-    address: z.string(),
-    neighborhood: z.string().optional(),
-  })),
-});
 
 const { TABLE_BOUNDS: tableBounds, TITLE: title, TABLE_HEADER_HEIGHT: tableHeaderHeight, MINIMUM_ROW_HEIGHT: minimumRowHeight, ROW_LINE_HEIGHT: rowLineHeight, PAGE_BOTTOM: pageBottom } = BENEFICIARY_SHEET_PDF;
 
@@ -304,7 +289,7 @@ async function createLegacyBeneficiarySheetPdf(snapshot: BeneficiarySheetSnapsho
 }
 
 export async function createBeneficiarySheetPdf(rawSnapshot: unknown) {
-  const parsedSnapshot = snapshotSchema.safeParse(rawSnapshot);
+  const parsedSnapshot = beneficiarySheetSnapshotSchema.safeParse(rawSnapshot);
 
   if (!parsedSnapshot.success) {
     throw new Error(DELIVERY_ERROR_MESSAGES.LA_PLANILLA_GUARDADA_NO_TIENE_UN_FORMATO_VALIDO);

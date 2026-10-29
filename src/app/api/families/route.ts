@@ -2,20 +2,14 @@
 
 import { PRIVATE_RESPONSE_HEADERS, HTTP_CACHE_CONTROL, HTTP_HEADERS } from "@/constants/http.constant";
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";
-import { FAMILY_API_MESSAGES, FAMILY_LIMITS } from "@/constants/family.constant";
+import { FAMILY_API_MESSAGES } from "@/constants/family.constant";
 import { familyService } from "@/server/services/family.service";
 import { requireFamilyReadAccess, requireFamilyWriteAccess } from "@/server/services/family-access";
 import { isSameOriginRequest } from "@/server/services/origin.service";
-import { createFamilyRequestSchema } from "@/validations/family.validation";
+import { createFamilyRequestSchema, familySearchSchema } from "@/schemas/family.schema";
 import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
 
-const searchSchema = z.object({
-  search: z.string().trim().max(FAMILY_LIMITS.SEARCH_FILTER_MAX_LENGTH).optional(),
-  neighborhood: z.string().trim().max(FAMILY_LIMITS.NEIGHBORHOOD_MAX_LENGTH).optional(),
-  alerts: z.enum(["true", "false"]).optional(),
-});
 const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 
 function handleError(error: unknown, request: NextRequest) {
@@ -31,7 +25,7 @@ function handleError(error: unknown, request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     await requireFamilyReadAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
-    const params = searchSchema.safeParse({
+    const params = familySearchSchema.safeParse({
       search: request.nextUrl.searchParams.get("search") ?? undefined,
       neighborhood: request.nextUrl.searchParams.get("neighborhood") ?? undefined,
       alerts: request.nextUrl.searchParams.get("alerts") ?? undefined,

@@ -3,7 +3,7 @@ import test from "node:test";
 import { isOfflineOperationEnabled } from "@/constants/offline-contract.constant";
 import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
 import { normalizeStoredOfflinePreparation } from "@/services/offline-preparation.service";
-import { dashboardSummaryResponseSchema } from "@/validations/dashboard.validation";
+import { dashboardSummaryResponseSchema } from "@/schemas/dashboard.schema";
 
 test("offline write contract enables family and merchandise maintenance operations", () => {
   const resources = ["families", "remittances", "records", "renditions"] as const;

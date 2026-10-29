@@ -1,9 +1,9 @@
 
 
 import { FAMILY_ERROR_MESSAGES } from "@/constants/family.constant";
-import { familyDeactivationTargetSchema, familyPayloadSchema, familyMemberChangeSchema } from "@/validations/family.validation";
+import { familyDeactivationTargetSchema, familyPayloadSchema, familyMemberChangeSchema } from "@/schemas/family.schema";
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import { nonNegativeIntegerSchema, nullableSchema } from "@/schemas/offline.schema";
 import { deactivateFamilyInTransaction } from "@/server/repository/family.repository";
 import type { SyncHandlerResult, SynchronizationHandler } from "@/interfaces/synchronization.interface";
 
@@ -19,10 +19,10 @@ export class FamilyDeactivationSyncError extends Error {
 
 export const familySynchronizationHandler: SynchronizationHandler = {
   async apply(transaction, operation): Promise<SyncHandlerResult> {
-    const baseVersionValidation = z.null().safeParse(operation.baseVersion);
+    const baseVersionValidation = nullableSchema.safeParse(operation.baseVersion);
 
     if (operation.operation === "delete") {
-      const baseVersion = z.number().int().nonnegative().safeParse(operation.baseVersion);
+      const baseVersion = nonNegativeIntegerSchema.safeParse(operation.baseVersion);
       const parsedTarget = familyDeactivationTargetSchema.safeParse(operation.payload);
 
       if (!baseVersion.success || !parsedTarget.success) {
@@ -180,7 +180,7 @@ export const familySynchronizationHandler: SynchronizationHandler = {
       return { type: "synchronized", resourceVersion: family.version, result: { resourceId: family.id, name: family.name } };
     }
 
-    if (operation.operation !== "update" || !z.number().int().nonnegative().safeParse(operation.baseVersion).success) {
+    if (operation.operation !== "update" || !nonNegativeIntegerSchema.safeParse(operation.baseVersion).success) {
       throw new Error(FAMILY_ERROR_MESSAGES.LA_OPERACION_FAMILIAR_NO_ESTA_HABILITADA_PARA_SINCRONIZAR);
     }
 

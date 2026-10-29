@@ -8,8 +8,8 @@ import type { JsonObject } from "@/types/json-value";
 import {
   renditionDocumentPayloadSchema,
   renditionReviewOperationPayloadSchema,
-  type RenditionDocumentPayload,
-} from "@/validations/rendition.validation";
+} from "@/schemas/rendition.schema";
+import type { RenditionDocumentPayload } from "@/types/schema-contracts";
 
 export class RenditionDocumentError extends Error {
   constructor(message: string, readonly status = 400) {

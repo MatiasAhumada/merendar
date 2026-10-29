@@ -3,18 +3,16 @@
 import { PRIVATE_RESPONSE_HEADERS } from "@/constants/http.constant";
 import { USER_ERROR_MESSAGES } from "@/constants/user.constant";
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";
 import { userService } from "@/server/services/user.service";
 import { requireAdministrativeCapability } from "@/server/services/access-policy.service";
 import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
-
-const statusSchema = z.object({ isActive: z.boolean() }).strict();
+import { updateUserStatusRequestSchema } from "@/schemas/user.schema";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const user = await requireAdministrativeCapability(request.cookies.get(AUTH.SESSION_COOKIE)?.value, "users.manage", USER_ERROR_MESSAGES.NO_TENES_PERMISO_PARA_ADMINISTRAR_USUARIOS);
-    const input = statusSchema.safeParse(await request.json());
+    const input = updateUserStatusRequestSchema.safeParse(await request.json());
     if (!input.success) return NextResponse.json({ error: { message: USER_ERROR_MESSAGES.INDICA_UN_ESTADO_VALIDO, details: input.error.flatten().fieldErrors } }, { status: 400 });
     const { id } = await params;
     await userService.updateStatus(id, user.id, input.data.isActive);

@@ -7,7 +7,7 @@ import { FAMILY_API_MESSAGES } from "@/constants/family.constant";
 import { familyService } from "@/server/services/family.service";
 import { requireFamilyWriteAccess } from "@/server/services/family-access";
 import { isSameOriginRequest } from "@/server/services/origin.service";
-import { familyDeactivationRequestSchema, updateFamilyMemberRequestSchema } from "@/validations/family.validation";
+import { familyDeactivationRequestSchema, updateFamilyMemberRequestSchema } from "@/schemas/family.schema";
 import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
 
 const privateHeaders = PRIVATE_RESPONSE_HEADERS;

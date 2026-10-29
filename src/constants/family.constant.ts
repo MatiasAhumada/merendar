@@ -1,5 +1,13 @@
 import type { FamilyDocumentType } from "@prisma/client";
 
+export const FAMILY_DOCUMENT_TYPES = [
+  "DNI",
+  "PARTIDA_NACIMIENTO",
+  "CERTIFICADO_ESCOLAR",
+  "CERTIFICADO_MEDICO",
+  "OTRO",
+] as const satisfies readonly FamilyDocumentType[];
+
 export const FAMILY_DOCUMENT_LABELS: Record<FamilyDocumentType, string> = {
   DNI: "DNI",
   PARTIDA_NACIMIENTO: "Partida de nacimiento",

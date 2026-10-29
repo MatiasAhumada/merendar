@@ -15,8 +15,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
-import { familyCollectionSchema, familyDeactivationTargetSchema, familyMemberChangeSchema, familyMemberInputSchema, familyPayloadSchema, newFamilyMemberChangeSchema, newFamilyMemberInputSchema, newFamilyPayloadSchema, type FamilyPayload } from "@/validations/family.validation";
-import { z } from "zod";
+import { familyCollectionSchema, familyDeactivationTargetSchema, familyMemberChangeSchema, familyMemberInputSchema, familyPayloadSchema, newFamilyMemberChangeSchema, newFamilyMemberInputSchema, newFamilyPayloadSchema } from "@/schemas/family.schema";
+import type { FamilyPayload } from "@/types/schema-contracts";
+import type { z } from "zod";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { getFamilyCollection } from "@/services/client/family-data.service";
 import {

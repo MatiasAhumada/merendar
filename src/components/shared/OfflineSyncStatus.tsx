@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SYNC_MESSAGES } from "@/constants/offline.constant";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { z } from "zod";
+import { duplicateDniSnapshotSchema } from "@/schemas/offline.schema";
 import {
   listOfflineOperations,
   resolveOfflineConflict,
@@ -20,16 +20,6 @@ import {
   synchronizeOfflineQueue,
 } from "@/services/offline-queue.service";
 import type { OfflineOperation } from "@/types/offline-operation";
-
-const duplicateDniSnapshotSchema = z.object({
-  kind: z.literal("duplicate_dni"),
-  person: z.object({
-    firstName: z.string(),
-    lastName: z.string(),
-    dni: z.string().nullable(),
-    families: z.array(z.object({ name: z.string(), neighborhood: z.string(), address: z.string() })),
-  }),
-});
 
 interface OfflineSyncStatusProps {
   userId: string;

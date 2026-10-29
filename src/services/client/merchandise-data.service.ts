@@ -3,7 +3,7 @@
 import { NO_CACHE_REQUEST_HEADERS } from "@/constants/http.constant";
 import { MERCHANDISE_ERROR_MESSAGES } from "@/constants/merchandise.constant";
 import { API_ROUTES, ROUTES } from "@/constants/routes.constant";
-import { merchandiseResponseSchema } from "@/validations/merchandise-response.validation";
+import { merchandiseResponseSchema } from "@/schemas/merchandise.schema";
 import { apiDataResult, isTransportFailure, readOfflineSnapshot, updateOfflineSnapshot } from "@/services/client/offline-snapshot.service";
 import clientAxios from "@/utils/clientAxios.util";
 

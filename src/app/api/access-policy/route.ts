@@ -4,21 +4,14 @@ import { PRIVATE_RESPONSE_HEADERS } from "@/constants/http.constant";
 import { USER_ERROR_MESSAGES } from "@/constants/user.constant";
 import { AccessCapability, UserRole } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { AUTH } from "@/constants/auth.constant";
 import { ACCESS_CAPABILITY_KEYS } from "@/constants/access-policy.constant";
 import { accessPolicyRepository } from "@/server/repository/access-policy.repository";
 import { requireAdministrativeCapability } from "@/server/services/access-policy.service";
 import apiErrorHandler, { ApiError } from "@/utils/handlers/apiError.handler";
+import { updateAccessPolicyRequestSchema } from "@/schemas/access-policy.schema";
 
 const privateHeaders = PRIVATE_RESPONSE_HEADERS;
-const policySchema = z.object({
-  roles: z.array(z.object({
-    role: z.enum(UserRole),
-    capabilities: z.array(z.enum(AccessCapability)),
-  }).strict()).length(Object.values(UserRole).length),
-}).strict();
-
 function isCompletePolicySet(roles: Array<{ role: UserRole; capabilities: AccessCapability[] }>) {
   const uniqueRoles = new Set(roles.map((policy) => policy.role));
   return uniqueRoles.size === Object.values(UserRole).length && Object.values(UserRole).every((role) => uniqueRoles.has(role));
@@ -60,7 +53,7 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const actor = await requireAdministrativeCapability(request.cookies.get(AUTH.SESSION_COOKIE)?.value, "access-policy.manage", USER_ERROR_MESSAGES.NO_TENES_PERMISO_PARA_ADMINISTRAR_PERMISOS);
-    const parsedBody = policySchema.safeParse(await request.json());
+    const parsedBody = updateAccessPolicyRequestSchema.safeParse(await request.json());
 
     if (!parsedBody.success || !isCompletePolicySet(parsedBody.data.roles)) {
       return NextResponse.json({ error: { message: USER_ERROR_MESSAGES.LA_MATRIZ_DEBE_INCLUIR_UNA_SOLA_CONFIGURACION_COMPLETA_POR_ROL } }, { status: 400, headers: privateHeaders });

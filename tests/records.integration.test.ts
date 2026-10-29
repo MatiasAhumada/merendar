@@ -9,7 +9,7 @@ import { createBeneficiarySheetPdf } from "@/server/services/beneficiary-sheet.s
 import { createLocalBeneficiarySheetPdf } from "@/services/local-beneficiary-sheet.service";
 import { BENEFICIARY_SHEET_COLUMN_HEADERS } from "@/constants/delivery.constant";
 import { NextRequest } from "next/server";
-import { z } from "zod";
+import { localBeneficiarySnapshotSchema, versionedBeneficiarySnapshotSchema } from "./schemas/record-snapshot.schema";
 import { AUTH } from "@/constants/auth.constant";
 import { GET as getRecords } from "@/app/api/records/route";
 import { POST as issueSheet } from "@/app/api/records/sheets/route";
@@ -19,7 +19,7 @@ import { prisma } from "@/lib/prisma";
 import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
 import { synchronizationService } from "@/server/services/synchronization.service";
 import { recordSynchronizationHandler } from "@/server/services/record-synchronization.service";
-import { beneficiarySheetDraftSchema } from "@/validations/record.validation";
+import { beneficiarySheetDraftSchema } from "@/schemas/record.schema";
 
 function createRequest(url: string, method: string, token: string, body?: unknown) {
   return new NextRequest(url, {
@@ -160,8 +160,7 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     assert.notEqual(secondResult.sheet.id, sheetId);
     const preservedSheets = await prisma.beneficiarySheet.findMany({ where: { periodId }, orderBy: { version: "asc" } });
     assert.deepEqual(preservedSheets.map((savedSheet) => savedSheet.version), [1, 2]);
-    const firstSnapshotSchema = z.object({ templateVersion: z.literal(2), beneficiaries: z.array(z.object({ name: z.string(), familyName: z.string(), neighborhood: z.string() })) });
-    const firstSnapshot = firstSnapshotSchema.safeParse(preservedSheets[0]?.snapshot);
+    const firstSnapshot = versionedBeneficiarySnapshotSchema.safeParse(preservedSheets[0]?.snapshot);
     assert.equal(firstSnapshot.success, true);
 
     if (!firstSnapshot.success) {
@@ -199,8 +198,7 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     assert.equal(replayedOfflineSheetResult.replayed, true);
     const offlineSheet = await prisma.beneficiarySheet.findUnique({ where: { id: offlineSheetId } });
     assert.equal(offlineSheet?.version, 3);
-    const offlineSnapshotSchema = z.object({ beneficiaries: z.array(z.object({ name: z.string(), dni: z.string(), address: z.string() })) });
-    const offlineSnapshot = offlineSnapshotSchema.safeParse(offlineSheet?.snapshot);
+    const offlineSnapshot = localBeneficiarySnapshotSchema.safeParse(offlineSheet?.snapshot);
     assert.equal(offlineSnapshot.success, true);
     if (!offlineSnapshot.success) {
       assert.fail("La sincronización modificó la instantánea impresa de la planilla local");

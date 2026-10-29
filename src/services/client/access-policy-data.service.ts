@@ -2,7 +2,7 @@
 
 import { USER_ERROR_MESSAGES } from "@/constants/user.constant";
 import { API_ROUTES, ROUTES } from "@/constants/routes.constant";
-import { policySnapshotSchema } from "@/validations/access-policy-snapshot.validation";
+import { policySnapshotSchema } from "@/schemas/access-policy.schema";
 import { apiDataResult, isTransportFailure, readOfflineSnapshot, updateOfflineSnapshot } from "@/services/client/offline-snapshot.service";
 import clientAxios from "@/utils/clientAxios.util";
 

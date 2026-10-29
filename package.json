@@ -8,7 +8,7 @@
     "predev": "tsx scripts/generate-service-worker-config.ts",
     "build": "next build",
     "prebuild": "tsx scripts/generate-service-worker-config.ts",
-    "start": "next start -p 3022 -H 0.0.0.0",
+    "start": "next start -p ${PORT:-3022} -H 0.0.0.0",
     "prestart": "tsx scripts/generate-service-worker-config.ts",
     "lint": "eslint",
     "test:integration": "tsx --test --test-concurrency=1 tests/*.integration.test.ts",
@@ -20,7 +20,8 @@
     "migrate": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "studio": "prisma studio",
-    "check:constants": "tsx scripts/check-application-constants.ts"
+    "check:constants": "tsx scripts/check-application-constants.ts",
+    "check:schema-location": "tsx scripts/check-schema-location.ts"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.0.0",

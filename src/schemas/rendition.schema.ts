@@ -2,18 +2,22 @@ import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
 import { z } from "zod";
 import { RENDITION_LIMITS, RENDITION_DOCUMENT_TYPES, RENDITION_VALIDATION_MESSAGES } from "@/constants/rendition.constant";
 
+export const renditionDocumentTypeSchema = z.enum([
+  RENDITION_DOCUMENT_TYPES.SIGNED_SHEET,
+  RENDITION_DOCUMENT_TYPES.REMITTANCE,
+  RENDITION_DOCUMENT_TYPES.SUPPORTING,
+]);
+export const renditionReviewStatusSchema = z.enum(["REVISADA", "OBSERVADA"]);
+
 const documentSchema = z.object({
   id: z.string().trim().min(1).max(80),
-  type: z.enum([
-    RENDITION_DOCUMENT_TYPES.SIGNED_SHEET,
-    RENDITION_DOCUMENT_TYPES.REMITTANCE,
-    RENDITION_DOCUMENT_TYPES.SUPPORTING,
-  ]),
+  type: renditionDocumentTypeSchema,
   supersedesId: z.string().trim().min(1).max(80).optional(),
   originalName: z.string().trim().min(1).max(RENDITION_LIMITS.MAX_FILENAME_LENGTH).refine((name) => name.toLowerCase().endsWith(".pdf"), RENDITION_VALIDATION_MESSAGES.PDF_EXTENSION_INVALID),
   contentType: z.literal(HTTP_CONTENT_TYPES.PDF),
   contentBase64: z.string().max(1_000_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
 });
+
 
 export const renditionDocumentPayloadSchema = z.object({
   kind: z.literal("rendition_documents"),
@@ -36,7 +40,7 @@ export const renditionDocumentPayloadSchema = z.object({
 });
 
 const renditionReviewFieldsSchema = z.object({
-  status: z.enum(["REVISADA", "OBSERVADA"]),
+  status: renditionReviewStatusSchema,
   notes: z.string().trim().max(1000).optional(),
 }).strict();
 
@@ -63,6 +67,3 @@ export const renditionSynchronizationPayloadSchema = z.discriminatedUnion("kind"
   renditionReviewOperationPayloadSchema,
 ]);
 
-export type RenditionDocumentPayload = z.infer<typeof renditionDocumentPayloadSchema>;
-export type RenditionReviewPayload = z.infer<typeof renditionReviewPayloadSchema>;
-export type RenditionReviewOperationPayload = z.infer<typeof renditionReviewOperationPayloadSchema>;

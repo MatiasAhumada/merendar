@@ -2,7 +2,7 @@
 
 import { APPLICATION_ERROR_MESSAGES, ERROR_MESSAGES } from "@/constants/error-messages.constant";
 import { AxiosError } from "axios";
-import { z } from "zod";
+import { errorMessageSchema } from "@/schemas/common.schema";
 import {
   toastSuccess,
   toastError,
@@ -12,7 +12,6 @@ import {
 
 import type { ToastOptions } from "@/types/toast";
 
-const errorMessageSchema = z.object({ message: z.string() });
 
 interface HandlerOptions {
   logToConsole?: boolean;

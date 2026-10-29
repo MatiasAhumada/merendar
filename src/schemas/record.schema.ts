@@ -79,14 +79,18 @@ export const recordsCollectionSchema = z.object({
   sheets: z.array(z.object({ id: z.string(), periodId: z.string(), version: z.number().int().positive(), createdAt: z.iso.datetime() })),
 });
 
-export type DistributionRecordPayload = z.infer<typeof distributionRecordPayloadSchema>;
-export type BeneficiarySheetDraft = z.infer<typeof beneficiarySheetDraftSchema>;
-export type RecordsCollection = z.infer<typeof recordsCollectionSchema>;
+export const beneficiarySheetSnapshotSchema = z.object({
+  period: z.object({ label: z.string(), agency: z.string(), startsAt: z.string(), endsAt: z.string() }),
+  version: z.number().int().positive(),
+  createdAt: z.string(),
+  templateVersion: z.literal(2).optional(),
+  beneficiaries: z.array(z.object({
+    personId: z.string(),
+    name: z.string(),
+    dni: z.string(),
+    familyName: z.string(),
+    address: z.string(),
+    neighborhood: z.string().optional(),
+  })),
+});
 
-export interface BeneficiarySheetSnapshot {
-  period: { label: string; agency: string; startsAt: string; endsAt: string };
-  version: number;
-  createdAt: string;
-  templateVersion?: 2;
-  beneficiaries: Array<{ personId: string; name: string; dni: string; familyName: string; address: string; neighborhood?: string }>;
-}
