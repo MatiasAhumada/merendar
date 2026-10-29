@@ -9,6 +9,7 @@ import type { SynchronizationHandler, SubmittedSyncOperation, SyncHandlerResult 
 import type { JsonObject } from "@/types/json-value";
 
 import {
+  serializedMerchandiseOperationPayloadSchema,
   merchandiseOperationPayloadSchema,
   merchandisePayloadSchema,
   merchandiseUpdatePayloadSchema,
@@ -428,19 +429,7 @@ async function applyPayload(transaction: Prisma.TransactionClient, operation: Su
 
 export const merchandiseSynchronizationHandler: SynchronizationHandler = {
   async apply(transaction, operation) {
-    let rawPayload: unknown = operation.payload;
-
-    // Older clients stored the serialized JSON as a string. Parse that legacy
-    // representation so queued work can recover and synchronize normally.
-    if (typeof rawPayload === "string") {
-      try {
-        rawPayload = JSON.parse(rawPayload);
-      } catch {
-        throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.REVISA_LOS_DATOS_DEL_CAMBIO_PENDIENTE_DE_MERCADERIA);
-      }
-    }
-
-    const parsedPayload = merchandiseOperationPayloadSchema.safeParse(rawPayload);
+    const parsedPayload = serializedMerchandiseOperationPayloadSchema.safeParse(operation.payload);
 
     if (!parsedPayload.success) {
       throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.REVISA_LOS_DATOS_DEL_CAMBIO_PENDIENTE_DE_MERCADERIA);

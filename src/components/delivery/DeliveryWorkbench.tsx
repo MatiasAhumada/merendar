@@ -1,6 +1,6 @@
 "use client";
 
-import { HTTP_CONTENT_TYPES, HTTP_CACHE_CONTROL } from "@/constants/http.constant";
+import { HTTP_CONTENT_TYPES, HTTP_RESPONSE_TYPES, NO_STORE_REQUEST_HEADERS } from "@/constants/http.constant";
 import { DELIVERY_ERROR_MESSAGES, DELIVERY_UI_TEXT, DELIVERY_SHEET_COLUMNS } from "@/constants/delivery.constant";
 import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
 import { API_ROUTES, ROUTES } from "@/constants/routes.constant";
@@ -19,12 +19,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue } from "@/services/offline-queue.service";
 import { createLocalBeneficiarySheetPdf } from "@/services/local-beneficiary-sheet.service";
 import { readOfflinePreparedDocuments, removeOfflinePreparedDocument, saveOfflinePreparedDocument, type OfflinePreparedDocument } from "@/services/offline-preparation.service";
-import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
+import { beneficiarySheetDraftSchema, beneficiarySheetResponseSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
 import type { RecordsCollection } from "@/types/schema-contracts";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { BRAND } from "@/constants/brand.constant";
 import { getDeliveryCollection } from "@/services/client/delivery-data.service";
 import Link from "next/link";
+import clientAxios from "@/utils/clientAxios.util";
+import { getClientErrorMessage } from "@/utils/handlers/clientHandler";
 
 import type { OfflineOperation } from "@/types/offline-operation";
 
@@ -333,11 +335,8 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
         if (!parsedDraft.success) {
           throw new Error(DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_PREPARAR_UNA_PLANILLA_CON_LOS_DATOS_CAPTURADOS_CONECTATE_PA);
         }
-        const logoResponse = await fetch(BRAND.institutionLogoPath);
-        if (!logoResponse.ok) {
-          throw new Error(DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_CARGAR_EL_LOGO_APROBADO_PARA_PREPARAR_LA_PLANILLA_LOCAL);
-        }
-        const pdfBytes = await createLocalBeneficiarySheetPdf(parsedDraft.data, new Uint8Array(await logoResponse.arrayBuffer()));
+        const logoResponse = await clientAxios.get<ArrayBuffer>(BRAND.institutionLogoPath, { responseType: HTTP_RESPONSE_TYPES.ARRAY_BUFFER });
+        const pdfBytes = await createLocalBeneficiarySheetPdf(parsedDraft.data, new Uint8Array(logoResponse.data));
         const pdfBuffer = new ArrayBuffer(pdfBytes.byteLength);
         new Uint8Array(pdfBuffer).set(pdfBytes);
         const content = new Blob([pdfBuffer], { type: HTTP_CONTENT_TYPES.PDF });
@@ -376,45 +375,45 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
         setSelectedPersonIds([]);
         return;
       }
-      const response = await fetch(API_ROUTES.RECORD_SHEETS, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ periodId, personIds: selectedPersonIds }),
-      });
-      const result = await response.json() as { sheet?: { id: string; version: number; periodId: string; createdAt: string }; error?: { message?: string } };
+      const response = await clientAxios.post<unknown>(API_ROUTES.RECORD_SHEETS, { periodId, personIds: selectedPersonIds });
+      const parsedResponse = beneficiarySheetResponseSchema.safeParse(response.data);
 
-      if (!response.ok || !result.sheet) {
-        const responseMessage = result.error?.message ?? DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_EMITIR_LA_PLANILLA;
-        if (responseMessage.toLocaleLowerCase("es-AR").includes("dni")) {
-          setDniRecoveryNeeded(true);
-        }
-        throw new Error(responseMessage);
+      if (!parsedResponse.success) {
+        throw new Error(DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_EMITIR_LA_PLANILLA);
       }
 
-      setNotice(DELIVERY_UI_TEXT.PLANILLA_EMITIDA(result.sheet.version, selectedPersonIds.length));
+      const { sheet } = parsedResponse.data;
+
+      setNotice(DELIVERY_UI_TEXT.PLANILLA_EMITIDA(sheet.version, selectedPersonIds.length));
       setSelectedPersonIds([]);
       try {
-        const pdfResponse = await fetch(API_ROUTES.RECORD_SHEET(result.sheet.id), { cache: HTTP_CACHE_CONTROL.NO_STORE });
-        if (!pdfResponse.ok) {
-          throw new Error(DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_DESCARGAR_EL_PDF);
-        }
-        const pdf = await pdfResponse.blob();
+        const pdfResponse = await clientAxios.get<Blob>(API_ROUTES.RECORD_SHEET(sheet.id), {
+          responseType: HTTP_RESPONSE_TYPES.BLOB,
+          headers: NO_STORE_REQUEST_HEADERS,
+        });
+        const pdf = pdfResponse.data;
         const url = URL.createObjectURL(pdf);
         const anchor = document.createElement("a");
         anchor.href = url;
-        anchor.download = `planilla-${periodId}-v${result.sheet.version}.pdf`;
+        anchor.download = `planilla-${periodId}-v${sheet.version}.pdf`;
         anchor.click();
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       } catch {
-        setError(DELIVERY_UI_TEXT.PLANILLA_EMITIDA_NO_DESCARGADA(result.sheet.version));
+        setError(DELIVERY_UI_TEXT.PLANILLA_EMITIDA_NO_DESCARGADA(sheet.version));
       }
       try {
         await fetchData();
       } catch {
-        setError(DELIVERY_UI_TEXT.PLANILLA_EMITIDA_LISTA_DESACTUALIZADA(result.sheet.version));
+        setError(DELIVERY_UI_TEXT.PLANILLA_EMITIDA_LISTA_DESACTUALIZADA(sheet.version));
       }
     } catch (issueError) {
-      setError(issueError instanceof Error ? issueError.message : DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_EMITIR_LA_PLANILLA_CON_PUNTO);
+      const issueMessage = getClientErrorMessage(issueError, DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_EMITIR_LA_PLANILLA_CON_PUNTO);
+
+      if (issueMessage.toLocaleLowerCase("es-AR").includes("dni")) {
+        setDniRecoveryNeeded(true);
+      }
+
+      setError(issueMessage);
     } finally {
       setIsIssuingSheet(false);
     }

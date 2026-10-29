@@ -28,6 +28,7 @@ export const HTTP_REQUEST = {
 export const HTTP_RESPONSE_TYPES = {
   TEXT: "text",
   BLOB: "blob",
+  ARRAY_BUFFER: "arraybuffer",
 } as const;
 
 export const PRIVATE_RESPONSE_HEADERS = {

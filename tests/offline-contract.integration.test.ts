@@ -4,6 +4,22 @@ import { isOfflineOperationEnabled } from "@/constants/offline-contract.constant
 import { OFFLINE_PREPARATION } from "@/constants/offline.constant";
 import { normalizeStoredOfflinePreparation } from "@/services/offline-preparation.service";
 import { dashboardSummaryResponseSchema } from "@/schemas/dashboard.schema";
+import { serializedMerchandiseOperationPayloadSchema } from "@/schemas/merchandise.schema";
+
+test("merchandise synchronization accepts current objects and serialized legacy payloads", () => {
+  const payload = {
+    kind: "period",
+    id: "period-1",
+    label: "Octubre",
+    agency: "Desarrollo Social",
+    startsAt: "2026-10-01",
+    endsAt: "2026-10-31",
+  };
+
+  assert.deepEqual(serializedMerchandiseOperationPayloadSchema.parse(payload), payload);
+  assert.deepEqual(serializedMerchandiseOperationPayloadSchema.parse(JSON.stringify(payload)), payload);
+  assert.equal(serializedMerchandiseOperationPayloadSchema.safeParse("{invalid").success, false);
+});
 
 test("offline write contract enables family and merchandise maintenance operations", () => {
   const resources = ["families", "remittances", "records", "renditions"] as const;

@@ -2,7 +2,7 @@
 
 import { APPLICATION_ERROR_MESSAGES, ERROR_MESSAGES } from "@/constants/error-messages.constant";
 import { AxiosError } from "axios";
-import { errorMessageSchema } from "@/schemas/common.schema";
+import { apiErrorResponseSchema, errorMessageSchema } from "@/schemas/common.schema";
 import {
   toastSuccess,
   toastError,
@@ -27,6 +27,12 @@ function normalizeError(error: unknown): Error {
       return new Error(APPLICATION_ERROR_MESSAGES.ERROR_DE_CONEXION);
     }
 
+    const responseError = apiErrorResponseSchema.safeParse(error.response.data);
+
+    if (responseError.success) {
+      return new Error(responseError.data.error.message);
+    }
+
     return new Error(error.message);
   }
 
@@ -38,6 +44,11 @@ function normalizeError(error: unknown): Error {
   }
 
   return new Error(ERROR_MESSAGES.UNKNOWN_ERROR);
+}
+
+export function getClientErrorMessage(error: unknown, defaultMessage: string): string {
+  const normalizedError = normalizeError(error);
+  return normalizedError.message || defaultMessage;
 }
 
 export function clientErrorHandler(

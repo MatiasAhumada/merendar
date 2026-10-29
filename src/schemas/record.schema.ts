@@ -79,6 +79,14 @@ export const recordsCollectionSchema = z.object({
   sheets: z.array(z.object({ id: z.string(), periodId: z.string(), version: z.number().int().positive(), createdAt: z.iso.datetime() })),
 });
 
+export const beneficiarySheetResponseSchema = z.object({
+  sheet: z.object({
+    id: z.string().min(1),
+    version: z.number().int().positive(),
+    createdAt: z.iso.datetime(),
+  }),
+});
+
 export const beneficiarySheetSnapshotSchema = z.object({
   period: z.object({ label: z.string(), agency: z.string(), startsAt: z.string(), endsAt: z.string() }),
   version: z.number().int().positive(),

@@ -125,6 +125,19 @@ export const merchandiseOperationPayloadSchema = z.union([
   merchandiseCancellationPayloadSchema,
 ]);
 
+export const serializedMerchandiseOperationPayloadSchema = z.preprocess((payload: unknown) => {
+  if (typeof payload !== "string") {
+    return payload;
+  }
+
+  try {
+    const parsedPayload: unknown = JSON.parse(payload);
+    return parsedPayload;
+  } catch {
+    return payload;
+  }
+}, merchandiseOperationPayloadSchema);
+
 export const receiptLimitConflictSchema = z.object({
   kind: z.literal("receipt_exceeds_quota"),
   approvedQuantity: z.number().int(),
