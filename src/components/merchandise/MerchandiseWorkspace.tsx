@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineOperation, listOfflineOperations, resolveOfflineConflict, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace";
@@ -60,6 +61,7 @@ import type {
   MerchandiseQuotaRecord,
   MerchandiseRemittanceRecord,
   MerchandiseRequestRecord,
+  MerchandiseDestination,
 } from "@/interfaces/merchandise.interface";
 
 interface MerchandiseWorkspaceProps {
@@ -82,6 +84,14 @@ interface PendingRecord {
 
 function formatDate(date: string) {
   return new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(date));
+}
+
+function selectedDestination(formData: FormData): MerchandiseDestination {
+  if (formData.get("destination") === "MERENDERO") {
+    return "MERENDERO";
+  }
+
+  return "FAMILIES";
 }
 
 function formatFileSize(byteSize: number) {
@@ -191,6 +201,7 @@ function queuedPeriod(payload: Extract<MerchandisePayload, { kind: "period" }>, 
     version: 1,
     label: payload.label,
     agency: payload.agency,
+    destination: payload.destination ?? "FAMILIES",
     startsAt: new Date(`${payload.startsAt}T00:00:00.000Z`).toISOString(),
     endsAt: new Date(`${payload.endsAt}T00:00:00.000Z`).toISOString(),
     status: "VIGENTE",
@@ -207,6 +218,16 @@ function queuedRequest(
   operation: OfflineOperation,
 ): MerchandiseRequestRecord {
   const timestamp = new Date(operation.createdAt).toISOString();
+  let item: MerchandiseRequestRecord["item"] = null;
+  if (payload.item) {
+    item = {
+      id: `local:${payload.id}:item`,
+      productName: payload.item.productName,
+      presentation: payload.item.presentation,
+      unit: payload.item.unit,
+      requestedQuantity: payload.item.requestedQuantity,
+    };
+  }
   return {
     id: payload.id,
     version: 1,
@@ -214,6 +235,7 @@ function queuedRequest(
     requestNumber: payload.requestNumber,
     requestedAt: new Date(`${payload.requestedAt}T00:00:00.000Z`).toISOString(),
     requestedQuantity: payload.requestedQuantity,
+    item,
     status: "PENDIENTE",
     notes: payload.notes ?? null,
     createdBy: { id: operation.userId, name: "En este dispositivo" },
@@ -228,13 +250,19 @@ function queuedRequest(
 function queuedQuota(
   payload: Extract<MerchandisePayload, { kind: "quota" }>,
   operation: OfflineOperation,
+  request: MerchandiseRequestRecord,
 ): MerchandiseQuotaRecord {
   const timestamp = new Date(operation.createdAt).toISOString();
+  const items: MerchandiseQuotaRecord["items"] = [];
+  if (request.item) {
+    items.push({ id: `local:${payload.id}:item`, requestItemId: request.item.id, authorizedQuantity: payload.approvedQuantity });
+  }
   return {
     id: payload.id,
     version: 1,
     requestId: payload.requestId,
     approvedQuantity: payload.approvedQuantity,
+    items,
     approvedAt: new Date(`${payload.approvedAt}T00:00:00.000Z`).toISOString(),
     notes: payload.notes ?? null,
     approvedBy: { id: operation.userId, name: "En este dispositivo" },
@@ -246,8 +274,13 @@ function queuedQuota(
 function queuedRemittance(
   payload: Extract<MerchandisePayload, { kind: "remittance" }>,
   operation: OfflineOperation,
+  request: MerchandiseRequestRecord,
 ): MerchandiseRemittanceRecord {
   const timestamp = new Date(operation.createdAt).toISOString();
+  const items: MerchandiseRemittanceRecord["items"] = [];
+  if (request.quota?.items.length) {
+    items.push({ id: `local:${payload.id}:item`, quotaItemId: request.quota.items[0].id, receivedQuantity: payload.receivedQuantity });
+  }
   return {
     id: payload.id,
     version: 1,
@@ -256,6 +289,7 @@ function queuedRemittance(
     remittanceNumber: payload.remittanceNumber,
     receivedAt: new Date(`${payload.receivedAt}T00:00:00.000Z`).toISOString(),
     receivedQuantity: payload.receivedQuantity,
+    items,
     responsibleName: payload.responsibleName,
     notes: payload.notes ?? null,
     status: "VIGENTE",
@@ -313,7 +347,7 @@ function addQueuedRecords(periods: MerchandisePeriodRecord[], records: PendingRe
       const request = displayedPeriods.flatMap((period) => period.requests).find((candidate) => candidate.id === payload.requestId);
 
       if (request && !request.quota) {
-        request.quota = queuedQuota(payload, record.operation);
+        request.quota = queuedQuota(payload, record.operation, request);
         request.status = "APROBADA";
       }
     }
@@ -327,7 +361,7 @@ function addQueuedRecords(periods: MerchandisePeriodRecord[], records: PendingRe
       const request = displayedPeriods.flatMap((period) => period.requests).find((candidate) => candidate.id === payload.requestId);
 
       if (request && !request.remittances.some((remittance) => remittance.id === payload.id)) {
-        request.remittances.push(queuedRemittance(payload, record.operation));
+        request.remittances.push(queuedRemittance(payload, record.operation, request));
       }
     }
   }
@@ -752,25 +786,38 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
       id: crypto.randomUUID(),
       label: String(formData.get("label") ?? ""),
       agency: String(formData.get("agency") ?? ""),
+      destination: selectedDestination(formData),
       startsAt: String(formData.get("startsAt") ?? ""),
       endsAt: String(formData.get("endsAt") ?? ""),
     }, []);
   }
 
-  async function createRequest(periodId: string, formData: FormData) {
+  async function createRequest(period: MerchandisePeriodRecord, formData: FormData) {
     const requestedQuantity = Number(formData.get("requestedQuantity"));
     const document = await encodeDocument(formFile(formData, "document"));
-    const payload = {
+    let item: Extract<MerchandisePayload, { kind: "request" }>["item"];
+    if (period.destination === "MERENDERO") {
+      item = {
+        productName: String(formData.get("productName") ?? ""),
+        presentation: String(formData.get("presentation") ?? ""),
+        unit: String(formData.get("unit") ?? ""),
+        requestedQuantity,
+      };
+    }
+    const payload: MerchandisePayload = {
       kind: "request" as const,
       id: crypto.randomUUID(),
-      periodId,
+      periodId: period.id,
       requestNumber: String(formData.get("requestNumber") ?? ""),
       requestedAt: String(formData.get("requestedAt") ?? ""),
       requestedQuantity,
       notes: optionalText(formData, "notes"),
       document,
     };
-    await savePayload(payload, [periodId]);
+    if (item && payload.kind === "request") {
+      payload.item = item;
+    }
+    await savePayload(payload, [period.id]);
   }
 
   async function approveQuota(request: MerchandiseRequestRecord, formData: FormData) {
@@ -806,7 +853,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
     const previouslyReceived = request.remittances.reduce((total, remittance) => total + remittance.receivedQuantity, 0);
 
     if (previouslyReceived + receivedQuantity > quota.approvedQuantity) {
-      throw new Error(MERCHANDISE_UI_TEXT.RECEIPT_LIMIT_ERROR(quota.approvedQuantity, previouslyReceived));
+      throw new Error(MERCHANDISE_UI_TEXT.RECEIPT_LIMIT_ERROR(quota.approvedQuantity, previouslyReceived, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL));
     }
 
     await savePayload(payload, [request.id, quota.id]);
@@ -824,6 +871,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
           {canWriteMerchandise ? <SaveSheet title={MERCHANDISE_UI_TEXT.NUEVO_PERIODO} description={MERCHANDISE_UI_TEXT.CREA_EL_CICLO_DEL_ORGANISMO_ANTES_DE_REGISTRAR_SOLICITUDES} triggerLabel={MERCHANDISE_UI_TEXT.NUEVO_PERIODO} onSave={createPeriod} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_PERIODO} presentation="dialog">
             <Field><FieldLabel htmlFor="period-label">{MERCHANDISE_UI_TEXT.NOMBRE_DEL_PERIODO}</FieldLabel><Input id="period-label" name="label" placeholder={MERCHANDISE_UI_TEXT.EJ_SEPTIEMBRE_2026} minLength={2} maxLength={80} required /></Field>
             <Field><FieldLabel htmlFor="period-agency">{MERCHANDISE_UI_TEXT.ORGANISMO}</FieldLabel><Input id="period-agency" name="agency" placeholder={MERCHANDISE_UI_TEXT.MINISTERIO_DE_DESARROLLO_SOCIAL} minLength={2} maxLength={120} required /></Field>
+            <Field><FieldLabel htmlFor="period-destination">{MERCHANDISE_UI_TEXT.DESTINO}</FieldLabel><Select name="destination" defaultValue="FAMILIES"><SelectTrigger id="period-destination" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="FAMILIES">{MERCHANDISE_UI_TEXT.DESTINO_FAMILIAS}</SelectItem><SelectItem value="MERENDERO">{MERCHANDISE_UI_TEXT.DESTINO_MERENDERO}</SelectItem></SelectContent></Select></Field>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field><FieldLabel htmlFor="period-start">{MERCHANDISE_UI_TEXT.DESDE}</FieldLabel><Input id="period-start" name="startsAt" type="date" required /></Field>
               <Field><FieldLabel htmlFor="period-end">{MERCHANDISE_UI_TEXT.HASTA}</FieldLabel><Input id="period-end" name="endsAt" type="date" required /></Field>
@@ -903,19 +951,20 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
 
             return <Card key={period.id} className="overflow-hidden">
               <CardHeader className="gap-4 border-b bg-muted/40 sm:flex-row sm:items-start sm:justify-between">
-                <div className="flex gap-3"><span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="size-6" /></span><div className="min-w-0"><CardTitle><h3 className="font-display text-lg font-semibold">{period.label}</h3></CardTitle><p className="text-sm text-muted-foreground">{period.agency} {APPLICATION_UI_TEXT.TEXT}{formatDate(period.startsAt)} {MERCHANDISE_UI_TEXT.TEXT}{formatDate(period.endsAt)}</p></div></div>
+                  <div className="flex gap-3"><span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="size-6" /></span><div className="min-w-0"><CardTitle><div className="flex flex-wrap items-center gap-2"><h3 className="font-display text-lg font-semibold">{period.label}</h3><Badge variant="outline">{MERCHANDISE_UI_TEXT.DESTINATION_LABEL(period.destination)}</Badge></div></CardTitle><p className="text-sm text-muted-foreground">{period.agency} {APPLICATION_UI_TEXT.TEXT}{formatDate(period.startsAt)} {MERCHANDISE_UI_TEXT.TEXT}{formatDate(period.endsAt)}</p></div></div>
                 <div className="flex flex-col items-start gap-2 sm:items-end"><Badge variant={periodStatusBadgeVariant(period.status, periodIsLocal)}>{periodStatusLabel(period.status, periodIsLocal)}</Badge>{canWriteMerchandise && period.status === "VIGENTE" && !periodIsLocal ? <div className="flex flex-col gap-2 sm:flex-row">
-                  <SaveSheet title={MERCHANDISE_UI_TEXT.CORREGIR_PERIODO} description={MERCHANDISE_UI_TEXT.LOS_CAMBIOS_SE_APLICARAN_AL_RECUPERAR_CONEXION_Y_SE_VALIDARA_QUE_NO_HAYA} triggerLabel={MERCHANDISE_UI_TEXT.CORREGIR_PERIODO} triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "period", id: period.id, label: String(formData.get("label") ?? ""), agency: String(formData.get("agency") ?? ""), startsAt: String(formData.get("startsAt") ?? ""), endsAt: String(formData.get("endsAt") ?? "") }, period.version)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CORRECCION}>
+                  <SaveSheet title={MERCHANDISE_UI_TEXT.CORREGIR_PERIODO} description={MERCHANDISE_UI_TEXT.LOS_CAMBIOS_SE_APLICARAN_AL_RECUPERAR_CONEXION_Y_SE_VALIDARA_QUE_NO_HAYA} triggerLabel={MERCHANDISE_UI_TEXT.CORREGIR_PERIODO} triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "period", id: period.id, label: String(formData.get("label") ?? ""), agency: String(formData.get("agency") ?? ""), destination: selectedDestination(formData), startsAt: String(formData.get("startsAt") ?? ""), endsAt: String(formData.get("endsAt") ?? "") }, period.version)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CORRECCION}>
                     <Field><FieldLabel htmlFor={`period-edit-label-${period.id}`}>{MERCHANDISE_UI_TEXT.NOMBRE_DEL_PERIODO}</FieldLabel><Input id={`period-edit-label-${period.id}`} name="label" defaultValue={period.label} maxLength={80} required /></Field>
                     <Field><FieldLabel htmlFor={`period-edit-agency-${period.id}`}>{MERCHANDISE_UI_TEXT.ORGANISMO}</FieldLabel><Input id={`period-edit-agency-${period.id}`} name="agency" defaultValue={period.agency} maxLength={120} required /></Field>
+                    <Field><FieldLabel htmlFor={`period-edit-destination-${period.id}`}>{MERCHANDISE_UI_TEXT.DESTINO}</FieldLabel><Select name="destination" defaultValue={period.destination} disabled={period.requests.length > 0}><SelectTrigger id={`period-edit-destination-${period.id}`} className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="FAMILIES">{MERCHANDISE_UI_TEXT.DESTINO_FAMILIAS}</SelectItem><SelectItem value="MERENDERO">{MERCHANDISE_UI_TEXT.DESTINO_MERENDERO}</SelectItem></SelectContent></Select></Field>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`period-edit-start-${period.id}`}>{MERCHANDISE_UI_TEXT.DESDE}</FieldLabel><Input id={`period-edit-start-${period.id}`} name="startsAt" type="date" defaultValue={period.startsAt.slice(0, 10)} required /></Field><Field><FieldLabel htmlFor={`period-edit-end-${period.id}`}>{MERCHANDISE_UI_TEXT.HASTA}</FieldLabel><Input id={`period-edit-end-${period.id}`} name="endsAt" type="date" defaultValue={period.endsAt.slice(0, 10)} required /></Field></div>
                   </SaveSheet>
                   {period.requests.length === 0 && !period.beneficiarySheets.length && !period.renditions.length ? <SaveSheet title={MERCHANDISE_UI_TEXT.ANULAR_PERIODO} description={MERCHANDISE_UI_TEXT.EL_PERIODO_QUEDARA_CONSERVADO_PARA_AUDITORIA_LA_ANULACION_NO_BORRA_DATOS} triggerLabel={MERCHANDISE_UI_TEXT.ANULAR} triggerVariant="destructive" onSave={(formData) => cancelRecord({ kind: "period", id: period.id, action: "cancel", reason: String(formData.get("reason") ?? "") }, period.version)} submitLabel={MERCHANDISE_UI_TEXT.ANULAR_PERIODO}>
                     <CancellationReasonField id={`period-cancel-reason-${period.id}`} />
                   </SaveSheet> : <p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.NO_SE_PUEDE_ANULAR_UN_PERIODO_CON_OPERACIONES_O_DOCUMENTOS_VINCULADOS}</p>}
-                </div> : null}{canWriteMerchandise && period.status === "VIGENTE" ? <SaveSheet title={MERCHANDISE_UI_TEXT.NUEVA_SOLICITUD_DE_MODULOS} description={MERCHANDISE_UI_TEXT.PERIOD_REQUEST_DESCRIPTION(period.label)} triggerLabel={MERCHANDISE_UI_TEXT.REGISTRAR_SOLICITUD} onSave={(formData) => createRequest(period.id, formData)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_SOLICITUD}>
+                </div> : null}{canWriteMerchandise && period.status === "VIGENTE" ? <SaveSheet title={period.destination === "MERENDERO" ? MERCHANDISE_UI_TEXT.NUEVA_SOLICITUD_DE_INSUMOS : MERCHANDISE_UI_TEXT.NUEVA_SOLICITUD_DE_MODULOS} description={MERCHANDISE_UI_TEXT.PERIOD_REQUEST_DESCRIPTION(period.label)} triggerLabel={MERCHANDISE_UI_TEXT.REGISTRAR_SOLICITUD} onSave={(formData) => createRequest(period, formData)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_SOLICITUD}>
                   <Field><FieldLabel htmlFor={`request-number-${period.id}`}>{MERCHANDISE_UI_TEXT.NUMERO_DE_SOLICITUD}</FieldLabel><Input id={`request-number-${period.id}`} name="requestNumber" maxLength={80} required /></Field>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`request-date-${period.id}`}>{MERCHANDISE_UI_TEXT.FECHA_DE_PRESENTACION}</FieldLabel><Input id={`request-date-${period.id}`} name="requestedAt" type="date" required /></Field><Field><FieldLabel htmlFor={`request-quantity-${period.id}`}>{MERCHANDISE_UI_TEXT.MODULOS_SOLICITADOS}</FieldLabel><Input id={`request-quantity-${period.id}`} name="requestedQuantity" type="number" min="1" max="100000" required /></Field></div>
+                  {period.destination === "MERENDERO" ? <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`request-date-${period.id}`}>{MERCHANDISE_UI_TEXT.FECHA_DE_PRESENTACION}</FieldLabel><Input id={`request-date-${period.id}`} name="requestedAt" type="date" required /></Field><Field><FieldLabel htmlFor={`request-product-${period.id}`}>{MERCHANDISE_UI_TEXT.PRODUCTO}</FieldLabel><Input id={`request-product-${period.id}`} name="productName" maxLength={120} required /></Field><Field><FieldLabel htmlFor={`request-presentation-${period.id}`}>{MERCHANDISE_UI_TEXT.PRESENTACION}</FieldLabel><Input id={`request-presentation-${period.id}`} name="presentation" maxLength={120} placeholder={MERCHANDISE_UI_TEXT.PRESENTATION_PLACEHOLDER} required /></Field><Field><FieldLabel htmlFor={`request-unit-${period.id}`}>{MERCHANDISE_UI_TEXT.UNIDAD}</FieldLabel><Input id={`request-unit-${period.id}`} name="unit" maxLength={40} placeholder={MERCHANDISE_UI_TEXT.UNIT_PLACEHOLDER} required /></Field><Field><FieldLabel htmlFor={`request-quantity-${period.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_DEL_PRODUCTO}</FieldLabel><Input id={`request-quantity-${period.id}`} name="requestedQuantity" type="number" min="0.001" step="0.001" max="100000" required /></Field></div> : <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`request-date-${period.id}`}>{MERCHANDISE_UI_TEXT.FECHA_DE_PRESENTACION}</FieldLabel><Input id={`request-date-${period.id}`} name="requestedAt" type="date" required /></Field><Field><FieldLabel htmlFor={`request-quantity-${period.id}`}>{MERCHANDISE_UI_TEXT.MODULOS_SOLICITADOS}</FieldLabel><Input id={`request-quantity-${period.id}`} name="requestedQuantity" type="number" min="1" step="1" max="100000" required /></Field></div>}
                   <Field><FieldLabel htmlFor={`request-notes-${period.id}`}>{APPLICATION_UI_TEXT.OBSERVACIONES}</FieldLabel><Textarea id={`request-notes-${period.id}`} name="notes" maxLength={1000} rows={3} /></Field>
                   <DocumentField id={`request-document-${period.id}`} />
                 </SaveSheet> : null}</div>
@@ -964,7 +1013,7 @@ function RemittanceConflictCorrection({ operation, payload, onCorrect }: Remitta
   let maximumQuantity = payload.receivedQuantity;
 
   if (receiptLimitConflict.success) {
-    conflictMessage = MERCHANDISE_UI_TEXT.QUOTA_LIMIT_ERROR(receiptLimitConflict.data.approvedQuantity, receiptLimitConflict.data.receivedSoFar);
+    conflictMessage = MERCHANDISE_UI_TEXT.QUOTA_LIMIT_ERROR(receiptLimitConflict.data.approvedQuantity, receiptLimitConflict.data.receivedSoFar, MERCHANDISE_UI_TEXT.GENERIC_QUANTITY_UNIT);
     maximumQuantity = receiptLimitConflict.data.approvedQuantity - receiptLimitConflict.data.receivedSoFar;
   }
 
@@ -982,7 +1031,7 @@ function RemittanceConflictCorrection({ operation, payload, onCorrect }: Remitta
   return <div className="mt-3 space-y-3 rounded-lg border border-warning/40 bg-warning/5 p-3">
     <p className="text-sm">{conflictMessage}</p>
     <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={(event) => void submitCorrection(event)}>
-      {receiptLimitConflict.success ? <Field className="flex-1"><FieldLabel htmlFor={`correct-quantity-${operation.operationId}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_CORREGIDA}</FieldLabel><Input id={`correct-quantity-${operation.operationId}`} name="receivedQuantity" type="number" min="1" max={maximumQuantity} defaultValue={Math.min(payload.receivedQuantity, maximumQuantity)} required disabled={!maximumQuantity} /></Field> : null}
+      {receiptLimitConflict.success ? <Field className="flex-1"><FieldLabel htmlFor={`correct-quantity-${operation.operationId}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_CORREGIDA}</FieldLabel><Input id={`correct-quantity-${operation.operationId}`} name="receivedQuantity" type="number" min="0.001" step="0.001" max={maximumQuantity} defaultValue={Math.min(payload.receivedQuantity, maximumQuantity)} required disabled={!maximumQuantity} /></Field> : null}
       {duplicateNumberConflict.success ? <Field className="flex-1"><FieldLabel htmlFor={`correct-number-${operation.operationId}`}>{MERCHANDISE_UI_TEXT.NUMERO_DE_REMITO}</FieldLabel><Input id={`correct-number-${operation.operationId}`} name="remittanceNumber" maxLength={80} defaultValue="" required /></Field> : null}
       <Button type="submit" size="sm" variant="outline" disabled={receiptLimitConflict.success && !maximumQuantity}>{MERCHANDISE_UI_TEXT.CORREGIR_Y_REINTENTAR}</Button>
     </form>
@@ -1047,17 +1096,17 @@ function RequestCard({ period, request, operations, createQuota, receiveRemittan
 
   return <article className="rounded-2xl border p-4 sm:p-5">
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} /></span><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold">{MERCHANDISE_UI_TEXT.SOLICITUD}{request.requestNumber}</h4><Badge variant={requestStatusBadgeVariant(request.status)}>{requestStatusLabel(request.status)}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{formatDate(request.requestedAt)} {APPLICATION_UI_TEXT.TEXT}{request.requestedQuantity} {MERCHANDISE_UI_TEXT.MODULOS_REGISTRO}{request.createdBy.name}</p><p className="mt-1 text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.PERIODO}{period.label}</p></div></div>
+      <div className="flex gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} /></span><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold">{MERCHANDISE_UI_TEXT.SOLICITUD}{request.requestNumber}</h4><Badge variant={requestStatusBadgeVariant(request.status)}>{requestStatusLabel(request.status)}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{formatDate(request.requestedAt)} {APPLICATION_UI_TEXT.TEXT}{MERCHANDISE_UI_TEXT.QUANTITY_WITH_UNIT(request.requestedQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)} · {MERCHANDISE_UI_TEXT.REGISTRO}{request.createdBy.name}</p>{request.item ? <p className="mt-1 text-sm">{request.item.productName} · {request.item.presentation} · {request.item.unit}</p> : null}<p className="mt-1 text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.PERIODO}{period.label}</p></div></div>
       <div className="flex flex-wrap gap-2">
-        {canWrite && !quota && request.status !== "RECHAZADA" && request.status !== "CANCELADA" ? <SaveSheet title={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO_APROBADO} description={MERCHANDISE_UI_TEXT.REQUEST_DESCRIPTION(request.requestNumber, request.requestedQuantity)} triggerLabel={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO} triggerVariant="outline" onSave={(formData) => createQuota(request, formData)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CUPO}>
-          <Field><FieldLabel htmlFor={`quota-quantity-${request.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_APROBADA}</FieldLabel><Input id={`quota-quantity-${request.id}`} name="approvedQuantity" type="number" min="1" max={request.requestedQuantity} required /><FieldDescription>{MERCHANDISE_UI_TEXT.EL_CUPO_NO_PUEDE_SUPERAR_LOS}{request.requestedQuantity} {MERCHANDISE_UI_TEXT.MODULOS_SOLICITADOS_2}</FieldDescription></Field>
+        {canWrite && !quota && request.status !== "RECHAZADA" && request.status !== "CANCELADA" ? <SaveSheet title={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO_APROBADO} description={MERCHANDISE_UI_TEXT.REQUEST_DESCRIPTION(request.requestNumber, request.requestedQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)} triggerLabel={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO} triggerVariant="outline" onSave={(formData) => createQuota(request, formData)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CUPO}>
+          <Field><FieldLabel htmlFor={`quota-quantity-${request.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_APROBADA}</FieldLabel><Input id={`quota-quantity-${request.id}`} name="approvedQuantity" type="number" min="0.001" step={request.item ? "0.001" : "1"} max={request.requestedQuantity} required /><FieldDescription>{MERCHANDISE_UI_TEXT.EL_CUPO_NO_PUEDE_SUPERAR_LOS}{request.requestedQuantity} {request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL}</FieldDescription></Field>
           <Field><FieldLabel htmlFor={`quota-date-${request.id}`}>{MERCHANDISE_UI_TEXT.FECHA_DE_APROBACION}</FieldLabel><Input id={`quota-date-${request.id}`} name="approvedAt" type="date" required /></Field>
           <Field><FieldLabel htmlFor={`quota-notes-${request.id}`}>{APPLICATION_UI_TEXT.OBSERVACIONES}</FieldLabel><Textarea id={`quota-notes-${request.id}`} name="notes" maxLength={1000} rows={3} /></Field>
           <DocumentField id={`quota-document-${request.id}`} />
         </SaveSheet> : null}
-        {canWrite && quota && availableQuantity > 0 && request.status !== "CANCELADA" ? <SaveSheet title={MERCHANDISE_UI_TEXT.REGISTRAR_RECEPCION_REMITO} description={MERCHANDISE_UI_TEXT.QUOTA_DESCRIPTION(availableQuantity)} triggerLabel={MERCHANDISE_UI_TEXT.REGISTRAR_REMITO} triggerVariant="default" onSave={(formData) => receiveRemittance(request, quota, formData)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_REMITO}>
+        {canWrite && quota && availableQuantity > 0 && request.status !== "CANCELADA" ? <SaveSheet title={MERCHANDISE_UI_TEXT.REGISTRAR_RECEPCION_REMITO} description={MERCHANDISE_UI_TEXT.QUOTA_DESCRIPTION(availableQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)} triggerLabel={MERCHANDISE_UI_TEXT.REGISTRAR_REMITO} triggerVariant="default" onSave={(formData) => receiveRemittance(request, quota, formData)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_REMITO}>
           <Field><FieldLabel htmlFor={`remittance-number-${request.id}`}>{MERCHANDISE_UI_TEXT.NUMERO_DE_REMITO}</FieldLabel><Input id={`remittance-number-${request.id}`} name="remittanceNumber" maxLength={80} required /></Field>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`remittance-date-${request.id}`}>{MERCHANDISE_UI_TEXT.FECHA_DE_RECEPCION}</FieldLabel><Input id={`remittance-date-${request.id}`} name="receivedAt" type="date" required /></Field><Field><FieldLabel htmlFor={`remittance-quantity-${request.id}`}>{MERCHANDISE_UI_TEXT.MODULOS_RECIBIDOS}</FieldLabel><Input id={`remittance-quantity-${request.id}`} name="receivedQuantity" type="number" min="1" max={availableQuantity} required /><FieldDescription>{MERCHANDISE_UI_TEXT.DISPONIBLES}{availableQuantity}</FieldDescription></Field></div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`remittance-date-${request.id}`}>{MERCHANDISE_UI_TEXT.FECHA_DE_RECEPCION}</FieldLabel><Input id={`remittance-date-${request.id}`} name="receivedAt" type="date" required /></Field><Field><FieldLabel htmlFor={`remittance-quantity-${request.id}`}>{request.item ? MERCHANDISE_UI_TEXT.CANTIDAD_RECIBIDA : MERCHANDISE_UI_TEXT.MODULOS_RECIBIDOS}</FieldLabel><Input id={`remittance-quantity-${request.id}`} name="receivedQuantity" type="number" min="0.001" step={request.item ? "0.001" : "1"} max={availableQuantity} required /><FieldDescription>{MERCHANDISE_UI_TEXT.DISPONIBLES}{availableQuantity} {request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL}</FieldDescription></Field></div>
           <Field><FieldLabel htmlFor={`remittance-manager-${request.id}`}>{MERCHANDISE_UI_TEXT.RESPONSABLE_DE_RECEPCION}</FieldLabel><Input id={`remittance-manager-${request.id}`} name="responsibleName" maxLength={120} required /></Field>
           <Field><FieldLabel htmlFor={`remittance-notes-${request.id}`}>{APPLICATION_UI_TEXT.OBSERVACIONES}</FieldLabel><Textarea id={`remittance-notes-${request.id}`} name="notes" maxLength={1000} rows={3} /></Field>
           <DocumentField id={`remittance-document-${request.id}`} />
@@ -1065,7 +1114,7 @@ function RequestCard({ period, request, operations, createQuota, receiveRemittan
         {quota && availableQuantity <= 0 ? <Badge variant="success">{MERCHANDISE_UI_TEXT.CUPO_RECIBIDO_COMPLETO}</Badge> : null}
         {canWrite && !queuedRequestOperation && request.status !== "CANCELADA" && request.status !== "RECHAZADA" ? <SaveSheet title={MERCHANDISE_UI_TEXT.CORREGIR_SOLICITUD} description={MERCHANDISE_UI_TEXT.EL_CAMBIO_SE_VALIDA_CONTRA_LA_VERSION_VIGENTE_Y_CONSERVA_LOS_COMPROBANTE} triggerLabel={MERCHANDISE_UI_TEXT.CORREGIR_SOLICITUD} triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "request", id: request.id, requestNumber: String(formData.get("requestNumber") ?? ""), requestedAt: String(formData.get("requestedAt") ?? ""), requestedQuantity: Number(formData.get("requestedQuantity")), notes: optionalText(formData, "notes") }, request.version, [request.id])} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CORRECCION}>
           <Field><FieldLabel htmlFor={`request-edit-number-${request.id}`}>{MERCHANDISE_UI_TEXT.NUMERO_DE_SOLICITUD}</FieldLabel><Input id={`request-edit-number-${request.id}`} name="requestNumber" defaultValue={request.requestNumber} maxLength={80} required /></Field>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`request-edit-date-${request.id}`}>{MERCHANDISE_UI_TEXT.FECHA}</FieldLabel><Input id={`request-edit-date-${request.id}`} name="requestedAt" type="date" defaultValue={request.requestedAt.slice(0, 10)} required /></Field><Field><FieldLabel htmlFor={`request-edit-quantity-${request.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_SOLICITADA}</FieldLabel><Input id={`request-edit-quantity-${request.id}`} name="requestedQuantity" type="number" min={quota?.approvedQuantity ?? 1} max="100000" defaultValue={request.requestedQuantity} required /></Field></div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`request-edit-date-${request.id}`}>{MERCHANDISE_UI_TEXT.FECHA}</FieldLabel><Input id={`request-edit-date-${request.id}`} name="requestedAt" type="date" defaultValue={request.requestedAt.slice(0, 10)} required /></Field><Field><FieldLabel htmlFor={`request-edit-quantity-${request.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_SOLICITADA}</FieldLabel><Input id={`request-edit-quantity-${request.id}`} name="requestedQuantity" type="number" min={quota?.approvedQuantity ?? (request.item ? 0.001 : 1)} step={request.item ? "0.001" : "1"} max="100000" defaultValue={request.requestedQuantity} required /></Field></div>
           <Field><FieldLabel htmlFor={`request-edit-notes-${request.id}`}>{APPLICATION_UI_TEXT.OBSERVACIONES}</FieldLabel><Textarea id={`request-edit-notes-${request.id}`} name="notes" maxLength={1000} rows={3} defaultValue={request.notes ?? ""} /></Field>
         </SaveSheet> : null}
         {canWrite && !queuedRequestOperation && !quota && !request.remittances.length && request.status !== "CANCELADA" ? <SaveSheet title={MERCHANDISE_UI_TEXT.ANULAR_SOLICITUD} description={MERCHANDISE_UI_TEXT.LA_SOLICITUD_SE_CONSERVARA_JUNTO_CON_SUS_DOCUMENTOS_INGRESA_EL_MOTIVO_PA} triggerLabel={MERCHANDISE_UI_TEXT.ANULAR_SOLICITUD} triggerVariant="destructive" onSave={(formData) => cancelRecord({ kind: "request", id: request.id, action: "cancel", reason: String(formData.get("reason") ?? "") }, request.version, [request.id])} submitLabel={MERCHANDISE_UI_TEXT.ANULAR_SOLICITUD}>
@@ -1076,14 +1125,14 @@ function RequestCard({ period, request, operations, createQuota, receiveRemittan
     </div>
     {queuedRequestOperation?.message ? <p role="alert" className="mt-3 text-sm text-destructive">{queuedRequestOperation.message}</p> : null}
     {pendingQuotaOperation?.message ? <p role="alert" className="mt-3 text-sm text-destructive">{pendingQuotaOperation.message}</p> : null}
-    {quota ? <div className="mt-4 space-y-3"><div className="grid grid-cols-1 gap-2 rounded-xl bg-muted p-3 text-sm sm:grid-cols-3"><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.CUPO_APROBADO}</p><strong>{quota.approvedQuantity} {MERCHANDISE_UI_TEXT.MODULOS}</strong></div><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.APROBADO_POR}</p><strong>{quota.approvedBy.name}</strong></div><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.FECHA_DE_APROBACION_2}</p><strong>{formatDate(quota.approvedAt)}</strong></div></div>{canWrite && !pendingQuotaOperation ? <SaveSheet title={MERCHANDISE_UI_TEXT.CORREGIR_CUPO} description={MERCHANDISE_UI_TEXT.EL_CUPO_CORREGIDO_NO_PUEDE_QUEDAR_POR_DEBAJO_DE_LAS_RECEPCIONES_VIGENTES} triggerLabel={MERCHANDISE_UI_TEXT.CORREGIR_CUPO} triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "quota", id: quota.id, approvedQuantity: Number(formData.get("approvedQuantity")), approvedAt: String(formData.get("approvedAt") ?? ""), notes: optionalText(formData, "notes") }, quota.version, [request.id])} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CORRECCION}>
-      <Field><FieldLabel htmlFor={`quota-edit-quantity-${quota.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_APROBADA}</FieldLabel><Input id={`quota-edit-quantity-${quota.id}`} name="approvedQuantity" type="number" min={pendingCount || 1} max={request.requestedQuantity} defaultValue={quota.approvedQuantity} required /></Field>
+    {quota ? <div className="mt-4 space-y-3"><div className="grid grid-cols-1 gap-2 rounded-xl bg-muted p-3 text-sm sm:grid-cols-3"><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.CUPO_APROBADO}</p><strong>{MERCHANDISE_UI_TEXT.QUANTITY_WITH_UNIT(quota.approvedQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)}</strong></div><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.APROBADO_POR}</p><strong>{quota.approvedBy.name}</strong></div><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.FECHA_DE_APROBACION_2}</p><strong>{formatDate(quota.approvedAt)}</strong></div></div>{canWrite && !pendingQuotaOperation ? <SaveSheet title={MERCHANDISE_UI_TEXT.CORREGIR_CUPO} description={MERCHANDISE_UI_TEXT.EL_CUPO_CORREGIDO_NO_PUEDE_QUEDAR_POR_DEBAJO_DE_LAS_RECEPCIONES_VIGENTES} triggerLabel={MERCHANDISE_UI_TEXT.CORREGIR_CUPO} triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "quota", id: quota.id, approvedQuantity: Number(formData.get("approvedQuantity")), approvedAt: String(formData.get("approvedAt") ?? ""), notes: optionalText(formData, "notes") }, quota.version, [request.id])} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CORRECCION}>
+      <Field><FieldLabel htmlFor={`quota-edit-quantity-${quota.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_APROBADA}</FieldLabel><Input id={`quota-edit-quantity-${quota.id}`} name="approvedQuantity" type="number" min={pendingCount || (request.item ? 0.001 : 1)} step={request.item ? "0.001" : "1"} max={request.requestedQuantity} defaultValue={quota.approvedQuantity} required /></Field>
       <Field><FieldLabel htmlFor={`quota-edit-date-${quota.id}`}>{MERCHANDISE_UI_TEXT.FECHA_DE_APROBACION}</FieldLabel><Input id={`quota-edit-date-${quota.id}`} name="approvedAt" type="date" defaultValue={quota.approvedAt.slice(0, 10)} required /></Field>
       <Field><FieldLabel htmlFor={`quota-edit-notes-${quota.id}`}>{APPLICATION_UI_TEXT.OBSERVACIONES}</FieldLabel><Textarea id={`quota-edit-notes-${quota.id}`} name="notes" maxLength={1000} rows={3} defaultValue={quota.notes ?? ""} /></Field>
     </SaveSheet> : null}<p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.EL_CUPO_NO_SE_ANULA_PORQUE_LA_SOLICITUD_CONSERVA_UN_UNICO_CUPO_Y_SUS_DOC}</p></div> : null}
     {request.notes ? <p className="mt-3 text-sm text-muted-foreground">{request.notes}</p> : null}
     {request.documents.map((document) => <DocumentLink key={document.id} document={document} />)}
-    {request.remittances.length ? <div className="mt-4 space-y-3">{request.remittances.map((remittance) => <RemittanceCard key={remittance.id} remittance={remittance} operations={operations} canWrite={canWrite} correctRecord={correctRecord} cancelRecord={cancelRecord} />)}</div> : null}
+    {request.remittances.length ? <div className="mt-4 space-y-3">{request.remittances.map((remittance) => <RemittanceCard key={remittance.id} remittance={remittance} unitLabel={request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL} operations={operations} canWrite={canWrite} correctRecord={correctRecord} cancelRecord={cancelRecord} />)}</div> : null}
   </article>;
 }
 
@@ -1095,14 +1144,14 @@ function DocumentLink({ document }: { document: MerchandiseRequestRecord["docume
   return <a className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline" href={API_ROUTES.MERCHANDISE_DOCUMENT(document.id)}><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} />{document.originalName} <span className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.TEXT_2}{formatFileSize(document.byteSize)}{APPLICATION_UI_TEXT.TEXT_2}</span></a>;
 }
 
-function RemittanceCard({ remittance, operations, canWrite, correctRecord, cancelRecord }: { remittance: MerchandiseRemittanceRecord; operations: OfflineOperation[]; canWrite: boolean; correctRecord: RequestCardProps["correctRecord"]; cancelRecord: RequestCardProps["cancelRecord"] }) {
+function RemittanceCard({ remittance, unitLabel, operations, canWrite, correctRecord, cancelRecord }: { remittance: MerchandiseRemittanceRecord; unitLabel: string; operations: OfflineOperation[]; canWrite: boolean; correctRecord: RequestCardProps["correctRecord"]; cancelRecord: RequestCardProps["cancelRecord"] }) {
   const hasPendingChange = operations.some((operation) => operation.resourceId === remittance.id && operation.status !== "synced");
 
   return <div className="rounded-xl border bg-background p-3">
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><HugeiconsIcon icon={TruckIcon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-primary" /><div><div className="flex flex-wrap items-center gap-2"><h5 className="font-semibold">{MERCHANDISE_UI_TEXT.REMITO_N}{remittance.remittanceNumber}</h5><Badge variant="secondary">{remittance.receivedQuantity} {MERCHANDISE_UI_TEXT.MODULOS}</Badge>{remittance.status === "ANULADO" ? <Badge variant="destructive">{MERCHANDISE_UI_TEXT.ANULADO}</Badge> : null}</div><p className="mt-1 text-xs text-muted-foreground">{formatDate(remittance.receivedAt)} {MERCHANDISE_UI_TEXT.RECIBIO}{remittance.responsibleName} {MERCHANDISE_UI_TEXT.REGISTRO}{remittance.createdBy.name}</p></div></div><div className="flex flex-wrap items-center gap-2"><Badge variant={hasPendingChange ? "warning" : "success"}>{hasPendingChange ? MERCHANDISE_UI_TEXT.CAMBIO_PENDIENTE : MERCHANDISE_UI_TEXT.CONFIRMADO_EN_SERVIDOR}</Badge>{canWrite && !hasPendingChange && remittance.status === "VIGENTE" ? <>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-3"><HugeiconsIcon icon={TruckIcon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-primary" /><div><div className="flex flex-wrap items-center gap-2"><h5 className="font-semibold">{MERCHANDISE_UI_TEXT.REMITO_N}{remittance.remittanceNumber}</h5><Badge variant="secondary">{MERCHANDISE_UI_TEXT.QUANTITY_WITH_UNIT(remittance.receivedQuantity, unitLabel)}</Badge>{remittance.status === "ANULADO" ? <Badge variant="destructive">{MERCHANDISE_UI_TEXT.ANULADO}</Badge> : null}</div><p className="mt-1 text-xs text-muted-foreground">{formatDate(remittance.receivedAt)} {MERCHANDISE_UI_TEXT.RECIBIO}{remittance.responsibleName} {MERCHANDISE_UI_TEXT.REGISTRO}{remittance.createdBy.name}</p></div></div><div className="flex flex-wrap items-center gap-2"><Badge variant={hasPendingChange ? "warning" : "success"}>{hasPendingChange ? MERCHANDISE_UI_TEXT.CAMBIO_PENDIENTE : MERCHANDISE_UI_TEXT.CONFIRMADO_EN_SERVIDOR}</Badge>{canWrite && !hasPendingChange && remittance.status === "VIGENTE" ? <>
       <SaveSheet title={MERCHANDISE_UI_TEXT.CORREGIR_REMITO} description={MERCHANDISE_UI_TEXT.LOS_COMPROBANTES_EXISTENTES_SE_CONSERVARAN_Y_SE_VERIFICARA_EL_SALDO_DEL} triggerLabel={MERCHANDISE_UI_TEXT.CORREGIR} triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "remittance", id: remittance.id, remittanceNumber: String(formData.get("remittanceNumber") ?? ""), receivedAt: String(formData.get("receivedAt") ?? ""), receivedQuantity: Number(formData.get("receivedQuantity")), responsibleName: String(formData.get("responsibleName") ?? ""), notes: optionalText(formData, "notes") }, remittance.version, [remittance.requestId, remittance.quotaId])} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CORRECCION}>
         <Field><FieldLabel htmlFor={`remittance-edit-number-${remittance.id}`}>{MERCHANDISE_UI_TEXT.NUMERO_DE_REMITO}</FieldLabel><Input id={`remittance-edit-number-${remittance.id}`} name="remittanceNumber" defaultValue={remittance.remittanceNumber} maxLength={80} required /></Field>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`remittance-edit-date-${remittance.id}`}>{MERCHANDISE_UI_TEXT.FECHA}</FieldLabel><Input id={`remittance-edit-date-${remittance.id}`} name="receivedAt" type="date" defaultValue={remittance.receivedAt.slice(0, 10)} required /></Field><Field><FieldLabel htmlFor={`remittance-edit-quantity-${remittance.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_RECIBIDA}</FieldLabel><Input id={`remittance-edit-quantity-${remittance.id}`} name="receivedQuantity" type="number" min="1" defaultValue={remittance.receivedQuantity} required /></Field></div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><Field><FieldLabel htmlFor={`remittance-edit-date-${remittance.id}`}>{MERCHANDISE_UI_TEXT.FECHA}</FieldLabel><Input id={`remittance-edit-date-${remittance.id}`} name="receivedAt" type="date" defaultValue={remittance.receivedAt.slice(0, 10)} required /></Field><Field><FieldLabel htmlFor={`remittance-edit-quantity-${remittance.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_RECIBIDA}</FieldLabel><Input id={`remittance-edit-quantity-${remittance.id}`} name="receivedQuantity" type="number" min="0.001" step={unitLabel === MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL ? "1" : "0.001"} defaultValue={remittance.receivedQuantity} required /></Field></div>
         <Field><FieldLabel htmlFor={`remittance-edit-responsible-${remittance.id}`}>{MERCHANDISE_UI_TEXT.RESPONSABLE}</FieldLabel><Input id={`remittance-edit-responsible-${remittance.id}`} name="responsibleName" defaultValue={remittance.responsibleName} maxLength={120} required /></Field>
         <Field><FieldLabel htmlFor={`remittance-edit-notes-${remittance.id}`}>{APPLICATION_UI_TEXT.OBSERVACIONES}</FieldLabel><Textarea id={`remittance-edit-notes-${remittance.id}`} name="notes" maxLength={1000} rows={3} defaultValue={remittance.notes ?? ""} /></Field>
       </SaveSheet>

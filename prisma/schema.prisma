@@ -7,113 +7,119 @@ datasource db {
 }
 
 model User {
-  id           String        @id @default(cuid())
-  name         String
-  email        String?       @unique
-  username     String?       @unique
-  passwordHash String?
-  role         UserRole?
-  isActive     Boolean       @default(true)
-  sessions     AuthSession[]
-  createdFamilies Family[]
-  deactivatedFamilies Family[] @relation("FamilyDeactivator")
-  deactivatedFamilyMembers FamilyMember[] @relation("FamilyMemberDeactivator")
-  familyOperations FamilyOperation[]
-  merchandiseRequests MerchandiseRequest[] @relation("MerchandiseRequestCreator")
-  approvedMerchandiseQuotas MerchandiseQuota[] @relation("MerchandiseQuotaApprover")
-  merchandiseRemittances MerchandiseRemittance[] @relation("MerchandiseRemittanceCreator")
-  cancelledMerchandisePeriods MerchandisePeriod[] @relation("MerchandisePeriodCanceller")
-  cancelledMerchandiseRemittances MerchandiseRemittance[] @relation("MerchandiseRemittanceCanceller")
-  merchandiseDocuments MerchandiseDocument[] @relation("MerchandiseDocumentUploader")
-  distributionRecords DistributionRecord[] @relation("DistributionRecordCreator")
-  beneficiarySheets BeneficiarySheet[] @relation("BeneficiarySheetCreator")
-  createdRenditions Rendition[] @relation("RenditionCreator")
-  reviewedRenditions Rendition[] @relation("RenditionReviewer")
-  renditionDocuments RenditionDocument[] @relation("RenditionDocumentUploader")
-  synchronizationReceipts SynchronizationReceipt[]
-  accessPolicyChanges AccessPolicyChange[] @relation("AccessPolicyChangeActor")
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id                              String                    @id @default(cuid())
+  name                            String
+  email                           String?                   @unique
+  username                        String?                   @unique
+  passwordHash                    String?
+  role                            UserRole?
+  isActive                        Boolean                   @default(true)
+  sessions                        AuthSession[]
+  createdFamilies                 Family[]
+  deactivatedFamilies             Family[]                  @relation("FamilyDeactivator")
+  deactivatedFamilyMembers        FamilyMember[]            @relation("FamilyMemberDeactivator")
+  familyOperations                FamilyOperation[]
+  merchandiseRequests             MerchandiseRequest[]      @relation("MerchandiseRequestCreator")
+  approvedMerchandiseQuotas       MerchandiseQuota[]        @relation("MerchandiseQuotaApprover")
+  merchandiseRemittances          MerchandiseRemittance[]   @relation("MerchandiseRemittanceCreator")
+  cancelledMerchandisePeriods     MerchandisePeriod[]       @relation("MerchandisePeriodCanceller")
+  cancelledMerchandiseRemittances MerchandiseRemittance[]   @relation("MerchandiseRemittanceCanceller")
+  merchandiseDocuments            MerchandiseDocument[]     @relation("MerchandiseDocumentUploader")
+  merchandiseCycles               MerchandiseCycle[]        @relation("MerchandiseCycleCreator")
+  distributionEvents              DistributionEvent[]       @relation("DistributionEventCreator")
+  familyDeliveries                FamilyDelivery[]          @relation("FamilyDeliveryRecorder")
+  distributionParticipants        DistributionParticipant[] @relation("DistributionParticipantRecorder")
+  distributionRecords             DistributionRecord[]      @relation("DistributionRecordCreator")
+  beneficiarySheets               BeneficiarySheet[]        @relation("BeneficiarySheetCreator")
+  createdRenditions               Rendition[]               @relation("RenditionCreator")
+  reviewedRenditions              Rendition[]               @relation("RenditionReviewer")
+  renditionDocuments              RenditionDocument[]       @relation("RenditionDocumentUploader")
+  synchronizationReceipts         SynchronizationReceipt[]
+  accessPolicyChanges             AccessPolicyChange[]      @relation("AccessPolicyChangeActor")
+  createdAt                       DateTime                  @default(now())
+  updatedAt                       DateTime                  @updatedAt
 }
 
 model Family {
-  id                 String         @id @default(cuid())
-  name               String
-  neighborhood       String
-  address            String
-  contactPhone       String?
-  contactEmail       String?
-  referencePersonId  String?
-  createdById        String
-  members            FamilyMember[]
-  operations         FamilyOperation[]
-  referencePerson    Person?        @relation("FamilyReference", fields: [referencePersonId], references: [id], onDelete: SetNull)
-  createdBy          User           @relation(fields: [createdById], references: [id], onDelete: Restrict)
-  deactivatedAt      DateTime?
-  deactivatedById    String?
-  deactivatedBy      User?          @relation("FamilyDeactivator", fields: [deactivatedById], references: [id], onDelete: Restrict)
-  version            Int            @default(1)
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  id                String            @id @default(cuid())
+  name              String
+  neighborhood      String
+  address           String
+  contactPhone      String?
+  contactEmail      String?
+  referencePersonId String?
+  createdById       String
+  members           FamilyMember[]
+  operations        FamilyOperation[]
+  familyDeliveries  FamilyDelivery[]
+  referencePerson   Person?           @relation("FamilyReference", fields: [referencePersonId], references: [id], onDelete: SetNull)
+  createdBy         User              @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  deactivatedAt     DateTime?
+  deactivatedById   String?
+  deactivatedBy     User?             @relation("FamilyDeactivator", fields: [deactivatedById], references: [id], onDelete: Restrict)
+  version           Int               @default(1)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
 
   @@index([neighborhood, name])
   @@index([createdById, createdAt])
 }
 
 model Person {
-  id                 String         @id @default(cuid())
-  firstName          String
-  lastName           String
-  dni                String?        @unique
-  email              String?
-  phone              String?
-  memberships        FamilyMember[]
-  referencedBy       Family[]       @relation("FamilyReference")
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  id           String         @id @default(cuid())
+  firstName    String
+  lastName     String
+  dni          String?        @unique
+  email        String?
+  phone        String?
+  memberships  FamilyMember[]
+  referencedBy Family[]       @relation("FamilyReference")
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   @@index([lastName, firstName])
 }
 
 model FamilyMember {
-  id                 String            @id @default(cuid())
-  familyId           String
-  personId           String
-  relationship       String
-  family             Family            @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  person             Person            @relation(fields: [personId], references: [id], onDelete: Restrict)
-  deactivatedAt      DateTime?
-  deactivatedById    String?
-  deactivatedBy      User?             @relation("FamilyMemberDeactivator", fields: [deactivatedById], references: [id], onDelete: Restrict)
-  missingDocuments   MissingDocument[]
-  distributionRecords DistributionRecord[]
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  id                       String                    @id @default(cuid())
+  familyId                 String
+  personId                 String
+  relationship             String
+  family                   Family                    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  person                   Person                    @relation(fields: [personId], references: [id], onDelete: Restrict)
+  deactivatedAt            DateTime?
+  deactivatedById          String?
+  deactivatedBy            User?                     @relation("FamilyMemberDeactivator", fields: [deactivatedById], references: [id], onDelete: Restrict)
+  missingDocuments         MissingDocument[]
+  distributionRecords      DistributionRecord[]
+  distributionParticipants DistributionParticipant[]
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
 
   @@unique([familyId, personId])
   @@index([personId])
 }
 
 model MissingDocument {
-  id               String                 @id @default(cuid())
-  familyMemberId   String
-  documentType     FamilyDocumentType
-  familyMember     FamilyMember           @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
-  createdAt        DateTime               @default(now())
+  id             String             @id @default(cuid())
+  familyMemberId String
+  documentType   FamilyDocumentType
+  familyMember   FamilyMember       @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+  createdAt      DateTime           @default(now())
 
   @@unique([familyMemberId, documentType])
   @@index([documentType, createdAt])
 }
 
 model FamilyOperation {
-  operationId String   @id @db.Uuid
+  operationId String                @id @db.Uuid
   actorId     String
   familyId    String
   requestHash String
   action      FamilyOperationAction @default(LEGACY)
-  actor       User     @relation(fields: [actorId], references: [id], onDelete: Cascade)
-  family      Family   @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
+  actor       User                  @relation(fields: [actorId], references: [id], onDelete: Cascade)
+  family      Family                @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  createdAt   DateTime              @default(now())
 
   @@index([actorId, createdAt])
   @@index([familyId])
@@ -164,14 +170,14 @@ model RoleCapabilityPolicy {
 }
 
 model AccessPolicyChange {
-  id             String           @id @default(cuid())
-  actorId        String
-  role           UserRole
-  capability     AccessCapability
-  previousValue  Boolean
-  newValue       Boolean
-  createdAt      DateTime         @default(now())
-  actor          User             @relation("AccessPolicyChangeActor", fields: [actorId], references: [id], onDelete: Restrict)
+  id            String           @id @default(cuid())
+  actorId       String
+  role          UserRole
+  capability    AccessCapability
+  previousValue Boolean
+  newValue      Boolean
+  createdAt     DateTime         @default(now())
+  actor         User             @relation("AccessPolicyChangeActor", fields: [actorId], references: [id], onDelete: Restrict)
 
   @@index([role, createdAt])
   @@index([actorId, createdAt])
@@ -232,129 +238,251 @@ enum MerchandiseRecordStatus {
   ANULADO
 }
 
+enum MerchandiseDestination {
+  FAMILIES
+  MERENDERO
+}
+
 model MerchandisePeriod {
-  id        String               @id @default(cuid())
-  version   Int                  @default(1)
-  label     String
-  agency    String
-  status    MerchandiseRecordStatus @default(VIGENTE)
-  startsAt  DateTime             @db.Date
-  endsAt    DateTime             @db.Date
-  cancelledAt DateTime?
-  cancelledById String?
-  cancelledBy User? @relation("MerchandisePeriodCanceller", fields: [cancelledById], references: [id], onDelete: Restrict)
-  cancellationReason String?
-  requests  MerchandiseRequest[]
+  id                  String                  @id @default(cuid())
+  version             Int                     @default(1)
+  label               String
+  agency              String
+  destination         MerchandiseDestination  @default(FAMILIES)
+  status              MerchandiseRecordStatus @default(VIGENTE)
+  startsAt            DateTime                @db.Date
+  endsAt              DateTime                @db.Date
+  cancelledAt         DateTime?
+  cancelledById       String?
+  cancelledBy         User?                   @relation("MerchandisePeriodCanceller", fields: [cancelledById], references: [id], onDelete: Restrict)
+  cancellationReason  String?
+  requests            MerchandiseRequest[]
+  cycles              MerchandiseCycle[]
+  distributionEvents  DistributionEvent[]
   distributionRecords DistributionRecord[]
-  beneficiarySheets BeneficiarySheet[]
-  renditions Rendition[]
-  createdAt DateTime             @default(now())
-  updatedAt DateTime             @updatedAt
+  beneficiarySheets   BeneficiarySheet[]
+  renditions          Rendition[]
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
 
   @@unique([label, agency])
   @@index([startsAt, endsAt])
 }
 
 model MerchandiseRequest {
-  id                String                    @id @default(cuid())
-  version           Int                       @default(1)
+  id                String                   @id @default(cuid())
+  version           Int                      @default(1)
   periodId          String
-  requestNumber     String                    @unique
-  requestedAt       DateTime                  @db.Date
-  requestedQuantity Int
-  status            MerchandiseRequestStatus  @default(PENDIENTE)
+  requestNumber     String                   @unique
+  requestedAt       DateTime                 @db.Date
+  requestedQuantity Decimal                  @db.Decimal(12, 3)
+  status            MerchandiseRequestStatus @default(PENDIENTE)
   notes             String?
-  period            MerchandisePeriod         @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  period            MerchandisePeriod        @relation(fields: [periodId], references: [id], onDelete: Restrict)
   createdById       String
-  createdBy         User                      @relation("MerchandiseRequestCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdBy         User                     @relation("MerchandiseRequestCreator", fields: [createdById], references: [id], onDelete: Restrict)
   quota             MerchandiseQuota?
   remittances       MerchandiseRemittance[]
   documents         MerchandiseDocument[]
-  createdAt         DateTime                  @default(now())
-  updatedAt         DateTime                  @updatedAt
+  items             MerchandiseRequestItem[]
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
 
   @@index([periodId, requestedAt])
   @@index([status, requestedAt])
 }
 
 model MerchandiseQuota {
-  id               String                 @id @default(cuid())
-  version          Int                    @default(1)
-  requestId        String                 @unique
-  approvedQuantity Int
-  approvedAt       DateTime               @db.Date
+  id               String                  @id @default(cuid())
+  version          Int                     @default(1)
+  requestId        String                  @unique
+  approvedQuantity Decimal                 @db.Decimal(12, 3)
+  approvedAt       DateTime                @db.Date
   notes            String?
-  request          MerchandiseRequest    @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  request          MerchandiseRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict)
   approvedById     String
-  approvedBy       User                   @relation("MerchandiseQuotaApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  approvedBy       User                    @relation("MerchandiseQuotaApprover", fields: [approvedById], references: [id], onDelete: Restrict)
   remittances      MerchandiseRemittance[]
-  createdAt        DateTime               @default(now())
-  updatedAt        DateTime               @updatedAt
+  items            MerchandiseQuotaItem[]
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
 
   @@index([approvedAt])
 }
 
 model MerchandiseRemittance {
-  id                String                @id @default(cuid())
-  version           Int                   @default(1)
-  requestId         String
-  quotaId           String
-  remittanceNumber  String                @unique
-  receivedAt        DateTime              @db.Date
-  receivedQuantity  Int
-  responsibleName   String
-  notes             String?
-  status            MerchandiseRecordStatus @default(VIGENTE)
-  cancelledAt       DateTime?
-  cancelledById     String?
-  cancelledBy       User?                 @relation("MerchandiseRemittanceCanceller", fields: [cancelledById], references: [id], onDelete: Restrict)
+  id                 String                   @id @default(cuid())
+  version            Int                      @default(1)
+  requestId          String
+  quotaId            String
+  remittanceNumber   String                   @unique
+  receivedAt         DateTime                 @db.Date
+  receivedQuantity   Decimal                  @db.Decimal(12, 3)
+  responsibleName    String
+  notes              String?
+  status             MerchandiseRecordStatus  @default(VIGENTE)
+  cancelledAt        DateTime?
+  cancelledById      String?
+  cancelledBy        User?                    @relation("MerchandiseRemittanceCanceller", fields: [cancelledById], references: [id], onDelete: Restrict)
   cancellationReason String?
-  request           MerchandiseRequest   @relation(fields: [requestId], references: [id], onDelete: Restrict)
-  quota             MerchandiseQuota     @relation(fields: [quotaId], references: [id], onDelete: Restrict)
-  createdById       String
-  createdBy         User                  @relation("MerchandiseRemittanceCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  documents         MerchandiseDocument[]
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
+  request            MerchandiseRequest       @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  quota              MerchandiseQuota         @relation(fields: [quotaId], references: [id], onDelete: Restrict)
+  createdById        String
+  createdBy          User                     @relation("MerchandiseRemittanceCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  documents          MerchandiseDocument[]
+  items              MerchandiseReceiptItem[]
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
 
   @@index([requestId, receivedAt])
   @@index([quotaId, receivedAt])
 }
 
+model MerchandiseRequestItem {
+  id                String                @id @default(cuid())
+  requestId         String
+  productName       String
+  presentation      String
+  unit              String
+  requestedQuantity Decimal               @db.Decimal(12, 3)
+  request           MerchandiseRequest    @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  quotaItem         MerchandiseQuotaItem?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@index([requestId, productName])
+}
+
+model MerchandiseQuotaItem {
+  id                 String                   @id @default(cuid())
+  quotaId            String
+  requestItemId      String                   @unique
+  authorizedQuantity Decimal                  @db.Decimal(12, 3)
+  quota              MerchandiseQuota         @relation(fields: [quotaId], references: [id], onDelete: Restrict)
+  requestItem        MerchandiseRequestItem   @relation(fields: [requestItemId], references: [id], onDelete: Restrict)
+  receiptItems       MerchandiseReceiptItem[]
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  @@index([quotaId])
+}
+
+model MerchandiseReceiptItem {
+  id               String                @id @default(cuid())
+  remittanceId     String
+  quotaItemId      String
+  receivedQuantity Decimal               @db.Decimal(12, 3)
+  remittance       MerchandiseRemittance @relation(fields: [remittanceId], references: [id], onDelete: Restrict)
+  quotaItem        MerchandiseQuotaItem  @relation(fields: [quotaItemId], references: [id], onDelete: Restrict)
+  createdAt        DateTime              @default(now())
+
+  @@unique([remittanceId, quotaItemId])
+  @@index([quotaItemId, createdAt])
+}
+
+model MerchandiseCycle {
+  id                      String            @id @default(cuid())
+  periodId                String
+  externalOrderReference  String?
+  authorizedRecipient     String?
+  authorizationValidUntil DateTime?
+  notes                   String?
+  period                  MerchandisePeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  createdById             String
+  createdBy               User              @relation("MerchandiseCycleCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+
+  @@index([periodId, createdAt])
+}
+
+model DistributionEvent {
+  id               String            @id @default(cuid())
+  periodId         String
+  scheduledAt      DateTime          @db.Date
+  location         String
+  responsibleNames String
+  notes            String?
+  period           MerchandisePeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  createdById      String
+  createdBy        User              @relation("DistributionEventCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  familyDeliveries FamilyDelivery[]
+  renditions       Rendition[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([periodId, scheduledAt])
+}
+
+model FamilyDelivery {
+  id             String                    @id @default(cuid())
+  eventId        String
+  familyId       String
+  moduleQuantity Int                       @default(1)
+  event          DistributionEvent         @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  family         Family                    @relation(fields: [familyId], references: [id], onDelete: Restrict)
+  recordedById   String
+  recordedBy     User                      @relation("FamilyDeliveryRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+  participants   DistributionParticipant[]
+  records        DistributionRecord[]
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+
+  @@unique([eventId, familyId])
+  @@index([familyId, createdAt])
+}
+
+model DistributionParticipant {
+  id                    String         @id @default(cuid())
+  familyDeliveryId      String
+  familyMemberId        String
+  paperSignatureChecked Boolean        @default(false)
+  familyDelivery        FamilyDelivery @relation(fields: [familyDeliveryId], references: [id], onDelete: Restrict)
+  familyMember          FamilyMember   @relation(fields: [familyMemberId], references: [id], onDelete: Restrict)
+  recordedById          String
+  recordedBy            User           @relation("DistributionParticipantRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+  createdAt             DateTime       @default(now())
+
+  @@unique([familyDeliveryId, familyMemberId])
+  @@index([familyMemberId, createdAt])
+}
+
 model MerchandiseDocument {
-  id              String                 @id @default(cuid())
-  originalName    String
-  contentType     String
-  byteSize        Int
-  content         Bytes
-  requestId       String?
-  request         MerchandiseRequest?    @relation(fields: [requestId], references: [id], onDelete: Restrict)
-  remittanceId    String?
-  remittance      MerchandiseRemittance? @relation(fields: [remittanceId], references: [id], onDelete: Restrict)
-  uploadedById    String
-  uploadedBy      User                   @relation("MerchandiseDocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
-  createdAt       DateTime               @default(now())
+  id           String                 @id @default(cuid())
+  originalName String
+  contentType  String
+  byteSize     Int
+  content      Bytes
+  requestId    String?
+  request      MerchandiseRequest?    @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  remittanceId String?
+  remittance   MerchandiseRemittance? @relation(fields: [remittanceId], references: [id], onDelete: Restrict)
+  uploadedById String
+  uploadedBy   User                   @relation("MerchandiseDocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime               @default(now())
 
   @@index([requestId, createdAt])
   @@index([remittanceId, createdAt])
 }
 
 model DistributionRecord {
-  id                 String             @id @default(cuid())
-  operationId        String             @unique @db.Uuid
+  id                 String            @id @default(cuid())
+  operationId        String            @unique @db.Uuid
   periodId           String
   familyMemberId     String
-  receivedAt         DateTime           @db.Date
+  familyDeliveryId   String?
+  receivedAt         DateTime          @db.Date
   moduleType         String
   quantity           Int
-  physicalDniChecked Boolean            @default(false)
-  documentsChecked   Boolean            @default(false)
+  physicalDniChecked Boolean           @default(false)
+  documentsChecked   Boolean           @default(false)
   notes              String?
-  period             MerchandisePeriod  @relation(fields: [periodId], references: [id], onDelete: Restrict)
-  familyMember       FamilyMember       @relation(fields: [familyMemberId], references: [id], onDelete: Restrict)
+  period             MerchandisePeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  familyMember       FamilyMember      @relation(fields: [familyMemberId], references: [id], onDelete: Restrict)
+  familyDelivery     FamilyDelivery?   @relation(fields: [familyDeliveryId], references: [id], onDelete: Restrict)
   createdById        String
-  createdBy          User               @relation("DistributionRecordCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  createdAt          DateTime           @default(now())
+  createdBy          User              @relation("DistributionRecordCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt          DateTime          @default(now())
 
   @@unique([periodId, familyMemberId])
   @@index([familyMemberId, receivedAt])
@@ -368,7 +496,7 @@ model BeneficiarySheet {
   period      MerchandisePeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
   createdById String
   createdBy   User              @relation("BeneficiarySheetCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  renditions Rendition[]
+  renditions  Rendition[]
   createdAt   DateTime          @default(now())
 
   @@unique([periodId, version])
@@ -388,23 +516,26 @@ enum RenditionDocumentType {
 }
 
 model Rendition {
-  id                 String                @id @default(cuid())
-  periodId           String
-  beneficiarySheetId String                @unique
-  reviewStatus       RenditionReviewStatus @default(PENDIENTE)
-  reviewNotes        String?
-  reviewedAt         DateTime?
-  reviewedById       String?
-  period             MerchandisePeriod     @relation(fields: [periodId], references: [id], onDelete: Restrict)
-  beneficiarySheet   BeneficiarySheet      @relation(fields: [beneficiarySheetId], references: [id], onDelete: Restrict)
-  createdById        String
-  createdBy          User                  @relation("RenditionCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  reviewedBy         User?                 @relation("RenditionReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
-  documents          RenditionDocument[]
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
+  id                  String                @id @default(cuid())
+  periodId            String
+  distributionEventId String?
+  beneficiarySheetId  String                @unique
+  reviewStatus        RenditionReviewStatus @default(PENDIENTE)
+  reviewNotes         String?
+  reviewedAt          DateTime?
+  reviewedById        String?
+  period              MerchandisePeriod     @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  distributionEvent   DistributionEvent?    @relation(fields: [distributionEventId], references: [id], onDelete: Restrict)
+  beneficiarySheet    BeneficiarySheet      @relation(fields: [beneficiarySheetId], references: [id], onDelete: Restrict)
+  createdById         String
+  createdBy           User                  @relation("RenditionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewedBy          User?                 @relation("RenditionReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  documents           RenditionDocument[]
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
   @@index([periodId, createdAt])
+  @@index([distributionEventId])
   @@index([reviewStatus, updatedAt])
 }
 

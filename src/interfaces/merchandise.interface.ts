@@ -1,5 +1,7 @@
 import type { RenditionRecord } from "@/interfaces/rendition.interface";
 
+export type MerchandiseDestination = "FAMILIES" | "MERENDERO";
+
 export interface MerchandiseDocumentSummary {
   id: string;
   originalName: string;
@@ -16,6 +18,7 @@ export interface MerchandiseRemittanceRecord {
   remittanceNumber: string;
   receivedAt: string;
   receivedQuantity: number;
+  items: Array<{ id: string; quotaItemId: string; receivedQuantity: number }>;
   responsibleName: string;
   notes: string | null;
   status: "VIGENTE" | "ANULADO";
@@ -30,6 +33,7 @@ export interface MerchandiseQuotaRecord {
   version: number;
   requestId: string;
   approvedQuantity: number;
+  items: Array<{ id: string; requestItemId: string; authorizedQuantity: number }>;
   approvedAt: string;
   notes: string | null;
   approvedBy: { id: string; name: string };
@@ -44,6 +48,7 @@ export interface MerchandiseRequestRecord {
   requestNumber: string;
   requestedAt: string;
   requestedQuantity: number;
+  item: { id: string; productName: string; presentation: string; unit: string; requestedQuantity: number } | null;
   status: "PENDIENTE" | "APROBADA" | "RECHAZADA" | "CANCELADA";
   notes: string | null;
   createdBy: { id: string; name: string };
@@ -59,6 +64,7 @@ export interface MerchandisePeriodRecord {
   version: number;
   label: string;
   agency: string;
+  destination: MerchandiseDestination;
   status: "VIGENTE" | "ANULADO";
   startsAt: string;
   endsAt: string;

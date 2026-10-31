@@ -43,10 +43,12 @@ export const merchandiseRepository = {
         requests: {
           include: {
             createdBy: { select: { id: true, name: true } },
-            quota: { include: { approvedBy: { select: { id: true, name: true } } } },
+            quota: { include: { approvedBy: { select: { id: true, name: true } }, items: true } },
+            items: true,
             remittances: {
               include: {
                 createdBy: { select: { id: true, name: true } },
+                items: true,
                 documents: { select: documentSummarySelect, orderBy: { createdAt: "asc" } },
               },
               orderBy: { receivedAt: "desc" },
@@ -76,6 +78,31 @@ export const merchandiseRepository = {
           beneficiaryCount: beneficiaryCount(rendition.beneficiarySheet.snapshot),
         },
       })),
+      requests: period.requests.map((request) => {
+        let item = null;
+        if (request.items[0]) {
+          item = { ...request.items[0], requestedQuantity: request.items[0].requestedQuantity.toNumber() };
+        }
+        let quota = null;
+        if (request.quota) {
+          quota = {
+            ...request.quota,
+            approvedQuantity: request.quota.approvedQuantity.toNumber(),
+            items: request.quota.items.map((quotaItem) => ({ ...quotaItem, authorizedQuantity: quotaItem.authorizedQuantity.toNumber() })),
+          };
+        }
+        return {
+          ...request,
+          requestedQuantity: request.requestedQuantity.toNumber(),
+          item,
+          quota,
+          remittances: request.remittances.map((remittance) => ({
+            ...remittance,
+            receivedQuantity: remittance.receivedQuantity.toNumber(),
+            items: remittance.items.map((receiptItem) => ({ ...receiptItem, receivedQuantity: receiptItem.receivedQuantity.toNumber() })),
+          })),
+        };
+      }),
     }));
   },
 };
