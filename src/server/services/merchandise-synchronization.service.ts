@@ -7,6 +7,7 @@ import type { PdfContentType } from "@/types/http";
 import type { MerchandiseQuotaItem, Prisma } from "@prisma/client";
 import type { SynchronizationHandler, SubmittedSyncOperation, SyncHandlerResult } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
+import { createMerchandiseRequestPdf } from "@/services/merchandise-request-document-pdf.service";
 
 import {
   serializedMerchandiseOperationPayloadSchema,
@@ -500,6 +501,65 @@ async function applyCancellation(transaction: Prisma.TransactionClient, operatio
 }
 
 async function applyPayload(transaction: Prisma.TransactionClient, operation: SubmittedSyncOperation, payload: MerchandisePayload) {
+  if (payload.kind === "request-document") {
+    const request = await transaction.merchandiseRequest.findUnique({ where: { id: payload.requestId }, include: { period: true, items: true } });
+    if (!request || request.status === "CANCELADA" || request.status === "RECHAZADA") {
+      return conflict(0, { kind: "request_missing_or_cancelled", id: payload.requestId });
+    }
+    const destinationMatches = (request.period.destination === "FAMILIES" && payload.documentKind === "MODULES")
+      || (request.period.destination === "MERENDERO" && payload.documentKind === "MERENDERO_SUPPLIES");
+    if (!destinationMatches) {
+      return conflict(request.version, { kind: "document_destination_mismatch", requestId: request.id });
+    }
+    const existing = await transaction.merchandiseRequestDocument.findUnique({ where: { id: payload.id } });
+    if (existing) {
+      return { type: "synchronized", resourceVersion: existing.version, result: { resourceId: existing.id, kind: "request-document" } } as const;
+    }
+    const previous = await transaction.merchandiseRequestDocument.findFirst({ where: { requestId: request.id, kind: payload.documentKind }, orderBy: { version: "desc" }, select: { version: true } });
+    let version = 1;
+    if (previous) {
+      version = previous.version + 1;
+    }
+    const content = await createMerchandiseRequestPdf({
+      kind: payload.documentKind,
+      template: payload.template,
+      request: {
+        requestNumber: request.requestNumber,
+        requestedAt: request.requestedAt,
+        requestedQuantity: request.requestedQuantity.toNumber(),
+        period: { label: request.period.label, agency: request.period.agency },
+        items: request.items.map((item) => ({ ...item, requestedQuantity: item.requestedQuantity.toNumber() })),
+      },
+    });
+    let fileSuffix = "insumos-merendero";
+    if (payload.documentKind === "MODULES") {
+      fileSuffix = "modulos";
+    }
+    const originalName = `borrador-solicitud-${fileSuffix}-${request.requestNumber}-v${version}.pdf`;
+    await transaction.merchandiseRequestDocument.create({ data: {
+      id: payload.id,
+      requestId: request.id,
+      kind: payload.documentKind,
+      version,
+      templateVersion: 1,
+      snapshot: {
+        template: payload.template,
+        request: {
+          requestNumber: request.requestNumber,
+          requestedAt: request.requestedAt.toISOString(),
+          requestedQuantity: request.requestedQuantity.toNumber(),
+          period: { label: request.period.label, agency: request.period.agency },
+          items: request.items.map((item) => ({ productName: item.productName, presentation: item.presentation, unit: item.unit, requestedQuantity: item.requestedQuantity.toNumber() })),
+        },
+      },
+      originalName,
+      contentType: HTTP_CONTENT_TYPES.PDF,
+      content,
+      issuedById: operation.userId,
+    } });
+    return { type: "synchronized", resourceVersion: version, result: { resourceId: payload.id, kind: "request-document" } } as const;
+  }
+
   if (payload.kind === "period") {
     return applyPeriod(transaction, payload);
   }

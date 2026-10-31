@@ -2,6 +2,8 @@ import { z } from "zod";
 import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
 import { RENDITION_LIMITS } from "@/constants/rendition.constant";
 import { MERCHANDISE_LIMITS, MERCHANDISE_VALIDATION_MESSAGES } from "@/constants/merchandise.constant";
+import { merchandiseRequestDocumentSnapshotSchema } from "@/schemas/merchandise-request-document.schema";
+import { merchandiseRequestDocumentPayloadSchema } from "@/schemas/merchandise-request-document.schema";
 
 const documentSchema = z.object({
   originalName: z.string().trim().min(1).max(MERCHANDISE_LIMITS.DOCUMENT_NAME_MAX_LENGTH).refine((name) => name.toLowerCase().endsWith(".pdf"), MERCHANDISE_VALIDATION_MESSAGES.PDF_REQUIRED),
@@ -83,6 +85,7 @@ export const merchandisePayloadSchema = z.discriminatedUnion("kind", [
   requestPayloadSchema,
   quotaPayloadSchema,
   remittancePayloadSchema,
+  merchandiseRequestDocumentPayloadSchema,
 ]);
 
 
@@ -256,6 +259,7 @@ export const merchandiseResponseSchema = z.object({
         byteSize: z.number(),
         createdAt: z.iso.datetime(),
       })),
+      issuedDocuments: z.array(z.object({ id: z.string(), kind: z.enum(["MODULES", "MERENDERO_SUPPLIES"]), version: z.number().int().positive(), templateVersion: z.number().int().positive(), originalName: z.string(), contentType: z.string(), createdAt: z.iso.datetime(), snapshot: merchandiseRequestDocumentSnapshotSchema }).strict()).default([]),
       createdAt: z.iso.datetime(),
       updatedAt: z.iso.datetime(),
     })),

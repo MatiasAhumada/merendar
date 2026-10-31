@@ -1,4 +1,5 @@
 import type { RenditionRecord } from "@/interfaces/rendition.interface";
+import type { MerchandiseRequestDocumentRecord } from "@/interfaces/merchandise-request-document.interface";
 
 export type MerchandiseDestination = "FAMILIES" | "MERENDERO";
 
@@ -55,6 +56,7 @@ export interface MerchandiseRequestRecord {
   quota: MerchandiseQuotaRecord | null;
   remittances: MerchandiseRemittanceRecord[];
   documents: MerchandiseDocumentSummary[];
+  issuedDocuments: MerchandiseRequestDocumentRecord[];
   createdAt: string;
   updatedAt: string;
 }

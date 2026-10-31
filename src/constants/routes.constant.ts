@@ -28,6 +28,7 @@ export const API_ROUTES = {
   FAMILIES: "/api/families",
   MERCHANDISE: "/api/merchandise",
   MERCHANDISE_DOCUMENT: (documentId: string) => `/api/merchandise/documents/${encodeURIComponent(documentId)}`,
+  MERCHANDISE_REQUEST_DOCUMENTS: (requestId: string) => `/api/merchandise/requests/${encodeURIComponent(requestId)}/documents`,
   RECORDS: "/api/records",
   DELIVERY_RECORDS: "/api/records?includePeriodDetails=true",
   RECORD_SHEETS: "/api/records/sheets",

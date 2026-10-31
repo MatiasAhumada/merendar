@@ -53,7 +53,7 @@ export const offlinePreparedDocumentSchema = z.object({
   contentType: nonEmptyStringSchema,
   byteSize: nonNegativeIntegerSchema,
   content: z.instanceof(Blob),
-  documentType: z.enum(["merchandise", "rendition", "beneficiary-sheet", "beneficiary-sheet-local"]).optional(),
+  documentType: z.enum(["merchandise", "merchandise-request", "rendition", "beneficiary-sheet", "beneficiary-sheet-local"]).optional(),
 });
 export const beneficiarySheetCollectionSchema = z.object({
   sheets: z.array(z.object({

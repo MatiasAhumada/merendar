@@ -25,6 +25,7 @@ model User {
   cancelledMerchandisePeriods     MerchandisePeriod[]       @relation("MerchandisePeriodCanceller")
   cancelledMerchandiseRemittances MerchandiseRemittance[]   @relation("MerchandiseRemittanceCanceller")
   merchandiseDocuments            MerchandiseDocument[]     @relation("MerchandiseDocumentUploader")
+  issuedMerchandiseDocuments      MerchandiseRequestDocument[] @relation("MerchandiseRequestDocumentIssuer")
   merchandiseCycles               MerchandiseCycle[]        @relation("MerchandiseCycleCreator")
   distributionEvents              DistributionEvent[]       @relation("DistributionEventCreator")
   familyDeliveries                FamilyDelivery[]          @relation("FamilyDeliveryRecorder")
@@ -284,12 +285,37 @@ model MerchandiseRequest {
   quota             MerchandiseQuota?
   remittances       MerchandiseRemittance[]
   documents         MerchandiseDocument[]
+  issuedDocuments   MerchandiseRequestDocument[]
   items             MerchandiseRequestItem[]
   createdAt         DateTime                 @default(now())
   updatedAt         DateTime                 @updatedAt
 
   @@index([periodId, requestedAt])
   @@index([status, requestedAt])
+}
+
+enum MerchandiseRequestDocumentKind {
+  MODULES
+  MERENDERO_SUPPLIES
+}
+
+model MerchandiseRequestDocument {
+  id           String                           @id @default(cuid())
+  requestId    String
+  kind         MerchandiseRequestDocumentKind
+  version      Int
+  templateVersion Int
+  snapshot     Json
+  originalName String
+  contentType  String                           @default("application/pdf")
+  content      Bytes
+  request      MerchandiseRequest               @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  issuedById   String
+  issuedBy     User                             @relation("MerchandiseRequestDocumentIssuer", fields: [issuedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime                         @default(now())
+
+  @@unique([requestId, kind, version])
+  @@index([requestId, createdAt])
 }
 
 model MerchandiseQuota {

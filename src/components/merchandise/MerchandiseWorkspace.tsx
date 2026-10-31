@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineOperation, listOfflineOperations, resolveOfflineConflict, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace";
+import { MerchandiseRequestDocumentComposer } from "@/components/merchandise/MerchandiseRequestDocumentComposer";
 import { duplicateRemittanceConflictSchema, merchandiseCancellationPayloadSchema, merchandiseOperationPayloadSchema, merchandisePayloadSchema, merchandiseUpdatePayloadSchema, receiptLimitConflictSchema } from "@/schemas/merchandise.schema";
 import type { MerchandiseCancellationPayload, MerchandiseOperationPayload, MerchandisePayload, MerchandiseUpdatePayload } from "@/types/schema-contracts";
 import { jsonValueSchema } from "@/schemas/offline.schema";
@@ -242,6 +243,7 @@ function queuedRequest(
     quota: null,
     remittances: [],
     documents: [],
+    issuedDocuments: [],
     createdAt: timestamp,
     updatedAt: timestamp,
   };
@@ -971,7 +973,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
               </CardHeader>
               <CardContent className="space-y-4 pt-5">
                 {!period.requests.length ? <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">{MERCHANDISE_UI_TEXT.NO_HAY_SOLICITUDES_PARA_ESTE_PERIODO_TODAVIA}</p> : null}
-                {period.requests.map((request) => <RequestCard key={request.id} period={period} request={request} operations={operations} createQuota={approveQuota} receiveRemittance={receiveRemittance} correctRecord={correctRecord} cancelRecord={cancelRecord} canWrite={canWriteMerchandise} />)}
+                {period.requests.map((request) => <RequestCard key={request.id} period={period} request={request} operations={operations} createQuota={approveQuota} receiveRemittance={receiveRemittance} correctRecord={correctRecord} cancelRecord={cancelRecord} canWrite={canWriteMerchandise} userId={userId} sessionExpiresAt={sessionExpiresAt} isOnline={isOnline} />)}
               </CardContent>
               {queuedPeriodOperation?.message ? <div className="border-t px-5 py-3 text-sm text-destructive">{queuedPeriodOperation.message}</div> : null}
             </Card>;
@@ -1043,7 +1045,10 @@ function RemittanceConflictCorrection({ operation, payload, onCorrect }: Remitta
 function PendingDocumentSummary({ payload }: { payload: MerchandiseOperationPayload }) {
   const parsedPayload = merchandisePayloadSchema.safeParse(payload);
 
-  if (!parsedPayload.success || parsedPayload.data.kind === "period" || !parsedPayload.data.document) {
+  if (!parsedPayload.success || parsedPayload.data.kind === "period" || parsedPayload.data.kind === "request-document") {
+    return null;
+  }
+  if (!parsedPayload.data.document) {
     return null;
   }
 
@@ -1069,9 +1074,12 @@ interface RequestCardProps {
   correctRecord: (payload: MerchandiseUpdatePayload, baseVersion: number, dependencyRecordIds?: string[]) => Promise<void>;
   cancelRecord: (payload: MerchandiseCancellationPayload, baseVersion: number, dependencyRecordIds?: string[]) => Promise<void>;
   canWrite: boolean;
+  userId: string;
+  sessionExpiresAt: string;
+  isOnline: boolean;
 }
 
-function RequestCard({ period, request, operations, createQuota, receiveRemittance, correctRecord, cancelRecord, canWrite }: RequestCardProps) {
+function RequestCard({ period, request, operations, createQuota, receiveRemittance, correctRecord, cancelRecord, canWrite, userId, sessionExpiresAt, isOnline }: RequestCardProps) {
   const queuedRequestOperation = operations.find((operation) => operation.resourceId === request.id && operation.status !== "synced");
   const pendingQuotaOperation = operations.find((operation) => {
     const createPayload = merchandisePayloadSchema.safeParse(operation.payload);
@@ -1098,6 +1106,7 @@ function RequestCard({ period, request, operations, createQuota, receiveRemittan
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} /></span><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold">{MERCHANDISE_UI_TEXT.SOLICITUD}{request.requestNumber}</h4><Badge variant={requestStatusBadgeVariant(request.status)}>{requestStatusLabel(request.status)}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{formatDate(request.requestedAt)} {APPLICATION_UI_TEXT.TEXT}{MERCHANDISE_UI_TEXT.QUANTITY_WITH_UNIT(request.requestedQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)} · {MERCHANDISE_UI_TEXT.REGISTRO}{request.createdBy.name}</p>{request.item ? <p className="mt-1 text-sm">{request.item.productName} · {request.item.presentation} · {request.item.unit}</p> : null}<p className="mt-1 text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.PERIODO}{period.label}</p></div></div>
       <div className="flex flex-wrap gap-2">
+        {canWrite && !queuedRequestOperation && request.status !== "CANCELADA" && request.status !== "RECHAZADA" ? <MerchandiseRequestDocumentComposer request={request} period={period} userId={userId} sessionExpiresAt={sessionExpiresAt} isOnline={isOnline} /> : null}
         {canWrite && !quota && request.status !== "RECHAZADA" && request.status !== "CANCELADA" ? <SaveSheet title={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO_APROBADO} description={MERCHANDISE_UI_TEXT.REQUEST_DESCRIPTION(request.requestNumber, request.requestedQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)} triggerLabel={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO} triggerVariant="outline" onSave={(formData) => createQuota(request, formData)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CUPO}>
           <Field><FieldLabel htmlFor={`quota-quantity-${request.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_APROBADA}</FieldLabel><Input id={`quota-quantity-${request.id}`} name="approvedQuantity" type="number" min="0.001" step={request.item ? "0.001" : "1"} max={request.requestedQuantity} required /><FieldDescription>{MERCHANDISE_UI_TEXT.EL_CUPO_NO_PUEDE_SUPERAR_LOS}{request.requestedQuantity} {request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL}</FieldDescription></Field>
           <Field><FieldLabel htmlFor={`quota-date-${request.id}`}>{MERCHANDISE_UI_TEXT.FECHA_DE_APROBACION}</FieldLabel><Input id={`quota-date-${request.id}`} name="approvedAt" type="date" required /></Field>
@@ -1132,6 +1141,7 @@ function RequestCard({ period, request, operations, createQuota, receiveRemittan
     </SaveSheet> : null}<p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.EL_CUPO_NO_SE_ANULA_PORQUE_LA_SOLICITUD_CONSERVA_UN_UNICO_CUPO_Y_SUS_DOC}</p></div> : null}
     {request.notes ? <p className="mt-3 text-sm text-muted-foreground">{request.notes}</p> : null}
     {request.documents.map((document) => <DocumentLink key={document.id} document={document} />)}
+    {request.issuedDocuments.map((document) => <a key={document.id} className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline" href={API_ROUTES.MERCHANDISE_DOCUMENT(document.id)}><HugeiconsIcon icon={File01Icon} strokeWidth={1.8} />{document.originalName} · versión {document.version} · borrador</a>)}
     {request.remittances.length ? <div className="mt-4 space-y-3">{request.remittances.map((remittance) => <RemittanceCard key={remittance.id} remittance={remittance} unitLabel={request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL} operations={operations} canWrite={canWrite} correctRecord={correctRecord} cancelRecord={cancelRecord} />)}</div> : null}
   </article>;
 }

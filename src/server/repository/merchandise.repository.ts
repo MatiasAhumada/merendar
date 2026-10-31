@@ -1,5 +1,6 @@
 import { beneficiaryCountSchema } from "@/schemas/synchronization.schema";
 import { prisma } from "@/lib/prisma";
+import { merchandiseRequestDocumentSnapshotSchema } from "@/schemas/merchandise-request-document.schema";
 
 const documentSummarySelect = {
   id: true,
@@ -17,10 +18,14 @@ function beneficiaryCount(snapshot: unknown) {
 
 export const merchandiseRepository = {
   async findDocument(id: string) {
-    return prisma.merchandiseDocument.findUnique({
+    const existingDocument = await prisma.merchandiseDocument.findUnique({
       where: { id },
       select: { originalName: true, contentType: true, content: true },
     });
+    if (existingDocument) {
+      return existingDocument;
+    }
+    return prisma.merchandiseRequestDocument.findUnique({ where: { id }, select: { originalName: true, contentType: true, content: true } });
   },
 
   async findAll() {
@@ -45,6 +50,10 @@ export const merchandiseRepository = {
             createdBy: { select: { id: true, name: true } },
             quota: { include: { approvedBy: { select: { id: true, name: true } }, items: true } },
             items: true,
+            issuedDocuments: {
+              select: { id: true, kind: true, version: true, templateVersion: true, snapshot: true, originalName: true, contentType: true, createdAt: true },
+              orderBy: [{ kind: "asc" }, { version: "desc" }],
+            },
             remittances: {
               include: {
                 createdBy: { select: { id: true, name: true } },
@@ -93,6 +102,7 @@ export const merchandiseRepository = {
         }
         return {
           ...request,
+          issuedDocuments: request.issuedDocuments.map((document) => ({ ...document, snapshot: merchandiseRequestDocumentSnapshotSchema.parse(document.snapshot) })),
           requestedQuantity: request.requestedQuantity.toNumber(),
           item,
           quota,

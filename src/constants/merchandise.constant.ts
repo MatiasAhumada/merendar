@@ -73,6 +73,7 @@ export const MERCHANDISE_UI_TEXT = {
   NO_SE_PUEDE_ANULAR_UN_PERIODO_CON_OPERACIONES_O_DOCUMENTOS_VINCULADOS: "No se puede anular un período con operaciones o documentos vinculados.",
   NUEVA_SOLICITUD_DE_MODULOS: "Nueva solicitud de módulos",
   NUEVA_SOLICITUD_DE_INSUMOS: "Nueva solicitud de insumos",
+  GENERAR_BORRADOR_PDF: "Generar borrador PDF",
   REGISTRAR_SOLICITUD: "Registrar solicitud",
   GUARDAR_SOLICITUD: "Guardar solicitud",
   NUMERO_DE_SOLICITUD: "Número de solicitud *",
