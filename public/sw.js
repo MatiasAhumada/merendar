@@ -19,11 +19,27 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => Promise.all(
-      cacheNames
-        .filter((cacheName) => cacheName.startsWith(CONFIG.PUBLIC_CACHE_PREFIX) && cacheName !== CONFIG.CACHE_NAME)
-        .map((cacheName) => caches.delete(cacheName)),
-    )).then(() => self.clients.claim()),
+    caches.keys().then(async (cacheNames) => {
+      const previousCacheNames = cacheNames.filter((cacheName) => cacheName.startsWith(CONFIG.PUBLIC_CACHE_PREFIX) && cacheName !== CONFIG.CACHE_NAME);
+      const currentCache = await caches.open(CONFIG.CACHE_NAME);
+
+      for (const cacheName of previousCacheNames) {
+        const previousCache = await caches.open(cacheName);
+        for (const route of CONFIG.CANONICAL_ROUTES) {
+          if (await currentCache.match(route)) {
+            continue;
+          }
+
+          const response = await previousCache.match(route);
+          const contentType = response?.headers.get(CONFIG.HTTP_POLICY.CONTENT_TYPE_HEADER) || "";
+          if (response && isPublicResponse(response) && contentType.includes(CONFIG.HTTP_POLICY.HTML_CONTENT_TYPE)) {
+            await currentCache.put(route, response);
+          }
+        }
+      }
+
+      await Promise.all(previousCacheNames.map((cacheName) => caches.delete(cacheName)));
+    }).then(() => self.clients.claim()),
   );
 });
 

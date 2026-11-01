@@ -135,7 +135,7 @@ test("prepares private views automatically from a deep route, keeps them availab
         cachedPaths: cachedRequests.map((request) => new URL(request.url).pathname),
       };
     });
-    expect(privateCacheCheck.cacheNames).toEqual(["merendar-public-v6"]);
+    expect(privateCacheCheck.cacheNames).toEqual(["merendar-public-v8"]);
     expect(privateCacheCheck.privateApiCached).toBe(false);
     expect(privateCacheCheck.privateRouteCached).toBe(true);
     expect(privateCacheCheck.cachedPaths.some((path) => path.startsWith("/api/"))).toBe(false);
@@ -533,9 +533,9 @@ test("creates a dependent merchandise chain offline and synchronizes each operat
       include: { requests: { include: { quota: true, remittances: true } } },
     });
     expect(syncedPeriod?.requests).toHaveLength(1);
-    expect(syncedPeriod?.requests[0]?.quota?.approvedQuantity).toBe(3);
+    expect(syncedPeriod?.requests[0]?.quota?.approvedQuantity.toNumber()).toBe(3);
     expect(syncedPeriod?.requests[0]?.remittances).toHaveLength(1);
-    expect(syncedPeriod?.requests[0]?.remittances[0]?.receivedQuantity).toBe(3);
+    expect(syncedPeriod?.requests[0]?.remittances[0]?.receivedQuantity.toNumber()).toBe(3);
 
     await context.setOffline(true);
     await context.setOffline(false);
