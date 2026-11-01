@@ -40,3 +40,7 @@ export const merchandiseRequestDocumentSnapshotSchema = z.object({
     }).strict()),
   }).strict(),
 }).strict();
+
+export const merchandiseRequestDocumentProfileSchema = z.object({
+  presidentName: z.string().trim().min(2).max(120),
+}).strict();

@@ -557,6 +557,14 @@ async function applyPayload(transaction: Prisma.TransactionClient, operation: Su
       content,
       issuedById: operation.userId,
     } });
+    const presidentName = payload.template.signatories[0]?.name;
+    if (presidentName) {
+      await transaction.merchandiseRequestDocumentProfile.upsert({
+        where: { id: "default" },
+        create: { id: "default", presidentName, updatedById: operation.userId },
+        update: { presidentName, updatedById: operation.userId },
+      });
+    }
     return { type: "synchronized", resourceVersion: version, result: { resourceId: payload.id, kind: "request-document" } } as const;
   }
 

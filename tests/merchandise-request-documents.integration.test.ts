@@ -8,6 +8,7 @@ import { issueMerchandiseRequestDocument } from "@/server/services/merchandise-r
 import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
 import { merchandiseSynchronizationHandler } from "@/server/services/merchandise-synchronization.service";
 import { synchronizationService } from "@/server/services/synchronization.service";
+import { getMerchandiseRequestDocumentProfile, saveMerchandiseRequestDocumentProfile } from "@/server/services/merchandise-request-document-profile.service";
 
 const logoDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGMQ7AgFIgYIBQAZBgO5BdzoXgAAAABJRU5ErkJggg==";
 
@@ -22,10 +23,14 @@ test("request document emissions retain their source snapshot and are idempotent
   const period = await prisma.merchandisePeriod.create({ data: { label: `QA request document ${suffix}`, agency: "Organismo QA", destination: "MERENDERO", startsAt: new Date("2026-10-01"), endsAt: new Date("2026-10-31") } });
   const request = await prisma.merchandiseRequest.create({ data: { periodId: period.id, requestNumber: `QA-${suffix}`, requestedAt: new Date("2026-10-12"), requestedQuantity: 4.5, createdById: user.id, items: { create: { productName: "Harina de prueba", presentation: "Bolsa de 1 kg", unit: "kg", requestedQuantity: 4.5 } } } });
   const id = randomUUID();
+  const originalProfile = await getMerchandiseRequestDocumentProfile();
   const payload = { kind: "request-document", id, requestId: request.id, documentKind: "MERENDERO_SUPPLIES", template: { associationName: "Asociación QA editable", resolution: "", address: "", contact: "", recipient: "Organismo QA", recipientTitle: "", locality: "Tucumán", issueDate: "2026-10-31", requestedPeriod: period.label, purpose: "Solicitamos insumos para actividades de prueba.", population: "", observations: "", signatories: [{ name: "Responsable QA", title: "Presidencia" }], logoDataUrl } };
 
   try {
     const first = await issueMerchandiseRequestDocument(payload, user.id);
+    assert.equal((await getMerchandiseRequestDocumentProfile()).presidentName, "Responsable QA");
+    await saveMerchandiseRequestDocumentProfile({ presidentName: "Lorena Alpire" }, user.id);
+    assert.equal((await getMerchandiseRequestDocumentProfile()).presidentName, "Lorena Alpire");
     const replay = await issueMerchandiseRequestDocument(payload, user.id);
     const saved = await prisma.merchandiseRequestDocument.findUniqueOrThrow({ where: { id } });
     const snapshot = saved.snapshot as { template: { associationName: string }; request: { requestNumber: string; period: { label: string }; items: Array<{ productName: string; requestedQuantity: number }> } };
@@ -51,10 +56,12 @@ test("request document emissions retain their source snapshot and are idempotent
     };
     const synchronized = await synchronizationService.apply(offlineOperation, "REMITTANCES", merchandiseSynchronizationHandler);
     const offlineReplay = await synchronizationService.apply(offlineOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    assert.equal((await getMerchandiseRequestDocumentProfile()).presidentName, "Responsable QA");
     assert.equal(synchronized.resourceVersion, 2);
     assert.equal(offlineReplay.replayed, true);
     assert.equal(await prisma.merchandiseRequestDocument.count({ where: { requestId: request.id } }), 2);
   } finally {
+    await prisma.merchandiseRequestDocumentProfile.update({ where: { id: "default" }, data: { presidentName: originalProfile.presidentName, updatedById: null } });
     await prisma.merchandiseRequestDocument.deleteMany({ where: { requestId: request.id } });
     await prisma.merchandiseRequestItem.deleteMany({ where: { requestId: request.id } });
     await prisma.merchandiseRequest.delete({ where: { id: request.id } });

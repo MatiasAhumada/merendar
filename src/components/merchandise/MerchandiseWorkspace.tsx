@@ -25,6 +25,8 @@ import type { MerchandiseCancellationPayload, MerchandiseOperationPayload, Merch
 import { jsonValueSchema } from "@/schemas/offline.schema";
 import { RENDITION_LIMITS } from "@/constants/rendition.constant";
 import { getMerchandiseCollection } from "@/services/client/merchandise-data.service";
+import { getMerchandiseRequestDocumentProfile, saveMerchandiseRequestDocumentProfile } from "@/services/client/merchandise-request-document-profile.service";
+import { MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS } from "@/constants/merchandise.constant";
 import {
   AddCircleIcon,
   Calendar03Icon,
@@ -614,6 +616,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
   const [loadError, setLoadError] = useState("");
   const [syncMessage, setSyncMessage] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [presidentName, setPresidentName] = useState<string>(MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS.PRESIDENT_NAME);
   const synchronizingRef = useRef(false);
 
   const loadMerchandise = useCallback(async (forceRefresh = false) => {
@@ -635,6 +638,18 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
   }, [isOnline, offlineMode, userId]);
 
   const refreshServerData = useCallback(() => loadMerchandise(true), [loadMerchandise]);
+
+  useEffect(() => {
+    if (!isOnline || !canReadMerchandise) return;
+    void getMerchandiseRequestDocumentProfile().then((profile) => setPresidentName(profile.presidentName)).catch(() => undefined);
+  }, [canReadMerchandise, isOnline]);
+
+  const persistPresidentName = useCallback(async (name: string) => {
+    const saved = await saveMerchandiseRequestDocumentProfile(name);
+    setPresidentName(saved.presidentName);
+  }, []);
+  const savePresidentName = useCallback((formData: FormData) => persistPresidentName(String(formData.get("presidentName") ?? "")), [persistPresidentName]);
+  const updatePresidentName = useCallback(async (name: string) => { setPresidentName(name); }, []);
 
   const refreshQueue = useCallback(async () => {
     try {
@@ -870,6 +885,9 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Badge variant={isOnline ? "success" : "warning"} className="w-fit">{isOnline ? MERCHANDISE_UI_TEXT.CONECTADO : MERCHANDISE_UI_TEXT.SIN_CONEXION}</Badge>
+          {canWriteMerchandise && isOnline ? <SaveSheet title={MERCHANDISE_UI_TEXT.DATOS_DE_FIRMA_INSTITUCIONAL} description={MERCHANDISE_UI_TEXT.DATOS_DE_FIRMA_DESCRIPTION} triggerLabel={MERCHANDISE_UI_TEXT.DATOS_DE_FIRMA_INSTITUCIONAL} triggerVariant="outline" onSave={savePresidentName} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_FIRMA} presentation="dialog">
+            <Field><FieldLabel htmlFor="merchandise-president-name">{MERCHANDISE_UI_TEXT.NOMBRE_DE_LA_PRESIDENTA}</FieldLabel><Input id="merchandise-president-name" name="presidentName" defaultValue={presidentName} minLength={2} maxLength={120} required /></Field>
+          </SaveSheet> : null}
           {canWriteMerchandise ? <SaveSheet title={MERCHANDISE_UI_TEXT.NUEVO_PERIODO} description={MERCHANDISE_UI_TEXT.CREA_EL_CICLO_DEL_ORGANISMO_ANTES_DE_REGISTRAR_SOLICITUDES} triggerLabel={MERCHANDISE_UI_TEXT.NUEVO_PERIODO} onSave={createPeriod} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_PERIODO} presentation="dialog">
             <Field><FieldLabel htmlFor="period-label">{MERCHANDISE_UI_TEXT.NOMBRE_DEL_PERIODO}</FieldLabel><Input id="period-label" name="label" placeholder={MERCHANDISE_UI_TEXT.EJ_SEPTIEMBRE_2026} minLength={2} maxLength={80} required /></Field>
             <Field><FieldLabel htmlFor="period-agency">{MERCHANDISE_UI_TEXT.ORGANISMO}</FieldLabel><Input id="period-agency" name="agency" placeholder={MERCHANDISE_UI_TEXT.MINISTERIO_DE_DESARROLLO_SOCIAL} minLength={2} maxLength={120} required /></Field>
@@ -973,7 +991,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
               </CardHeader>
               <CardContent className="space-y-4 pt-5">
                 {!period.requests.length ? <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">{MERCHANDISE_UI_TEXT.NO_HAY_SOLICITUDES_PARA_ESTE_PERIODO_TODAVIA}</p> : null}
-                {period.requests.map((request) => <RequestCard key={request.id} period={period} request={request} operations={operations} createQuota={approveQuota} receiveRemittance={receiveRemittance} correctRecord={correctRecord} cancelRecord={cancelRecord} canWrite={canWriteMerchandise} userId={userId} sessionExpiresAt={sessionExpiresAt} isOnline={isOnline} />)}
+                {period.requests.map((request) => <RequestCard key={request.id} period={period} request={request} operations={operations} createQuota={approveQuota} receiveRemittance={receiveRemittance} correctRecord={correctRecord} cancelRecord={cancelRecord} canWrite={canWriteMerchandise} userId={userId} sessionExpiresAt={sessionExpiresAt} isOnline={isOnline} presidentName={presidentName} onPresidentNameChange={updatePresidentName} />)}
               </CardContent>
               {queuedPeriodOperation?.message ? <div className="border-t px-5 py-3 text-sm text-destructive">{queuedPeriodOperation.message}</div> : null}
             </Card>;
@@ -1077,9 +1095,11 @@ interface RequestCardProps {
   userId: string;
   sessionExpiresAt: string;
   isOnline: boolean;
+  presidentName: string;
+  onPresidentNameChange: (name: string) => Promise<void>;
 }
 
-function RequestCard({ period, request, operations, createQuota, receiveRemittance, correctRecord, cancelRecord, canWrite, userId, sessionExpiresAt, isOnline }: RequestCardProps) {
+function RequestCard({ period, request, operations, createQuota, receiveRemittance, correctRecord, cancelRecord, canWrite, userId, sessionExpiresAt, isOnline, presidentName, onPresidentNameChange }: RequestCardProps) {
   const queuedRequestOperation = operations.find((operation) => operation.resourceId === request.id && operation.status !== "synced");
   const pendingQuotaOperation = operations.find((operation) => {
     const createPayload = merchandisePayloadSchema.safeParse(operation.payload);
@@ -1106,7 +1126,7 @@ function RequestCard({ period, request, operations, createQuota, receiveRemittan
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} /></span><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold">{MERCHANDISE_UI_TEXT.SOLICITUD}{request.requestNumber}</h4><Badge variant={requestStatusBadgeVariant(request.status)}>{requestStatusLabel(request.status)}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{formatDate(request.requestedAt)} {APPLICATION_UI_TEXT.TEXT}{MERCHANDISE_UI_TEXT.QUANTITY_WITH_UNIT(request.requestedQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)} · {MERCHANDISE_UI_TEXT.REGISTRO}{request.createdBy.name}</p>{request.item ? <p className="mt-1 text-sm">{request.item.productName} · {request.item.presentation} · {request.item.unit}</p> : null}<p className="mt-1 text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.PERIODO}{period.label}</p></div></div>
       <div className="flex flex-wrap gap-2">
-        {canWrite && !queuedRequestOperation && request.status !== "CANCELADA" && request.status !== "RECHAZADA" ? <MerchandiseRequestDocumentComposer request={request} period={period} userId={userId} sessionExpiresAt={sessionExpiresAt} isOnline={isOnline} /> : null}
+        {canWrite && !queuedRequestOperation && request.status !== "CANCELADA" && request.status !== "RECHAZADA" ? <MerchandiseRequestDocumentComposer request={request} period={period} userId={userId} sessionExpiresAt={sessionExpiresAt} isOnline={isOnline} presidentName={presidentName} onPresidentNameChange={onPresidentNameChange} /> : null}
         {canWrite && !quota && request.status !== "RECHAZADA" && request.status !== "CANCELADA" ? <SaveSheet title={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO_APROBADO} description={MERCHANDISE_UI_TEXT.REQUEST_DESCRIPTION(request.requestNumber, request.requestedQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)} triggerLabel={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO} triggerVariant="outline" onSave={(formData) => createQuota(request, formData)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CUPO}>
           <Field><FieldLabel htmlFor={`quota-quantity-${request.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_APROBADA}</FieldLabel><Input id={`quota-quantity-${request.id}`} name="approvedQuantity" type="number" min="0.001" step={request.item ? "0.001" : "1"} max={request.requestedQuantity} required /><FieldDescription>{MERCHANDISE_UI_TEXT.EL_CUPO_NO_PUEDE_SUPERAR_LOS}{request.requestedQuantity} {request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL}</FieldDescription></Field>
           <Field><FieldLabel htmlFor={`quota-date-${request.id}`}>{MERCHANDISE_UI_TEXT.FECHA_DE_APROBACION}</FieldLabel><Input id={`quota-date-${request.id}`} name="approvedAt" type="date" required /></Field>

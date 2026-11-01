@@ -34,6 +34,8 @@ export const MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS = {
   RECIPIENT: "Dr. Federico Masso",
   RECIPIENT_TITLE: "Ministro de Desarrollo Social",
   LOCALITY: "Las Talitas, Tucumán",
+  PRESIDENT_NAME: "Lorena Alpire",
+  PRESIDENT_TITLE: "Presidenta",
   LOGO_PATH: "/brand/association-house-logo.png",
 } as const;
 
@@ -85,6 +87,11 @@ export const MERCHANDISE_UI_TEXT = {
   NUEVA_SOLICITUD_DE_MODULOS: "Nueva solicitud de módulos",
   NUEVA_SOLICITUD_DE_INSUMOS: "Nueva solicitud de insumos",
   GENERAR_BORRADOR_PDF: "Generar borrador PDF",
+  DATOS_DE_FIRMA_INSTITUCIONAL: "Datos de firma institucional",
+  DATOS_DE_FIRMA_DESCRIPTION: "El nombre guardado se utilizará en los próximos pedidos de módulos e insumos.",
+  NOMBRE_DE_LA_PRESIDENTA: "Nombre de la presidenta *",
+  GUARDAR_FIRMA: "Guardar firma",
+  FIRMA_GUARDADA: "La firma institucional se guardó para los próximos pedidos.",
   REGISTRAR_SOLICITUD: "Registrar solicitud",
   GUARDAR_SOLICITUD: "Guardar solicitud",
   NUMERO_DE_SOLICITUD: "Número de solicitud *",

@@ -48,6 +48,8 @@ interface MerchandiseRequestDocumentComposerProps {
   userId: string;
   sessionExpiresAt: string;
   isOnline: boolean;
+  presidentName: string;
+  onPresidentNameChange: (name: string) => Promise<void>;
 }
 
 function fileToDataUrl(file: Blob) {
@@ -125,7 +127,7 @@ function templateFromForm(form: HTMLFormElement, logoDataUrl: string, request: M
   };
 }
 
-export function MerchandiseRequestDocumentComposer({ request, period, userId, sessionExpiresAt, isOnline }: MerchandiseRequestDocumentComposerProps) {
+export function MerchandiseRequestDocumentComposer({ request, period, userId, sessionExpiresAt, isOnline, presidentName, onPresidentNameChange }: MerchandiseRequestDocumentComposerProps) {
   let documentKind: MerchandiseRequestDocumentKind = "MODULES";
   if (period.destination === "MERENDERO") {
     documentKind = "MERENDERO_SUPPLIES";
@@ -223,6 +225,10 @@ export function MerchandiseRequestDocumentComposer({ request, period, userId, se
 
     if (isOnline) {
       await clientAxios.post(API_ROUTES.MERCHANDISE_REQUEST_DOCUMENTS(request.id), payload);
+      const submittedPresidentName = documentInput.template.signatories[0]?.name;
+      if (submittedPresidentName && submittedPresidentName !== presidentName) {
+        await onPresidentNameChange(submittedPresidentName);
+      }
       const response = await clientAxios.get<ArrayBuffer>(API_ROUTES.MERCHANDISE_DOCUMENT(documentId), { responseType: "arraybuffer" });
       downloadPdf(new Uint8Array(response.data), localName);
       const issuedDocument: MerchandiseRequestDocumentRecord = {
@@ -290,7 +296,7 @@ export function MerchandiseRequestDocumentComposer({ request, period, userId, se
     defaultPurpose = "Solicitamos módulos alimentarios para su distribución a las familias destinatarias de la asociación.";
   }
   const previousTemplate = previousSnapshot?.template;
-  const template = { ...emptyTemplate, ...previousTemplate, requestedPeriod: previousTemplate?.requestedPeriod || period.label, purpose: previousTemplate?.purpose || defaultPurpose, observations: previousTemplate?.observations || request.notes || "" };
+  const template = { ...emptyTemplate, ...previousTemplate, requestedPeriod: previousTemplate?.requestedPeriod || period.label, purpose: previousTemplate?.purpose || defaultPurpose, observations: previousTemplate?.observations || request.notes || "", signatories: [{ name: presidentName, title: MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS.PRESIDENT_TITLE }, ...(previousTemplate?.signatories.slice(1) ?? [{ name: "", title: "" }])] };
   let documentTitle = "Solicitud de insumos";
   if (documentKind === "MODULES") {
     documentTitle = "Solicitud de módulos";

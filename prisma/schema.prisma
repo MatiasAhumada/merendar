@@ -26,6 +26,7 @@ model User {
   cancelledMerchandiseRemittances MerchandiseRemittance[]   @relation("MerchandiseRemittanceCanceller")
   merchandiseDocuments            MerchandiseDocument[]     @relation("MerchandiseDocumentUploader")
   issuedMerchandiseDocuments      MerchandiseRequestDocument[] @relation("MerchandiseRequestDocumentIssuer")
+  updatedMerchandiseRequestProfiles MerchandiseRequestDocumentProfile[] @relation("MerchandiseRequestDocumentProfileUpdater")
   merchandiseCycles               MerchandiseCycle[]        @relation("MerchandiseCycleCreator")
   distributionEvents              DistributionEvent[]       @relation("DistributionEventCreator")
   familyDeliveries                FamilyDelivery[]          @relation("FamilyDeliveryRecorder")
@@ -316,6 +317,14 @@ model MerchandiseRequestDocument {
 
   @@unique([requestId, kind, version])
   @@index([requestId, createdAt])
+}
+
+model MerchandiseRequestDocumentProfile {
+  id            String   @id @default("default")
+  presidentName String   @default("Lorena Alpire")
+  updatedAt     DateTime @updatedAt
+  updatedById   String?
+  updatedBy     User?    @relation("MerchandiseRequestDocumentProfileUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 }
 
 model MerchandiseQuota {

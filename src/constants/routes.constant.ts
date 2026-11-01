@@ -27,6 +27,7 @@ export const API_ROUTES = {
   DASHBOARD: "/api/dashboard",
   FAMILIES: "/api/families",
   MERCHANDISE: "/api/merchandise",
+  MERCHANDISE_REQUEST_DOCUMENT_PROFILE: "/api/merchandise/request-document-profile",
   MERCHANDISE_DOCUMENT: (documentId: string) => `/api/merchandise/documents/${encodeURIComponent(documentId)}`,
   MERCHANDISE_REQUEST_DOCUMENTS: (requestId: string) => `/api/merchandise/requests/${encodeURIComponent(requestId)}/documents`,
   RECORDS: "/api/records",

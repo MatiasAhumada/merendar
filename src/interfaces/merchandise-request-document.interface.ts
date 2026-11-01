@@ -1,5 +1,10 @@
 export type MerchandiseRequestDocumentKind = "MODULES" | "MERENDERO_SUPPLIES";
 
+export interface MerchandiseRequestDocumentProfile {
+  presidentName: string;
+  updatedAt: string;
+}
+
 export interface MerchandiseRequestDocumentTemplate {
   associationName: string;
   resolution: string;

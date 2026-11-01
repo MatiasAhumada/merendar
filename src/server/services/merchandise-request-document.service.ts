@@ -83,5 +83,14 @@ export async function issueMerchandiseRequestDocument(payload: unknown, issuerId
     select: { id: true, version: true, kind: true, originalName: true, createdAt: true },
   });
 
+  const presidentName = data.template.signatories[0]?.name;
+  if (presidentName) {
+    await prisma.merchandiseRequestDocumentProfile.upsert({
+      where: { id: "default" },
+      create: { id: "default", presidentName, updatedById: issuerId },
+      update: { presidentName, updatedById: issuerId },
+    });
+  }
+
   return document;
 }
