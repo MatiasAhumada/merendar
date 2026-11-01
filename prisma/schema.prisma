@@ -333,6 +333,9 @@ model MerchandiseQuota {
   requestId        String                  @unique
   approvedQuantity Decimal                 @db.Decimal(12, 3)
   approvedAt       DateTime                @db.Date
+  externalOrderNumber String?
+  authorizedRecipient String?
+  authorizationValidUntil DateTime?         @db.Date
   notes            String?
   request          MerchandiseRequest      @relation(fields: [requestId], references: [id], onDelete: Restrict)
   approvedById     String

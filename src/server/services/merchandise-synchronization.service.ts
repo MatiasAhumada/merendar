@@ -31,6 +31,14 @@ export class MerchandiseDocumentError extends Error {
   }
 }
 
+function optionalDate(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  return new Date(value);
+}
+
 function decodeDocument(document: DocumentInput | undefined) {
   if (!document) {
     return null;
@@ -197,6 +205,9 @@ async function applyQuota(transaction: Prisma.TransactionClient, operation: Subm
       requestId: request.id,
       approvedQuantity: payload.approvedQuantity,
       approvedAt: new Date(payload.approvedAt),
+      externalOrderNumber: payload.externalOrderNumber,
+      authorizedRecipient: payload.authorizedRecipient,
+      authorizationValidUntil: optionalDate(payload.authorizationValidUntil),
       notes: payload.notes,
       approvedById: operation.userId,
     },
@@ -386,7 +397,7 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
       throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_CUPO_CORREGIDO_NO_PUEDE_SER_MENOR_A_LAS_RECEPCIONES_YA_REGISTRADAS);
     }
 
-    const updated = await transaction.merchandiseQuota.update({ where: { id: quota.id }, data: { approvedQuantity: payload.approvedQuantity, approvedAt: new Date(payload.approvedAt), notes: payload.notes, version: { increment: 1 } } });
+    const updated = await transaction.merchandiseQuota.update({ where: { id: quota.id }, data: { approvedQuantity: payload.approvedQuantity, approvedAt: new Date(payload.approvedAt), externalOrderNumber: payload.externalOrderNumber, authorizedRecipient: payload.authorizedRecipient, authorizationValidUntil: optionalDate(payload.authorizationValidUntil), notes: payload.notes, version: { increment: 1 } } });
     await transaction.merchandiseQuotaItem.updateMany({ where: { quotaId: quota.id }, data: { authorizedQuantity: payload.approvedQuantity } });
     return { type: "synchronized", resourceVersion: resourceVersion(updated.version), result: { resourceId: updated.id, kind: "quota" } } as const;
   }

@@ -36,6 +36,9 @@ export interface MerchandiseQuotaRecord {
   approvedQuantity: number;
   items: Array<{ id: string; requestItemId: string; authorizedQuantity: number }>;
   approvedAt: string;
+  externalOrderNumber: string | null;
+  authorizedRecipient: string | null;
+  authorizationValidUntil: string | null;
   notes: string | null;
   approvedBy: { id: string; name: string };
   createdAt: string;

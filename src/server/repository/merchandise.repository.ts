@@ -97,6 +97,7 @@ export const merchandiseRepository = {
           quota = {
             ...request.quota,
             approvedQuantity: request.quota.approvedQuantity.toNumber(),
+            authorizationValidUntil: request.quota.authorizationValidUntil,
             items: request.quota.items.map((quotaItem) => ({ ...quotaItem, authorizedQuantity: quotaItem.authorizedQuantity.toNumber() })),
           };
         }

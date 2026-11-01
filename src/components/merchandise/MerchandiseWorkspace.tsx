@@ -20,6 +20,7 @@ import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineOperation, listOfflineOperations, resolveOfflineConflict, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace";
 import { MerchandiseRequestDocumentComposer } from "@/components/merchandise/MerchandiseRequestDocumentComposer";
+import { createMerchandiseReconciliationPdf } from "@/services/merchandise-reconciliation-pdf.service";
 import { duplicateRemittanceConflictSchema, merchandiseCancellationPayloadSchema, merchandiseOperationPayloadSchema, merchandisePayloadSchema, merchandiseUpdatePayloadSchema, receiptLimitConflictSchema } from "@/schemas/merchandise.schema";
 import type { MerchandiseCancellationPayload, MerchandiseOperationPayload, MerchandisePayload, MerchandiseUpdatePayload } from "@/types/schema-contracts";
 import { jsonValueSchema } from "@/schemas/offline.schema";
@@ -87,6 +88,26 @@ interface PendingRecord {
 
 function formatDate(date: string) {
   return new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(date));
+}
+
+function optionalDateIso(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  return new Date(`${value}T00:00:00.000Z`).toISOString();
+}
+
+async function downloadReconciliationReport(period: MerchandisePeriodRecord, request: MerchandiseRequestRecord) {
+  const pdf = await createMerchandiseReconciliationPdf(period, request);
+  const pdfBuffer = new ArrayBuffer(pdf.byteLength);
+  new Uint8Array(pdfBuffer).set(pdf);
+  const url = URL.createObjectURL(new Blob([pdfBuffer], { type: HTTP_CONTENT_TYPES.PDF }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `informe-recepcion-${request.requestNumber.replace(/[^a-zA-Z0-9_-]/g, "-")}.pdf`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function selectedDestination(formData: FormData): MerchandiseDestination {
@@ -268,6 +289,9 @@ function queuedQuota(
     approvedQuantity: payload.approvedQuantity,
     items,
     approvedAt: new Date(`${payload.approvedAt}T00:00:00.000Z`).toISOString(),
+    externalOrderNumber: payload.externalOrderNumber ?? null,
+    authorizedRecipient: payload.authorizedRecipient ?? null,
+    authorizationValidUntil: optionalDateIso(payload.authorizationValidUntil),
     notes: payload.notes ?? null,
     approvedBy: { id: operation.userId, name: "En este dispositivo" },
     createdAt: timestamp,
@@ -404,6 +428,9 @@ function addQueuedRecords(periods: MerchandisePeriodRecord[], records: PendingRe
         if (request?.quota) {
           request.quota.approvedQuantity = payload.approvedQuantity;
           request.quota.approvedAt = new Date(`${payload.approvedAt}T00:00:00.000Z`).toISOString();
+          request.quota.externalOrderNumber = payload.externalOrderNumber ?? null;
+          request.quota.authorizedRecipient = payload.authorizedRecipient ?? null;
+          request.quota.authorizationValidUntil = optionalDateIso(payload.authorizationValidUntil);
           request.quota.notes = payload.notes ?? null;
         }
       } else if (payload.kind === "remittance") {
@@ -846,6 +873,9 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
       requestId: request.id,
       approvedQuantity,
       approvedAt: String(formData.get("approvedAt") ?? ""),
+      externalOrderNumber: optionalText(formData, "externalOrderNumber"),
+      authorizedRecipient: optionalText(formData, "authorizedRecipient"),
+      authorizationValidUntil: optionalText(formData, "authorizationValidUntil"),
       notes: optionalText(formData, "notes"),
       document,
     };
@@ -1127,9 +1157,13 @@ function RequestCard({ period, request, operations, createQuota, receiveRemittan
       <div className="flex gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} /></span><div><div className="flex flex-wrap items-center gap-2"><h4 className="font-semibold">{MERCHANDISE_UI_TEXT.SOLICITUD}{request.requestNumber}</h4><Badge variant={requestStatusBadgeVariant(request.status)}>{requestStatusLabel(request.status)}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{formatDate(request.requestedAt)} {APPLICATION_UI_TEXT.TEXT}{MERCHANDISE_UI_TEXT.QUANTITY_WITH_UNIT(request.requestedQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)} · {MERCHANDISE_UI_TEXT.REGISTRO}{request.createdBy.name}</p>{request.item ? <p className="mt-1 text-sm">{request.item.productName} · {request.item.presentation} · {request.item.unit}</p> : null}<p className="mt-1 text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.PERIODO}{period.label}</p></div></div>
       <div className="flex flex-wrap gap-2">
         {canWrite && !queuedRequestOperation && request.status !== "CANCELADA" && request.status !== "RECHAZADA" ? <MerchandiseRequestDocumentComposer request={request} period={period} userId={userId} sessionExpiresAt={sessionExpiresAt} isOnline={isOnline} presidentName={presidentName} onPresidentNameChange={onPresidentNameChange} /> : null}
+        {quota ? <Button type="button" variant="outline" onClick={() => void downloadReconciliationReport(period, request)}>{MERCHANDISE_UI_TEXT.DESCARGAR_INFORME_RECEPCION}</Button> : null}
         {canWrite && !quota && request.status !== "RECHAZADA" && request.status !== "CANCELADA" ? <SaveSheet title={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO_APROBADO} description={MERCHANDISE_UI_TEXT.REQUEST_DESCRIPTION(request.requestNumber, request.requestedQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)} triggerLabel={MERCHANDISE_UI_TEXT.REGISTRAR_CUPO} triggerVariant="outline" onSave={(formData) => createQuota(request, formData)} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CUPO}>
           <Field><FieldLabel htmlFor={`quota-quantity-${request.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_APROBADA}</FieldLabel><Input id={`quota-quantity-${request.id}`} name="approvedQuantity" type="number" min="0.001" step={request.item ? "0.001" : "1"} max={request.requestedQuantity} required /><FieldDescription>{MERCHANDISE_UI_TEXT.EL_CUPO_NO_PUEDE_SUPERAR_LOS}{request.requestedQuantity} {request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL}</FieldDescription></Field>
           <Field><FieldLabel htmlFor={`quota-date-${request.id}`}>{MERCHANDISE_UI_TEXT.FECHA_DE_APROBACION}</FieldLabel><Input id={`quota-date-${request.id}`} name="approvedAt" type="date" required /></Field>
+          <Field><FieldLabel htmlFor={`quota-order-${request.id}`}>{MERCHANDISE_UI_TEXT.REFERENCIA_ORDEN_EXTERNA}</FieldLabel><Input id={`quota-order-${request.id}`} name="externalOrderNumber" maxLength={80} /><FieldDescription>{MERCHANDISE_UI_TEXT.NUMERO_EXTERNO_NO_GENERADO_POR_EL_SISTEMA}</FieldDescription></Field>
+          <Field><FieldLabel htmlFor={`quota-recipient-${request.id}`}>{MERCHANDISE_UI_TEXT.AUTORIZADO_A_RETIRAR}</FieldLabel><Input id={`quota-recipient-${request.id}`} name="authorizedRecipient" maxLength={120} /></Field>
+          <Field><FieldLabel htmlFor={`quota-validity-${request.id}`}>{MERCHANDISE_UI_TEXT.VIGENCIA_INDICADA_EN_DOCUMENTO}</FieldLabel><Input id={`quota-validity-${request.id}`} name="authorizationValidUntil" type="date" /><FieldDescription>{MERCHANDISE_UI_TEXT.VIGENCIA_NO_SE_CALCULA_AUTOMATICAMENTE}</FieldDescription></Field>
           <Field><FieldLabel htmlFor={`quota-notes-${request.id}`}>{APPLICATION_UI_TEXT.OBSERVACIONES}</FieldLabel><Textarea id={`quota-notes-${request.id}`} name="notes" maxLength={1000} rows={3} /></Field>
           <DocumentField id={`quota-document-${request.id}`} />
         </SaveSheet> : null}
@@ -1154,9 +1188,12 @@ function RequestCard({ period, request, operations, createQuota, receiveRemittan
     </div>
     {queuedRequestOperation?.message ? <p role="alert" className="mt-3 text-sm text-destructive">{queuedRequestOperation.message}</p> : null}
     {pendingQuotaOperation?.message ? <p role="alert" className="mt-3 text-sm text-destructive">{pendingQuotaOperation.message}</p> : null}
-    {quota ? <div className="mt-4 space-y-3"><div className="grid grid-cols-1 gap-2 rounded-xl bg-muted p-3 text-sm sm:grid-cols-3"><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.CUPO_APROBADO}</p><strong>{MERCHANDISE_UI_TEXT.QUANTITY_WITH_UNIT(quota.approvedQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)}</strong></div><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.APROBADO_POR}</p><strong>{quota.approvedBy.name}</strong></div><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.FECHA_DE_APROBACION_2}</p><strong>{formatDate(quota.approvedAt)}</strong></div></div>{canWrite && !pendingQuotaOperation ? <SaveSheet title={MERCHANDISE_UI_TEXT.CORREGIR_CUPO} description={MERCHANDISE_UI_TEXT.EL_CUPO_CORREGIDO_NO_PUEDE_QUEDAR_POR_DEBAJO_DE_LAS_RECEPCIONES_VIGENTES} triggerLabel={MERCHANDISE_UI_TEXT.CORREGIR_CUPO} triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "quota", id: quota.id, approvedQuantity: Number(formData.get("approvedQuantity")), approvedAt: String(formData.get("approvedAt") ?? ""), notes: optionalText(formData, "notes") }, quota.version, [request.id])} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CORRECCION}>
+    {quota ? <div className="mt-4 space-y-3"><div className="grid grid-cols-1 gap-2 rounded-xl bg-muted p-3 text-sm sm:grid-cols-3"><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.CUPO_APROBADO}</p><strong>{MERCHANDISE_UI_TEXT.QUANTITY_WITH_UNIT(quota.approvedQuantity, request.item?.unit ?? MERCHANDISE_UI_TEXT.MODULE_UNIT_LABEL)}</strong></div><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.APROBADO_POR}</p><strong>{quota.approvedBy.name}</strong></div><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.FECHA_DE_APROBACION_2}</p><strong>{formatDate(quota.approvedAt)}</strong></div><div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.REFERENCIA_ORDEN_EXTERNA}</p><strong>{quota.externalOrderNumber || MERCHANDISE_UI_TEXT.SIN_REFERENCIA_EXTERNA}</strong></div>{quota.authorizedRecipient ? <div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.AUTORIZADO_A_RETIRAR}</p><strong>{quota.authorizedRecipient}</strong></div> : null}{quota.authorizationValidUntil ? <div><p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.VIGENCIA_INDICADA_EN_DOCUMENTO}</p><strong>{formatDate(quota.authorizationValidUntil)}</strong></div> : null}</div>{canWrite && !pendingQuotaOperation ? <SaveSheet title={MERCHANDISE_UI_TEXT.CORREGIR_CUPO} description={MERCHANDISE_UI_TEXT.EL_CUPO_CORREGIDO_NO_PUEDE_QUEDAR_POR_DEBAJO_DE_LAS_RECEPCIONES_VIGENTES} triggerLabel={MERCHANDISE_UI_TEXT.CORREGIR_CUPO} triggerVariant="outline" onSave={(formData) => correctRecord({ kind: "quota", id: quota.id, approvedQuantity: Number(formData.get("approvedQuantity")), approvedAt: String(formData.get("approvedAt") ?? ""), externalOrderNumber: optionalText(formData, "externalOrderNumber"), authorizedRecipient: optionalText(formData, "authorizedRecipient"), authorizationValidUntil: optionalText(formData, "authorizationValidUntil"), notes: optionalText(formData, "notes") }, quota.version, [request.id])} submitLabel={MERCHANDISE_UI_TEXT.GUARDAR_CORRECCION}>
       <Field><FieldLabel htmlFor={`quota-edit-quantity-${quota.id}`}>{MERCHANDISE_UI_TEXT.CANTIDAD_APROBADA}</FieldLabel><Input id={`quota-edit-quantity-${quota.id}`} name="approvedQuantity" type="number" min={pendingCount || (request.item ? 0.001 : 1)} step={request.item ? "0.001" : "1"} max={request.requestedQuantity} defaultValue={quota.approvedQuantity} required /></Field>
       <Field><FieldLabel htmlFor={`quota-edit-date-${quota.id}`}>{MERCHANDISE_UI_TEXT.FECHA_DE_APROBACION}</FieldLabel><Input id={`quota-edit-date-${quota.id}`} name="approvedAt" type="date" defaultValue={quota.approvedAt.slice(0, 10)} required /></Field>
+      <Field><FieldLabel htmlFor={`quota-edit-order-${quota.id}`}>{MERCHANDISE_UI_TEXT.REFERENCIA_ORDEN_EXTERNA}</FieldLabel><Input id={`quota-edit-order-${quota.id}`} name="externalOrderNumber" maxLength={80} defaultValue={quota.externalOrderNumber ?? ""} /></Field>
+      <Field><FieldLabel htmlFor={`quota-edit-recipient-${quota.id}`}>{MERCHANDISE_UI_TEXT.AUTORIZADO_A_RETIRAR}</FieldLabel><Input id={`quota-edit-recipient-${quota.id}`} name="authorizedRecipient" maxLength={120} defaultValue={quota.authorizedRecipient ?? ""} /></Field>
+      <Field><FieldLabel htmlFor={`quota-edit-validity-${quota.id}`}>{MERCHANDISE_UI_TEXT.VIGENCIA_INDICADA_EN_DOCUMENTO}</FieldLabel><Input id={`quota-edit-validity-${quota.id}`} name="authorizationValidUntil" type="date" defaultValue={quota.authorizationValidUntil?.slice(0, 10) ?? ""} /><FieldDescription>{MERCHANDISE_UI_TEXT.VIGENCIA_NO_SE_CALCULA_AUTOMATICAMENTE}</FieldDescription></Field>
       <Field><FieldLabel htmlFor={`quota-edit-notes-${quota.id}`}>{APPLICATION_UI_TEXT.OBSERVACIONES}</FieldLabel><Textarea id={`quota-edit-notes-${quota.id}`} name="notes" maxLength={1000} rows={3} defaultValue={quota.notes ?? ""} /></Field>
     </SaveSheet> : null}<p className="text-xs text-muted-foreground">{MERCHANDISE_UI_TEXT.EL_CUPO_NO_SE_ANULA_PORQUE_LA_SOLICITUD_CONSERVA_UN_UNICO_CUPO_Y_SUS_DOC}</p></div> : null}
     {request.notes ? <p className="mt-3 text-sm text-muted-foreground">{request.notes}</p> : null}

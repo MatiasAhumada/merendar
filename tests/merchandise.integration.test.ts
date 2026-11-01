@@ -184,6 +184,9 @@ test("merchandise periods, requests, quotas, remittances and private documents p
       requestId: supplyRequestId,
       approvedQuantity: 1.25,
       approvedAt: "2026-10-03",
+      externalOrderNumber: `EXT-${suffix}`,
+      authorizedRecipient: "Synthetic QA Recipient",
+      authorizationValidUntil: "2026-10-05",
     }, [supplyRequestOperation.operationId]);
     const supplyReceiptOperation = createOperation(user.id, supplyRemittanceId, {
       kind: "remittance",
@@ -208,6 +211,7 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     await synchronizationService.apply(supplyPeriodOperation, "REMITTANCES", merchandiseSynchronizationHandler);
     await synchronizationService.apply(supplyRequestOperation, "REMITTANCES", merchandiseSynchronizationHandler);
     await synchronizationService.apply(supplyQuotaOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    const supplyQuotaReplay = await synchronizationService.apply(supplyQuotaOperation, "REMITTANCES", merchandiseSynchronizationHandler);
     await synchronizationService.apply(supplyReceiptOperation, "REMITTANCES", merchandiseSynchronizationHandler);
     await synchronizationService.apply(secondSupplyReceiptOperation, "REMITTANCES", merchandiseSynchronizationHandler);
     const savedSupplyRequest = await prisma.merchandiseRequest.findUniqueOrThrow({
@@ -219,6 +223,10 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     assert.equal(savedSupplyRequest.items[0]?.unit, "litro");
     assert.equal(savedSupplyRequest.items[0]?.requestedQuantity.toNumber(), 1.25);
     assert.equal(savedSupplyRequest.quota?.items[0]?.authorizedQuantity.toNumber(), 1.25);
+    assert.equal(savedSupplyRequest.quota?.externalOrderNumber, `EXT-${suffix}`);
+    assert.equal(savedSupplyRequest.quota?.authorizedRecipient, "Synthetic QA Recipient");
+    assert.equal(savedSupplyRequest.quota?.authorizationValidUntil?.toISOString().slice(0, 10), "2026-10-05");
+    assert.equal(supplyQuotaReplay.replayed, true);
     assert.deepEqual(savedSupplyRequest.remittances.map((remittance) => remittance.items[0]?.receivedQuantity.toNumber()).sort(), [0.5, 0.75]);
     assert.equal(savedSupplyRequest.remittances.reduce((total, remittance) => total + remittance.receivedQuantity.toNumber(), 0), 1.25);
 
