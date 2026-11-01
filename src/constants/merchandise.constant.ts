@@ -26,6 +26,17 @@ export const MERCHANDISE_VALIDATION_MESSAGES = {
   CANCELLATION_REASON_REQUIRED: "Indicá el motivo de la anulación",
 } as const;
 
+export const MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS = {
+  ASSOCIATION_NAME: "Asociación Civil Comunitaria Orgullo y Solidaridad",
+  ASSOCIATION_RESOLUTION: "Res. 314/2024",
+  ASSOCIATION_ADDRESS: "Calle 27 N.º 556, V.M.M., Las Talitas, Tucumán",
+  ASSOCIATION_CONTACT: "381 519-6289 / 381-505-9388 · asociaciónorgulloysolidaridad@gmail.com",
+  RECIPIENT: "Dr. Federico Masso",
+  RECIPIENT_TITLE: "Ministro de Desarrollo Social",
+  LOCALITY: "Las Talitas, Tucumán",
+  LOGO_PATH: "/brand/association-house-logo.png",
+} as const;
+
 export const MERCHANDISE_UI_TEXT = {
   MERCADERIA_Y_RENDICIONES_NO_ESTAN_HABILITADAS_PARA_TU_ROL: "Mercadería y rendiciones no están habilitadas para tu rol.",
   NO_SE_GUARDO: "No se guardó",

@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { API_ROUTES } from "@/constants/routes.constant";
 import { MERCHANDISE_UI_TEXT } from "@/constants/merchandise.constant";
+import { MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS } from "@/constants/merchandise.constant";
 import { merchandiseRequestDocumentPayloadSchema, merchandiseRequestDocumentTemplateSchema } from "@/schemas/merchandise-request-document.schema";
 import type { MerchandisePeriodRecord, MerchandiseRequestRecord } from "@/interfaces/merchandise.interface";
 import type { MerchandiseRequestDocumentKind, MerchandiseRequestDocumentRecord, MerchandiseRequestDocumentTemplate } from "@/interfaces/merchandise-request-document.interface";
@@ -21,16 +22,17 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { File01Icon } from "@hugeicons/core-free-icons";
+import Image from "next/image";
 import clientAxios from "@/utils/clientAxios.util";
 
 const emptyTemplate = {
-  associationName: "",
-  resolution: "",
-  address: "",
-  contact: "",
-  recipient: "",
-  recipientTitle: "",
-  locality: "",
+  associationName: MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS.ASSOCIATION_NAME,
+  resolution: MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS.ASSOCIATION_RESOLUTION,
+  address: MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS.ASSOCIATION_ADDRESS,
+  contact: MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS.ASSOCIATION_CONTACT,
+  recipient: MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS.RECIPIENT,
+  recipientTitle: MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS.RECIPIENT_TITLE,
+  locality: MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS.LOCALITY,
   issueDate: new Date().toLocaleDateString("sv-SE"),
   requestedPeriod: "",
   purpose: "",
@@ -48,7 +50,7 @@ interface MerchandiseRequestDocumentComposerProps {
   isOnline: boolean;
 }
 
-function fileToDataUrl(file: File) {
+function fileToDataUrl(file: Blob) {
   return file.arrayBuffer().then((arrayBuffer) => {
     const bytes = new Uint8Array(arrayBuffer);
     let binary = "";
@@ -94,7 +96,7 @@ function templateFromForm(form: HTMLFormElement, logoDataUrl: string, request: M
     issueDate: data.get("issueDate"),
     requestedPeriod: data.get("requestedPeriod"),
     purpose: data.get("purpose"),
-    population: data.get("population"),
+    population: data.get("population") ?? "",
     observations: data.get("observations"),
     signatories: [
       { name: data.get("signatoryName"), title: data.get("signatoryTitle") },
@@ -137,6 +139,34 @@ export function MerchandiseRequestDocumentComposer({ request, period, userId, se
   const [savedDocuments, setSavedDocuments] = useState<MerchandiseRequestDocumentRecord[]>(request.issuedDocuments.filter((document) => document.kind === documentKind));
   const [offlineDocuments, setOfflineDocuments] = useState<OfflinePreparedDocument[]>([]);
   const [queuedDocuments, setQueuedDocuments] = useState<OfflineOperation[]>([]);
+
+  useEffect(() => {
+    if (previousSnapshot?.template.logoDataUrl) {
+      return;
+    }
+    let cancelled = false;
+    void fetch(MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS.LOGO_PATH)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("No se pudo cargar el logo de la asociación.");
+        }
+        return response.blob();
+      })
+      .then(fileToDataUrl)
+      .then((logo) => {
+        if (!cancelled) {
+          setLogoDataUrl(logo);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setMessage(readErrorMessage(error));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [previousSnapshot?.template.logoDataUrl]);
 
   useEffect(() => {
     void Promise.all([readOfflinePreparedDocuments(userId), listOfflineOperations(userId)]).then(([documents, operations]) => {
@@ -301,7 +331,7 @@ export function MerchandiseRequestDocumentComposer({ request, period, userId, se
       <form onSubmit={(event) => void handleIssue(event)} className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 sm:px-6">
         <FieldGroup className="gap-4 pt-4">
           <Alert variant="info"><AlertTitle>Plantilla pendiente de aprobación</AlertTitle><AlertDescription>El PDF queda marcado como borrador y no declara que fue presentado o aprobado. No se agrega sello ni numeración oficial.</AlertDescription></Alert>
-          <Field><FieldLabel htmlFor={`association-logo-${request.id}`}>Logo institucional aprobado *</FieldLabel><Input id={`association-logo-${request.id}`} type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" required={!logoDataUrl} onChange={(event) => void chooseLogo(event.currentTarget.files?.[0]).catch((error: unknown) => setMessage(readErrorMessage(error)))} /><FieldDescription>PNG o JPG, hasta 256 KiB. No se usa el logo de la aplicación.</FieldDescription></Field>
+          <Field><FieldLabel htmlFor={`association-logo-${request.id}`}>Logo del merendero</FieldLabel><div className="flex items-center gap-3">{logoDataUrl ? <Image src={logoDataUrl} alt="Logo de la asociación que se incluirá en el PDF" width={72} height={72} unoptimized className="size-16 rounded-md border bg-white object-contain p-1" /> : null}<Input id={`association-logo-${request.id}`} type="file" accept="image/png,image/jpeg,.png,.jpg,.jpeg" onChange={(event) => void chooseLogo(event.currentTarget.files?.[0]).catch((error: unknown) => setMessage(readErrorMessage(error)))} /></div><FieldDescription>Se carga el isotipo de la casa de la asociación. Podés reemplazarlo por otro PNG o JPG de hasta 256 KiB. La planilla conserva su logo institucional.</FieldDescription></Field>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field><FieldLabel htmlFor={`association-name-${request.id}`}>Asociación *</FieldLabel><Input id={`association-name-${request.id}`} name="associationName" defaultValue={template.associationName} maxLength={160} required /></Field>
             <Field><FieldLabel htmlFor={`association-resolution-${request.id}`}>Resolución</FieldLabel><Input id={`association-resolution-${request.id}`} name="resolution" defaultValue={template.resolution} maxLength={120} /></Field>

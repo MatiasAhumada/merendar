@@ -46,7 +46,7 @@ export const OFFLINE_PREPARATION = {
 } as const;
 
 export const OFFLINE_SERVICE_WORKER = {
-  CACHE_NAME: "merendar-public-v6",
+  CACHE_NAME: "merendar-public-v7",
   CANONICAL_ROUTES: OFFLINE_PREPARATION.ROUTES,
   PUBLIC_ASSETS: [
     "/icon-192.png",
@@ -55,6 +55,7 @@ export const OFFLINE_SERVICE_WORKER = {
     "/apple-icon.png",
     "/merendar-logo.png",
     "/brand/merendar-isotipo.png",
+    "/brand/association-house-logo.png",
     "/brand/ministerio-desarrollo-social-tucuman.png",
   ] as const,
   STATIC_ASSET_PREFIX: "/_next/static/",

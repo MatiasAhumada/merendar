@@ -32,6 +32,11 @@ function wrapText(value: string, font: PDFFont, fontSize: number, width: number)
   return lines;
 }
 
+function formatSpanishDate(value: string) {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeZone: "UTC" }).format(date);
+}
+
 export async function createMerchandiseRequestPdf(input: {
   kind: MerchandiseRequestDocumentKind;
   template: MerchandiseRequestDocumentTemplate;
@@ -84,7 +89,7 @@ export async function createMerchandiseRequestPdf(input: {
   if (parsedTemplate.address) writeBlock(parsedTemplate.address, 9, regular, 2);
   if (parsedTemplate.contact) writeBlock(parsedTemplate.contact, 9, regular, 2);
   y -= 14;
-  writeBlock(`${parsedTemplate.locality}, ${parsedTemplate.issueDate}`, 11, regular, 9);
+  writeBlock(`${parsedTemplate.locality}, ${formatSpanishDate(parsedTemplate.issueDate)}`, 11, regular, 9);
   writeBlock(`A: ${parsedTemplate.recipient}`, 11, bold, 3);
   if (parsedTemplate.recipientTitle) writeBlock(parsedTemplate.recipientTitle, 10, regular, 9);
   let subject = "Solicitud de insumos para merendero";

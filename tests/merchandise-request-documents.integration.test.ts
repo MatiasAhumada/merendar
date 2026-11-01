@@ -5,6 +5,9 @@ import { test } from "node:test";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { issueMerchandiseRequestDocument } from "@/server/services/merchandise-request-document.service";
+import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
+import { merchandiseSynchronizationHandler } from "@/server/services/merchandise-synchronization.service";
+import { synchronizationService } from "@/server/services/synchronization.service";
 
 const logoDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGMQ7AgFIgYIBQAZBgO5BdzoXgAAAABJRU5ErkJggg==";
 
@@ -34,6 +37,23 @@ test("request document emissions retain their source snapshot and are idempotent
     assert.equal(snapshot.request.period.label, period.label);
     assert.deepEqual(snapshot.request.items[0], { productName: "Harina de prueba", presentation: "Bolsa de 1 kg", unit: "kg", requestedQuantity: 4.5 });
     assert.equal(await prisma.merchandiseRequestDocument.count({ where: { requestId: request.id } }), 1);
+
+    const offlineDocumentId = randomUUID();
+    const offlineOperation: SubmittedSyncOperation = {
+      operationId: randomUUID(),
+      userId: user.id,
+      resource: "remittances",
+      resourceId: offlineDocumentId,
+      operation: "create",
+      baseVersion: null,
+      dependencies: [],
+      payload: { ...payload, id: offlineDocumentId },
+    };
+    const synchronized = await synchronizationService.apply(offlineOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    const offlineReplay = await synchronizationService.apply(offlineOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    assert.equal(synchronized.resourceVersion, 2);
+    assert.equal(offlineReplay.replayed, true);
+    assert.equal(await prisma.merchandiseRequestDocument.count({ where: { requestId: request.id } }), 2);
   } finally {
     await prisma.merchandiseRequestDocument.deleteMany({ where: { requestId: request.id } });
     await prisma.merchandiseRequestItem.deleteMany({ where: { requestId: request.id } });
