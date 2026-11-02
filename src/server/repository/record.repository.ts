@@ -22,6 +22,58 @@ export async function findDistributionRecords(periodId?: string) {
   });
 }
 
+export async function findModuleReceipts() {
+  const remittances = await prisma.merchandiseRemittance.findMany({
+    where: { status: "VIGENTE", request: { period: { destination: "FAMILIES", status: "VIGENTE" } } },
+    select: { id: true, remittanceNumber: true, receivedAt: true, receivedQuantity: true, request: { select: { periodId: true, requestNumber: true, period: { select: { label: true } } } }, distributionAllocations: { select: { moduleQuantity: true } } },
+    orderBy: [{ receivedAt: "desc" }, { remittanceNumber: "asc" }],
+  });
+
+  return remittances.map((remittance) => {
+    const receivedQuantity = remittance.receivedQuantity.toNumber();
+    const assignedQuantity = remittance.distributionAllocations.reduce((total, allocation) => total + allocation.moduleQuantity, 0);
+    return {
+      id: remittance.id,
+      periodId: remittance.request.periodId,
+      periodLabel: remittance.request.period.label,
+      requestNumber: remittance.request.requestNumber,
+      remittanceNumber: remittance.remittanceNumber,
+      receivedAt: remittance.receivedAt.toISOString(),
+      receivedQuantity,
+      assignedQuantity,
+      remainingQuantity: receivedQuantity - assignedQuantity,
+    };
+  });
+}
+
+export async function findDistributionEvents(periodId?: string) {
+  let where: Prisma.DistributionEventWhereInput = {};
+  if (periodId) {
+    where = { periodId };
+  }
+  const events = await prisma.distributionEvent.findMany({
+    where,
+    select: {
+      id: true, version: true, periodId: true, scheduledAt: true, location: true, responsibleNames: true, notes: true,
+      allocations: { select: { id: true, familyId: true, family: { select: { name: true } }, remittanceId: true, remittance: { select: { remittanceNumber: true } }, moduleQuantity: true, notes: true }, orderBy: [{ family: { name: "asc" } }, { remittance: { remittanceNumber: "asc" } }] },
+    },
+    orderBy: [{ scheduledAt: "desc" }, { createdAt: "desc" }],
+  });
+
+  return events.map((event) => ({
+    ...event,
+    allocations: event.allocations.map((allocation) => ({
+      id: allocation.id,
+      familyId: allocation.familyId,
+      familyName: allocation.family.name,
+      remittanceId: allocation.remittanceId,
+      remittanceNumber: allocation.remittance.remittanceNumber,
+      moduleQuantity: allocation.moduleQuantity,
+      notes: allocation.notes,
+    })),
+  }));
+}
+
 export async function findBeneficiarySheets(periodId?: string) {
   let where: PrismaTypes.BeneficiarySheetWhereInput = {};
 

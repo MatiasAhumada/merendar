@@ -15,6 +15,25 @@ export const distributionRecordPayloadSchema = z.object({
   notes: z.string().trim().max(1000).optional(),
 }).strict();
 
+export const distributionPreparationPayloadSchema = z.object({
+  kind: z.literal("distribution-preparation"),
+  id: z.uuid(),
+  periodId: z.string().trim().min(1).max(80),
+  scheduledAt: z.iso.date(),
+  location: z.string().trim().min(2).max(180),
+  responsibleNames: z.string().trim().min(2).max(300),
+  notes: z.string().trim().max(1000).optional(),
+  allocations: z.array(z.object({
+    familyId: z.string().trim().min(1).max(80),
+    remittanceId: z.string().trim().min(1).max(80),
+    moduleQuantity: z.number().int().positive().max(1000),
+    notes: z.string().trim().max(500).optional(),
+  }).strict()).min(1).max(1000),
+}).strict().refine((payload) => {
+  const keys = payload.allocations.map((allocation) => `${allocation.familyId}:${allocation.remittanceId}`);
+  return new Set(keys).size === keys.length;
+}, { message: DELIVERY_VALIDATION_MESSAGES.REPEATED_SELECTION, path: ["allocations"] });
+
 export const beneficiarySheetSchema = z.object({
   periodId: z.string().trim().min(1).max(80),
   personIds: z.array(z.string().trim().min(1).max(80)).min(1).max(1000),
@@ -77,6 +96,16 @@ export const recordsCollectionSchema = z.object({
     family: z.object({ id: z.string(), name: z.string() }),
   })),
   sheets: z.array(z.object({ id: z.string(), periodId: z.string(), version: z.number().int().positive(), createdAt: z.iso.datetime() })),
+  moduleReceipts: z.array(z.object({
+    id: z.string(), periodId: z.string(), periodLabel: z.string(), requestNumber: z.string(), remittanceNumber: z.string(), receivedAt: z.iso.datetime(),
+    receivedQuantity: z.number(), assignedQuantity: z.number(), remainingQuantity: z.number(),
+  })).default([]),
+  distributionEvents: z.array(z.object({
+    id: z.string(), version: z.number().int().positive(), periodId: z.string(), scheduledAt: z.iso.date(), location: z.string(),
+    responsibleNames: z.string(), notes: z.string().nullable(), allocations: z.array(z.object({
+      id: z.string(), familyId: z.string(), familyName: z.string(), remittanceId: z.string(), remittanceNumber: z.string(), moduleQuantity: z.number().int().positive(), notes: z.string().nullable(),
+    })),
+  })).default([]),
 });
 
 export const beneficiarySheetResponseSchema = z.object({

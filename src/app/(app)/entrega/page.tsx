@@ -17,6 +17,7 @@ export default function DeliveryPage() {
           canWrite={capabilities.includes("delivery.write")}
           canCreateFamilies={capabilities.includes("families.read") && capabilities.includes("families.write")}
           canCreatePeriods={capabilities.includes("merchandise.read") && capabilities.includes("merchandise.write")}
+          canReadMerchandise={capabilities.includes("merchandise.read")}
         />
       ) : null}
     </SessionRoute>

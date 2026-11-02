@@ -10,6 +10,8 @@ import {
   findBeneficiarySheets,
   findCurrentFamilyMemberships,
   findDistributionRecords,
+  findDistributionEvents,
+  findModuleReceipts,
   findFamilyMemberships,
   findMerchandisePeriod,
   findRecordPeriods,
@@ -30,7 +32,7 @@ export async function createIssuedBeneficiarySheetPdf(id: string) {
   return { pdf, fileName, version: sheet.version };
 }
 
-export async function getRecordWorkbench(periodId?: string, includePeriodDetails = false) {
+export async function getRecordWorkbench(periodId?: string, includePeriodDetails = false, includeInventory = false) {
   const includeDetails = Boolean(periodId || includePeriodDetails);
   let distributionRecordsPromise: ReturnType<typeof findDistributionRecords> | Promise<[]> = Promise.resolve([]);
   let beneficiarySheetsPromise: ReturnType<typeof findBeneficiarySheets> | Promise<[]> = Promise.resolve([]);
@@ -47,6 +49,16 @@ export async function getRecordWorkbench(periodId?: string, includePeriodDetails
     beneficiarySheetsPromise,
   ]);
 
+  let moduleReceiptsPromise: ReturnType<typeof findModuleReceipts> | Promise<[]> = Promise.resolve([]);
+  if (includeInventory) {
+    moduleReceiptsPromise = findModuleReceipts();
+  }
+
+  const [moduleReceipts, distributionEvents] = await Promise.all([
+    moduleReceiptsPromise,
+    findDistributionEvents(periodId),
+  ]);
+
   return {
     periods,
     families,
@@ -57,6 +69,8 @@ export async function getRecordWorkbench(periodId?: string, includePeriodDetails
       family: familyMember.family,
     })),
     sheets,
+    moduleReceipts,
+    distributionEvents: distributionEvents.map((event) => ({ ...event, scheduledAt: event.scheduledAt.toISOString().slice(0, 10) })),
   };
 }
 

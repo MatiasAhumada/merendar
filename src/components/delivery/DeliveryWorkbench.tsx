@@ -32,6 +32,7 @@ import type { OfflineOperation } from "@/types/offline-operation";
 
 import type { JsonValue } from "@/types/json-value";
 import { jsonValueSchema } from "@/schemas/offline.schema";
+import { DistributionPreparationPanel } from "@/components/delivery/DistributionPreparationPanel";
 
 type WorkbenchData = RecordsCollection;
 
@@ -41,12 +42,13 @@ interface DeliveryWorkbenchProps {
   canWrite: boolean;
   canCreateFamilies: boolean;
   canCreatePeriods: boolean;
+  canReadMerchandise: boolean;
   offlineMode?: boolean;
   initialOfflineData?: WorkbenchData;
   preparedDocuments?: OfflinePreparedDocument[];
 }
 
-const emptyData: WorkbenchData = { periods: [], families: [], records: [], sheets: [] };
+const emptyData: WorkbenchData = { periods: [], families: [], records: [], sheets: [], moduleReceipts: [], distributionEvents: [] };
 
 function localDate() {
   const date = new Date();
@@ -59,7 +61,7 @@ function personLabel(person: WorkbenchData["families"][number]["members"][number
   return `${person.firstName} ${person.lastName}`;
 }
 
-export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreateFamilies, canCreatePeriods, initialOfflineData, preparedDocuments = [] }: DeliveryWorkbenchProps) {
+export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreateFamilies, canCreatePeriods, canReadMerchandise, initialOfflineData, preparedDocuments = [] }: DeliveryWorkbenchProps) {
   const isOnline = useNetworkStatus();
   const offlineMode = !isOnline;
   const [data, setData] = useState<WorkbenchData>(initialOfflineData ?? emptyData);
@@ -583,6 +585,8 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
           </CardContent>
         </Card> : null}
       </div>
+
+      {selectedPeriod && canReadMerchandise ? <DistributionPreparationPanel data={data} periodId={periodId} userId={userId} sessionExpiresAt={sessionExpiresAt} canWrite={canWrite} isOnline={isOnline} onRefresh={fetchData} /> : null}
 
       <Card>
         <CardHeader>

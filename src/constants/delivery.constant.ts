@@ -11,6 +11,24 @@ export const DELIVERY_VALIDATION_MESSAGES = {
   REPEATED_BENEFICIARIES: "La planilla contiene beneficiarios repetidos",
 } as const;
 
+export const DELIVERY_REPORT_TEXT = {
+  TITLE: "Preparación y disponibilidad de módulos",
+  DATE: "Fecha",
+  LOCATION: "Lugar",
+  RESPONSIBLE: "Responsables de la jornada",
+  TOTAL_FAMILIES: "Familias asignadas",
+  TOTAL_MODULES: "Módulos asignados",
+  FAMILY: "Familia",
+  RECEIPT: "Remito de origen",
+  MODULES: "Módulos",
+  NOTES: "Observaciones",
+  OBSERVATIONS: "Observaciones de la jornada",
+  INTERNAL_DOCUMENT: "Documento interno - La preparación no confirma una entrega",
+  FAMILY_UNAVAILABLE: "Familia no disponible",
+  SOURCE_UNAVAILABLE: "Origen no disponible",
+  DOWNLOAD: "Descargar planilla",
+} as const;
+
 export const DELIVERY_SHEET_COLUMNS = {
   NUMBER: "N°",
   BENEFICIARY: "Apellido y Nombre",
@@ -144,6 +162,10 @@ export const DELIVERY_UI_TEXT = {
 } as const;
 
 export const DELIVERY_ERROR_MESSAGES = {
+  ASIGNACION_SUPERA_MODULOS_DISPONIBLES: "La asignación supera los módulos recibidos que siguen disponibles.",
+  LA_FAMILIA_SELECCIONADA_NO_ESTA_ACTIVA: "La familia seleccionada ya no está activa en el padrón.",
+  LA_DISPONIBILIDAD_CAMBIO_MIENTRAS_SE_GUARDABA: "La disponibilidad cambió mientras se guardaba la jornada. Actualizá los datos e intentá de nuevo.",
+  NO_SE_PUDO_GUARDAR_LA_PREPARACION: "No se pudo guardar la preparación de la jornada.",
   EL_PERIODO_SELECCIONADO_NO_ES_VALIDO: "El período seleccionado no es válido.",
   NO_SE_PUDO_CONSULTAR_EL_REGISTRO_DE_MODULOS: "No se pudo consultar el registro de módulos",
   NO_ENCONTRAMOS_ESA_PLANILLA: "No encontramos esa planilla",

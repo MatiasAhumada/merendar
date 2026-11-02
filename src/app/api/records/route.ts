@@ -5,6 +5,7 @@ import { DELIVERY_ERROR_MESSAGES } from "@/constants/delivery.constant";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { requireRecordReadAccess } from "@/server/services/record-access";
+import { hasEffectiveCapability } from "@/server/services/access-policy.service";
 import { getRecordWorkbench } from "@/server/services/record.service";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 
@@ -14,7 +15,8 @@ const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 
 export async function GET(request: NextRequest) {
   try {
-    await requireRecordReadAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
+    const user = await requireRecordReadAccess(request.cookies.get(AUTH.SESSION_COOKIE)?.value);
+    const canReadInventory = await hasEffectiveCapability(user.role, "merchandise.read");
     const periodId = request.nextUrl.searchParams.get("periodId");
     const includePeriodDetails = request.nextUrl.searchParams.get("includePeriodDetails") === "true";
 
@@ -22,7 +24,7 @@ export async function GET(request: NextRequest) {
       throw new ApiError({ status: 400, message: DELIVERY_ERROR_MESSAGES.EL_PERIODO_SELECCIONADO_NO_ES_VALIDO });
     }
 
-    const workbench = await getRecordWorkbench(periodId ?? undefined, includePeriodDetails);
+    const workbench = await getRecordWorkbench(periodId ?? undefined, includePeriodDetails, canReadInventory);
     return NextResponse.json(workbench, { headers: privateHeaders });
   } catch (error) {
     let apiError = new ApiError({ status: 500, message: DELIVERY_ERROR_MESSAGES.NO_SE_PUDO_CONSULTAR_EL_REGISTRO_DE_MODULOS, isOperational: false });

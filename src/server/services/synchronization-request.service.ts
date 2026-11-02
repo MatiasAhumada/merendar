@@ -4,7 +4,7 @@ import { CAPABILITY_BY_SYNC_RESOURCE, PRISMA_RESOURCE_BY_CLIENT_RESOURCE } from 
 import { createSynchronizationHandlers, synchronizationService } from "@/server/services/synchronization.service";
 import { familyDeactivationTargetSchema, familyMemberChangeSchema, familyPayloadSchema } from "@/schemas/family.schema";
 import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
-import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
+import { beneficiarySheetDraftSchema, distributionPreparationPayloadSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
 import { renditionSynchronizationPayloadSchema } from "@/schemas/rendition.schema";
 import { RenditionDocumentError } from "@/server/services/rendition-synchronization.service";
 import { RecordSynchronizationError } from "@/server/services/record-synchronization.service";
@@ -145,15 +145,20 @@ export async function processSynchronizationRequest(
     parsedOperation.data.payload = normalizedPayload;
   }
 
+  let requiresMerchandiseRead = false;
   if (parsedOperation.data.resource === "records") {
     const validBaseVersion = nullableSchema.safeParse(parsedOperation.data.baseVersion);
     const parsedRecordPayload = distributionRecordPayloadSchema.safeParse(parsedOperation.data.payload);
     const parsedSheetDraft = beneficiarySheetDraftSchema.safeParse(parsedOperation.data.payload);
+    const parsedPreparation = distributionPreparationPayloadSchema.safeParse(parsedOperation.data.payload);
 
     if (parsedRecordPayload.success && parsedRecordPayload.data.id === parsedOperation.data.resourceId) {
       parsedOperation.data.payload = parsedRecordPayload.data;
     } else if (parsedSheetDraft.success && parsedSheetDraft.data.id === parsedOperation.data.resourceId) {
       parsedOperation.data.payload = parsedSheetDraft.data;
+    } else if (parsedPreparation.success && parsedPreparation.data.id === parsedOperation.data.resourceId) {
+      parsedOperation.data.payload = parsedPreparation.data;
+      requiresMerchandiseRead = true;
     } else {
       return errorResult(400, "invalid_record_operation", OFFLINE_OPERATION_MESSAGES.REVISA_EL_REGISTRO_O_LA_PLANILLA_LOCAL_ANTES_DE_SINCRONIZAR);
     }
@@ -196,6 +201,10 @@ export async function processSynchronizationRequest(
   const capabilityAllowed = await hasEffectiveCapability(userRole, ACCESS_CAPABILITY_KEYS[requiredCapability]);
 
   if (!capabilityAllowed) {
+    return errorResult(403, "permission_revoked", OFFLINE_OPERATION_MESSAGES.LA_CUENTA_YA_NO_TIENE_PERMISO_PARA_SINCRONIZAR_ESTE_CAMBIO);
+  }
+
+  if (requiresMerchandiseRead && !await hasEffectiveCapability(userRole, "merchandise.read")) {
     return errorResult(403, "permission_revoked", OFFLINE_OPERATION_MESSAGES.LA_CUENTA_YA_NO_TIENE_PERMISO_PARA_SINCRONIZAR_ESTE_CAMBIO);
   }
 

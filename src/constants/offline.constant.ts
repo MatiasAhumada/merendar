@@ -46,7 +46,7 @@ export const OFFLINE_PREPARATION = {
 } as const;
 
 export const OFFLINE_SERVICE_WORKER = {
-  CACHE_NAME: "merendar-public-v8",
+  CACHE_NAME: "merendar-public-v9",
   CANONICAL_ROUTES: OFFLINE_PREPARATION.ROUTES,
   PUBLIC_ASSETS: [
     "/icon-192.png",

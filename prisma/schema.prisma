@@ -29,6 +29,7 @@ model User {
   updatedMerchandiseRequestProfiles MerchandiseRequestDocumentProfile[] @relation("MerchandiseRequestDocumentProfileUpdater")
   merchandiseCycles               MerchandiseCycle[]        @relation("MerchandiseCycleCreator")
   distributionEvents              DistributionEvent[]       @relation("DistributionEventCreator")
+  distributionAllocations         DistributionAllocation[]  @relation("DistributionAllocationCreator")
   familyDeliveries                FamilyDelivery[]          @relation("FamilyDeliveryRecorder")
   distributionParticipants        DistributionParticipant[] @relation("DistributionParticipantRecorder")
   distributionRecords             DistributionRecord[]      @relation("DistributionRecordCreator")
@@ -54,6 +55,7 @@ model Family {
   members           FamilyMember[]
   operations        FamilyOperation[]
   familyDeliveries  FamilyDelivery[]
+  allocations       DistributionAllocation[]
   referencePerson   Person?           @relation("FamilyReference", fields: [referencePersonId], references: [id], onDelete: SetNull)
   createdBy         User              @relation(fields: [createdById], references: [id], onDelete: Restrict)
   deactivatedAt     DateTime?
@@ -369,6 +371,7 @@ model MerchandiseRemittance {
   createdBy          User                     @relation("MerchandiseRemittanceCreator", fields: [createdById], references: [id], onDelete: Restrict)
   documents          MerchandiseDocument[]
   items              MerchandiseReceiptItem[]
+  distributionAllocations DistributionAllocation[]
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 
@@ -436,6 +439,7 @@ model MerchandiseCycle {
 
 model DistributionEvent {
   id               String            @id @default(cuid())
+  version          Int               @default(1)
   periodId         String
   scheduledAt      DateTime          @db.Date
   location         String
@@ -445,11 +449,32 @@ model DistributionEvent {
   createdById      String
   createdBy        User              @relation("DistributionEventCreator", fields: [createdById], references: [id], onDelete: Restrict)
   familyDeliveries FamilyDelivery[]
+  allocations      DistributionAllocation[]
   renditions       Rendition[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
   @@index([periodId, scheduledAt])
+}
+
+model DistributionAllocation {
+  id             String                @id @default(cuid())
+  eventId        String
+  familyId       String
+  remittanceId   String
+  moduleQuantity Int
+  notes          String?
+  event          DistributionEvent     @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  family         Family                @relation(fields: [familyId], references: [id], onDelete: Restrict)
+  remittance     MerchandiseRemittance @relation(fields: [remittanceId], references: [id], onDelete: Restrict)
+  createdById    String
+  createdBy      User                  @relation("DistributionAllocationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@unique([eventId, familyId, remittanceId])
+  @@index([remittanceId, createdAt])
+  @@index([familyId, createdAt])
 }
 
 model FamilyDelivery {

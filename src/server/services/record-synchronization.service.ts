@@ -2,7 +2,7 @@
 
 import { OFFLINE_OPERATION_MESSAGES, SYNC_SERVER_MESSAGES } from "@/constants/offline.constant";
 import { DELIVERY_ERROR_MESSAGES } from "@/constants/delivery.constant";
-import { beneficiarySheetDraftSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
+import { beneficiarySheetDraftSchema, distributionPreparationPayloadSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
 import { Prisma } from "@prisma/client";
 import { lockFamilyRows } from "@/server/repository/record.repository";
 import { nullableSchema } from "@/schemas/offline.schema";
@@ -79,6 +79,48 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
         resourceVersion: sheet.version,
         result,
       };
+    }
+
+    const parsedPreparation = distributionPreparationPayloadSchema.safeParse(operation.payload);
+    if (parsedPreparation.success && parsedPreparation.data.id === operation.resourceId) {
+      const preparation = parsedPreparation.data;
+      const period = await transaction.merchandisePeriod.findFirst({ where: { id: preparation.periodId, destination: "FAMILIES", status: "VIGENTE" }, select: { id: true } });
+      if (!period) {
+        throw new RecordSynchronizationError("period_not_found", 404, SYNC_SERVER_MESSAGES.EL_PERIODO_YA_NO_ESTA_DISPONIBLE_CONECTATE_Y_ELEGI_OTRO_PERIODO_ANTES_DE_E);
+      }
+
+      const sourceIds = [...new Set(preparation.allocations.map((allocation) => allocation.remittanceId))].sort();
+      await transaction.$queryRaw(Prisma.sql`SELECT "id" FROM "MerchandiseRemittance" WHERE "id" IN (${Prisma.join(sourceIds)}) ORDER BY "id" FOR UPDATE`);
+      for (const sourceId of sourceIds) {
+        const source = await transaction.merchandiseRemittance.findFirst({ where: { id: sourceId, request: { periodId: preparation.periodId, period: { destination: "FAMILIES" } }, status: "VIGENTE" }, select: { receivedQuantity: true } });
+        const newQuantity = preparation.allocations.filter((allocation) => allocation.remittanceId === sourceId).reduce((total, allocation) => total + allocation.moduleQuantity, 0);
+        const allocationTotal = await transaction.distributionAllocation.aggregate({ where: { remittanceId: sourceId }, _sum: { moduleQuantity: true } });
+        const alreadyAllocated = allocationTotal._sum.moduleQuantity ?? 0;
+        if (!source || !Number.isInteger(source.receivedQuantity.toNumber()) || alreadyAllocated + newQuantity > source.receivedQuantity.toNumber()) {
+          throw new RecordSynchronizationError("period_not_found", 400, DELIVERY_ERROR_MESSAGES.ASIGNACION_SUPERA_MODULOS_DISPONIBLES);
+        }
+      }
+
+      const familyIds = [...new Set(preparation.allocations.map((allocation) => allocation.familyId))];
+      const activeFamilies = await transaction.family.findMany({ where: { id: { in: familyIds }, deactivatedAt: null }, select: { id: true } });
+      if (activeFamilies.length !== familyIds.length) {
+        throw new RecordSynchronizationError("beneficiary_not_in_roster", 400, DELIVERY_ERROR_MESSAGES.LA_FAMILIA_SELECCIONADA_NO_ESTA_ACTIVA);
+      }
+
+      const event = await transaction.distributionEvent.create({
+        data: {
+          id: preparation.id,
+          periodId: preparation.periodId,
+          scheduledAt: new Date(`${preparation.scheduledAt}T00:00:00.000Z`),
+          location: preparation.location,
+          responsibleNames: preparation.responsibleNames,
+          notes: preparation.notes,
+          createdById: operation.userId,
+          allocations: { create: preparation.allocations.map((allocation) => ({ ...allocation, createdById: operation.userId })) },
+        },
+        select: { id: true, allocations: { select: { id: true } } },
+      });
+      return { type: "synchronized", resourceVersion: 1, result: { resourceId: event.id, allocations: event.allocations.length } };
     }
 
     const parsedPayload = distributionRecordPayloadSchema.safeParse(operation.payload);
