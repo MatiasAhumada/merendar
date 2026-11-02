@@ -23,6 +23,12 @@ export class RenditionDocumentError extends Error {
   }
 }
 
+function copyPdfBytes(content: Uint8Array): Uint8Array<ArrayBuffer> {
+  const copiedContent = new Uint8Array(new ArrayBuffer(content.byteLength));
+  copiedContent.set(content);
+  return copiedContent;
+}
+
 async function applyReview(
   transaction: Prisma.TransactionClient,
   operation: SubmittedSyncOperation,
@@ -69,8 +75,20 @@ async function applyReview(
   };
 }
 
-function decodePdfDocument(originalName: string, contentBase64: string) {
-  const content = Buffer.from(contentBase64, "base64");
+function decodePdfDocument(document: RenditionDocumentPayload["documents"][number], attachments: ReadonlyMap<string, Uint8Array>) {
+  let attachedContent: Uint8Array | undefined;
+  if (document.attachmentId) {
+    attachedContent = attachments.get(document.attachmentId);
+  }
+  if (document.attachmentId && !attachedContent) {
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.EL_CONTENIDO_NO_ES_UN_PDF_VALIDO_REVISA_QUE_EL_ARCHIVO_SE_HAYA_EXPORTADO_C);
+  }
+  let content: Buffer;
+  if (attachedContent) {
+    content = Buffer.from(attachedContent);
+  } else {
+    content = Buffer.from(document.contentBase64, "base64");
+  }
 
   if (!content.length || content.length > RENDITION_LIMITS.MAX_DOCUMENT_BYTES) {
     throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.CADA_PDF_DEBE_PESAR_HASTA_512_KIB_Y_NO_PUEDE_ESTAR_VACIO);
@@ -83,11 +101,11 @@ function decodePdfDocument(originalName: string, contentBase64: string) {
     throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.EL_CONTENIDO_NO_ES_UN_PDF_VALIDO_REVISA_QUE_EL_ARCHIVO_SE_HAYA_EXPORTADO_C);
   }
 
-  if (!originalName.toLowerCase().endsWith(".pdf")) {
+  if (!document.originalName.toLowerCase().endsWith(".pdf")) {
     throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PLANILLA_Y_SUS_RESPALDOS_DEBEN_SER_ARCHIVOS_PDF);
   }
 
-  return { content, byteSize: content.length, contentType: HTTP_CONTENT_TYPES.PDF };
+  return { content: copyPdfBytes(content), byteSize: content.length, contentType: HTTP_CONTENT_TYPES.PDF };
 }
 
 async function applyDocuments(
@@ -138,7 +156,7 @@ async function applyDocuments(
     }
 
     const nextVersion = storedDocuments.filter((candidate) => candidate.documentType === document.type).length + 1;
-    const decoded = decodePdfDocument(document.originalName, document.contentBase64);
+    const decoded = decodePdfDocument(document, operation.attachments ?? new Map());
     const createdDocument = await transaction.renditionDocument.create({
       data: {
         id: document.id,
@@ -193,7 +211,19 @@ async function applySubmission(
 
   let evidenceDocumentId: string | null = null;
   if (payload.evidenceDocument) {
-    const content = Buffer.from(payload.evidenceDocument.contentBase64, "base64");
+    let attachedContent: Uint8Array | undefined;
+    if (payload.evidenceDocument.attachmentId) {
+      attachedContent = operation.attachments?.get(payload.evidenceDocument.attachmentId);
+    }
+    if (payload.evidenceDocument.attachmentId && !attachedContent) {
+      throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.EL_CONTENIDO_NO_ES_UN_PDF_VALIDO_REVISA_QUE_EL_ARCHIVO_SE_HAYA_EXPORTADO_C);
+    }
+    let content: Buffer;
+    if (attachedContent) {
+      content = Buffer.from(attachedContent);
+    } else {
+      content = Buffer.from(payload.evidenceDocument.contentBase64, "base64");
+    }
     const footer = content.subarray(Math.max(0, content.length - 1024)).toString("latin1");
     const validPdf = content.subarray(0, 5).toString("ascii") === "%PDF-" && footer.includes("%%EOF");
     const validSize = content.length > 0 && content.length <= RENDITION_LIMITS.MAX_DOCUMENT_BYTES;
@@ -217,7 +247,7 @@ async function applySubmission(
         originalName: payload.evidenceDocument.originalName,
         contentType: HTTP_CONTENT_TYPES.PDF,
         byteSize: content.byteLength,
-        content,
+        content: copyPdfBytes(content),
         uploadedById: operation.userId,
       },
       select: { id: true },

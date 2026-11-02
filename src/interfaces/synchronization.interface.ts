@@ -5,6 +5,7 @@ import type { JsonObject, JsonValue } from "@/types/json-value";
 export interface SubmittedSyncOperation extends OfflineOperationInput {
   operationId: string;
   userId: string;
+  attachments?: ReadonlyMap<string, Uint8Array>;
 }
 
 export type SyncHandlerResult =

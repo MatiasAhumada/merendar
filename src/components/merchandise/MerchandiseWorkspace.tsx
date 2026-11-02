@@ -1,7 +1,7 @@
 "use client";
 
 import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
-import { MERCHANDISE_ERROR_MESSAGES, MERCHANDISE_UI_TEXT } from "@/constants/merchandise.constant";
+import { MERCHANDISE_ERROR_MESSAGES, MERCHANDISE_UI_TEXT, MERCHANDISE_VALIDATION_MESSAGES } from "@/constants/merchandise.constant";
 import { DASHBOARD_UI_TEXT } from "@/constants/dashboard.constant";
 import { COMMON_UI_TEXT } from "@/constants/common-ui.constant";
 import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
@@ -141,7 +141,7 @@ async function encodeDocument(file: File | undefined) {
   }
 
   if (!file.size || file.size > RENDITION_LIMITS.MAX_DOCUMENT_BYTES) {
-    throw new Error(MERCHANDISE_ERROR_MESSAGES.EL_COMPROBANTE_DEBE_PESAR_HASTA_512_KIB);
+    throw new Error(MERCHANDISE_VALIDATION_MESSAGES.PDF_SIZE_LIMIT);
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());

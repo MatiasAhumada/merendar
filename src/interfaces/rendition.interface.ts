@@ -42,7 +42,7 @@ export interface RenditionSubmissionOperationPayload {
   recipient: string;
   externalReference?: string;
   notes?: string;
-  evidenceDocument?: { id: string; originalName: string; contentBase64: string };
+  evidenceDocument?: { id: string; originalName: string; contentBase64: string; attachmentId?: string; byteSize?: number; checksum?: string };
 }
 
 export interface RenditionEmissionOperationPayload {

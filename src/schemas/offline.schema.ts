@@ -79,6 +79,7 @@ export const offlineOperationSchema = z.object({
   baseVersion: nonNegativeIntegerSchema.nullable(),
   dependencies: z.array(z.uuid()),
   payload: jsonValueSchema,
+  attachmentIds: z.array(z.uuid()).default([]),
   createdAt: z.iso.datetime(),
   status: z.enum(["pending", "syncing", "synced", "error", "conflict"]),
   attempts: nonNegativeIntegerSchema,

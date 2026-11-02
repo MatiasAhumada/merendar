@@ -40,6 +40,7 @@ export async function processSynchronizationRequest(
   userId: string,
   userRole: UserRole,
   body: unknown,
+  attachments: ReadonlyMap<string, Uint8Array> = new Map(),
 ): Promise<SynchronizationRequestResult> {
   const parsedOperation = synchronizationRequestSchema.safeParse(body);
 
@@ -220,6 +221,7 @@ export async function processSynchronizationRequest(
     baseVersion: parsedOperation.data.baseVersion,
     dependencies: parsedOperation.data.dependencies,
     payload: parsedOperation.data.payload,
+    attachments,
   };
 
   try {

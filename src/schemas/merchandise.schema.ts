@@ -5,11 +5,23 @@ import { MERCHANDISE_LIMITS, MERCHANDISE_VALIDATION_MESSAGES } from "@/constants
 import { merchandiseRequestDocumentSnapshotSchema } from "@/schemas/merchandise-request-document.schema";
 import { merchandiseRequestDocumentPayloadSchema } from "@/schemas/merchandise-request-document.schema";
 
-const documentSchema = z.object({
+const documentMetadataSchema = z.object({
   originalName: z.string().trim().min(1).max(MERCHANDISE_LIMITS.DOCUMENT_NAME_MAX_LENGTH).refine((name) => name.toLowerCase().endsWith(".pdf"), MERCHANDISE_VALIDATION_MESSAGES.PDF_REQUIRED),
   contentType: z.literal(HTTP_CONTENT_TYPES.PDF),
-  contentBase64: z.string().max(700_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+}).strict();
+
+export const merchandiseDocumentSchema = documentMetadataSchema.extend({
+  contentBase64: z.string().max(2_800_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+  attachmentId: z.uuid().optional(),
+  byteSize: z.number().int().positive().optional(),
+  checksum: z.string().regex(/^[a-f0-9]{64}$/).optional(),
 }).strict().superRefine((document, context) => {
+  if (document.attachmentId && document.byteSize) {
+    if (document.byteSize > RENDITION_LIMITS.MAX_DOCUMENT_BYTES || !document.checksum) {
+      context.addIssue({ code: "custom", message: MERCHANDISE_VALIDATION_MESSAGES.PDF_SIZE_LIMIT, path: ["byteSize"] });
+    }
+    return;
+  }
   let paddingLength = 0;
 
   if (document.contentBase64.endsWith("==")) {
@@ -51,7 +63,7 @@ const requestPayloadSchema = z.object({
     requestedQuantity: z.number().positive().max(100_000),
   }).strict().optional(),
   notes: z.string().trim().max(1000).optional(),
-  document: documentSchema.optional(),
+  document: merchandiseDocumentSchema.optional(),
 }).strict().refine((request) => !request.item || request.item.requestedQuantity === request.requestedQuantity, {
   message: "La cantidad debe coincidir con el renglón del producto.",
   path: ["item", "requestedQuantity"],
@@ -67,7 +79,7 @@ const quotaPayloadSchema = z.object({
   authorizedRecipient: z.string().trim().max(MERCHANDISE_LIMITS.RESPONSIBLE_NAME_MAX_LENGTH).optional(),
   authorizationValidUntil: z.iso.date().optional(),
   notes: z.string().trim().max(1000).optional(),
-  document: documentSchema.optional(),
+  document: merchandiseDocumentSchema.optional(),
 }).strict();
 
 const remittancePayloadSchema = z.object({
@@ -80,7 +92,7 @@ const remittancePayloadSchema = z.object({
   receivedQuantity: z.number().positive().max(100_000),
   responsibleName: z.string().trim().min(MERCHANDISE_LIMITS.RESPONSIBLE_NAME_MIN_LENGTH, MERCHANDISE_VALIDATION_MESSAGES.RESPONSIBLE_REQUIRED).max(MERCHANDISE_LIMITS.RESPONSIBLE_NAME_MAX_LENGTH),
   notes: z.string().trim().max(1000).optional(),
-  document: documentSchema.optional(),
+  document: merchandiseDocumentSchema.optional(),
 }).strict();
 
 export const merchandisePayloadSchema = z.discriminatedUnion("kind", [

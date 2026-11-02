@@ -22,6 +22,8 @@ interface DocumentInput {
   originalName: string;
   contentType: PdfContentType;
   contentBase64: string;
+  attachmentId?: string;
+  byteSize?: number;
 }
 
 export class MerchandiseDocumentError extends Error {
@@ -39,15 +41,33 @@ function optionalDate(value: string | undefined) {
   return new Date(value);
 }
 
-function decodeDocument(document: DocumentInput | undefined) {
+function copyPdfBytes(content: Uint8Array): Uint8Array<ArrayBuffer> {
+  const copiedContent = new Uint8Array(new ArrayBuffer(content.byteLength));
+  copiedContent.set(content);
+  return copiedContent;
+}
+
+function decodeDocument(document: DocumentInput | undefined, attachments: ReadonlyMap<string, Uint8Array>) {
   if (!document) {
     return null;
   }
 
-  const content = Buffer.from(document.contentBase64, "base64");
+  let attachedContent: Uint8Array | undefined;
+  if (document.attachmentId) {
+    attachedContent = attachments.get(document.attachmentId);
+  }
+  if (document.attachmentId && !attachedContent) {
+    throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_ARCHIVO_NO_PARECE_UN_PDF_VALIDO_EL_FORMULARIO_SIGUE_ABIERTO_PARA_CO);
+  }
+  let content: Buffer;
+  if (attachedContent) {
+    content = Buffer.from(attachedContent);
+  } else {
+    content = Buffer.from(document.contentBase64, "base64");
+  }
 
   if (!content.length || content.length > RENDITION_LIMITS.MAX_DOCUMENT_BYTES) {
-    throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_COMPROBANTE_DEBE_PESAR_HASTA_512_KIB);
+    throw new MerchandiseDocumentError(MERCHANDISE_VALIDATION_MESSAGES.PDF_SIZE_LIMIT);
   }
 
   const header = content.subarray(0, 5).toString("ascii");
@@ -58,7 +78,7 @@ function decodeDocument(document: DocumentInput | undefined) {
     throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_CONTENIDO_NO_ES_UN_PDF_VALIDO_REVISA_QUE_SEA_UN_ARCHIVO_PDF_EXPORTADO_C);
   }
 
-  return { content, contentType: document.contentType, byteSize: content.length, originalName: document.originalName };
+  return { content: copyPdfBytes(content), contentType: document.contentType, byteSize: content.length, originalName: document.originalName };
 }
 
 async function storeRequestDocument(
@@ -66,8 +86,9 @@ async function storeRequestDocument(
   payload: Extract<MerchandisePayload, { kind: "request" | "quota" }>,
   userId: string,
   requestId: string,
+  attachments: ReadonlyMap<string, Uint8Array>,
 ) {
-  const document = decodeDocument(payload.document);
+  const document = decodeDocument(payload.document, attachments);
 
   if (!document) {
     return null;
@@ -83,8 +104,9 @@ async function storeRemittanceDocument(
   payload: Extract<MerchandisePayload, { kind: "remittance" }>,
   userId: string,
   remittanceId: string,
+  attachments: ReadonlyMap<string, Uint8Array>,
 ) {
-  const document = decodeDocument(payload.document);
+  const document = decodeDocument(payload.document, attachments);
 
   if (!document) {
     return null;
@@ -168,7 +190,7 @@ async function applyRequest(transaction: Prisma.TransactionClient, operation: Su
       },
     });
   }
-  await storeRequestDocument(transaction, payload, operation.userId, request.id);
+  await storeRequestDocument(transaction, payload, operation.userId, request.id, operation.attachments ?? new Map());
 
   return { type: "synchronized", resourceVersion: 1, result: { resourceId: request.id, kind: "request" } } as const;
 }
@@ -222,7 +244,7 @@ async function applyQuota(transaction: Prisma.TransactionClient, operation: Subm
     });
   }
   await transaction.merchandiseRequest.update({ where: { id: request.id }, data: { status: "APROBADA" } });
-  await storeRequestDocument(transaction, payload, operation.userId, request.id);
+  await storeRequestDocument(transaction, payload, operation.userId, request.id, operation.attachments ?? new Map());
 
   return { type: "synchronized", resourceVersion: 1, result: { resourceId: quota.id, kind: "quota" } } as const;
 }
@@ -284,7 +306,7 @@ async function applyRemittance(transaction: Prisma.TransactionClient, operation:
       data: { remittanceId: remittance.id, quotaItemId: quotaItem.id, receivedQuantity: payload.receivedQuantity },
     });
   }
-  await storeRemittanceDocument(transaction, payload, operation.userId, remittance.id);
+  await storeRemittanceDocument(transaction, payload, operation.userId, remittance.id, operation.attachments ?? new Map());
 
   return { type: "synchronized", resourceVersion: 1, result: { resourceId: remittance.id, kind: "remittance" } } as const;
 }

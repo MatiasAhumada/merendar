@@ -3,6 +3,14 @@ import type { JsonValue } from "@/types/json-value";
 export type SyncResource = "families" | "remittances" | "records" | "renditions";
 export type SyncOperationStatus = "pending" | "syncing" | "synced" | "error" | "conflict";
 
+export interface OfflineAttachmentInput {
+  id: string;
+  originalName: string;
+  contentType: string;
+  checksum: string;
+  content: Blob;
+}
+
 export interface OfflineOperationInput {
   resource: SyncResource;
   resourceId: string;
@@ -10,6 +18,7 @@ export interface OfflineOperationInput {
   baseVersion: number | null;
   dependencies: string[];
   payload: JsonValue;
+  attachmentIds?: string[];
 }
 
 export interface OfflineOperation extends OfflineOperationInput {

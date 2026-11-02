@@ -1,8 +1,8 @@
 export const RENDITION_LIMITS = {
-  MAX_DOCUMENT_BYTES: 512 * 1024,
+  MAX_DOCUMENT_BYTES: 2 * 1024 * 1024,
   MAX_DOCUMENTS_PER_UPLOAD: 5,
   MAX_DOCUMENTS_PER_RENDITION: 20,
-  MAX_UPLOAD_BYTES: 700_000,
+  MAX_UPLOAD_BYTES: 8 * 1024 * 1024,
   MAX_FILENAME_LENGTH: 180,
 } as const;
 
@@ -20,7 +20,7 @@ export const RENDITION_DOCUMENT_LABELS = {
 
 export const RENDITION_VALIDATION_MESSAGES = {
   PDF_EXTENSION_INVALID: "El archivo debe tener extensión PDF.",
-  UPLOAD_TOO_LARGE: "La selección supera el máximo de carga de 700 KiB.",
+  UPLOAD_TOO_LARGE: "La selección supera el máximo de carga de 8 MiB.",
   DUPLICATE_DOCUMENT_ID: "Cada archivo debe tener un identificador único.",
   REVIEW_NOTES_REQUIRED: "Indicá qué documentación debe corregirse.",
 } as const;
@@ -92,7 +92,7 @@ export const RENDITION_UI_TEXT = {
   V: " · v",
   LA_VERSION_ANTERIOR_SE_CONSERVA_Y_QUEDA_VINCULADA_A_LA_CORRECCION: "La versión anterior se conserva y queda vinculada a la corrección.",
   ARCHIVOS_PDF: "Archivos PDF",
-  PDF_DE_VARIAS_PAGINAS_PERMITIDO_MAXIMO_512_KIB_POR_ARCHIVO_Y_5_ARCHIVOS: "PDF de varias páginas permitido · máximo 512 KiB por archivo y 5 archivos por carga. No se toman fotos ni se capturan firmas en pantalla.",
+  PDF_DE_VARIAS_PAGINAS_PERMITIDO_MAXIMO_512_KIB_POR_ARCHIVO_Y_5_ARCHIVOS: "PDF de varias páginas permitido · máximo 2 MiB por archivo y 8 MiB por carga. No se toman fotos ni se capturan firmas en pantalla.",
   SELECCIONADOS: "Seleccionados: ",
   NO_SE_CONFIRMO_LA_CARGA: "No se confirmó la carga",
   DOCUMENTACION_RECIBIDA: "Documentación recibida",
@@ -135,7 +135,7 @@ export const RENDITION_ERROR_MESSAGES = {
   REVISA_LOS_DATOS_DE_LA_REVISION: "Revisá los datos de la revisión.",
   NO_SE_PUDO_REGISTRAR_LA_REVISION_DOCUMENTAL: "No se pudo registrar la revisión documental.",
   NO_SE_PUDO_CONSULTAR_EL_DOCUMENTO: "No se pudo consultar el documento.",
-  CADA_PDF_DEBE_PESAR_HASTA_512_KIB_Y_NO_PUEDE_ESTAR_VACIO: "Cada PDF debe pesar hasta 512 KiB y no puede estar vacío.",
+  CADA_PDF_DEBE_PESAR_HASTA_512_KIB_Y_NO_PUEDE_ESTAR_VACIO: "Cada PDF debe pesar hasta 2 MiB y no puede estar vacío.",
   EL_CONTENIDO_NO_ES_UN_PDF_VALIDO_REVISA_QUE_EL_ARCHIVO_SE_HAYA_EXPORTADO_C: "El contenido no es un PDF válido. Revisá que el archivo se haya exportado correctamente.",
   LA_PLANILLA_Y_SUS_RESPALDOS_DEBEN_SER_ARCHIVOS_PDF: "La planilla y sus respaldos deben ser archivos PDF.",
   LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP: "La planilla emitida no pertenece al período seleccionado o ya no está disponible.",

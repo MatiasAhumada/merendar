@@ -54,8 +54,9 @@ export const renditionSubmissionPayloadSchema = z.object({
   evidenceDocument: z.object({
     id: z.uuid(),
     originalName: z.string().trim().min(1).max(RENDITION_LIMITS.MAX_FILENAME_LENGTH),
-    contentBase64: z.string().max(1_000_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
-  }).optional(),
+    contentBase64: z.string().max(2_800_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+    attachmentId: z.uuid().optional(), byteSize: z.number().int().positive().optional(), checksum: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  }).strict().optional(),
 }).strict();
 
 export const renditionSubmissionOperationPayloadSchema = z.object({
@@ -66,13 +67,24 @@ export const renditionSubmissionOperationPayloadSchema = z.object({
   ...renditionSubmissionPayloadSchema.shape,
 }).strict();
 
-const documentSchema = z.object({
+const documentMetadataSchema = z.object({
   id: z.string().trim().min(1).max(80),
   type: renditionDocumentTypeSchema,
   supersedesId: z.string().trim().min(1).max(80).optional(),
   originalName: z.string().trim().min(1).max(RENDITION_LIMITS.MAX_FILENAME_LENGTH).refine((name) => name.toLowerCase().endsWith(".pdf"), RENDITION_VALIDATION_MESSAGES.PDF_EXTENSION_INVALID),
   contentType: z.literal(HTTP_CONTENT_TYPES.PDF),
-  contentBase64: z.string().max(1_000_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+});
+export const renditionDocumentFileSchema = documentMetadataSchema.extend({
+  contentBase64: z.string().max(2_800_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+  attachmentId: z.uuid().optional(), byteSize: z.number().int().positive().optional(), checksum: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).strict().superRefine((document, context) => {
+  let documentBytes = Math.floor(document.contentBase64.length * 3 / 4);
+  if (document.contentBase64.endsWith("==")) documentBytes -= 2;
+  else if (document.contentBase64.endsWith("=")) documentBytes -= 1;
+  if (document.attachmentId) documentBytes = document.byteSize ?? 0;
+  if (documentBytes > RENDITION_LIMITS.MAX_DOCUMENT_BYTES) {
+    context.addIssue({ code: "custom", message: RENDITION_VALIDATION_MESSAGES.UPLOAD_TOO_LARGE, path: ["byteSize"] });
+  }
 });
 
 
@@ -81,9 +93,17 @@ export const renditionDocumentPayloadSchema = z.object({
   id: z.string().trim().min(1).max(80),
   periodId: z.string().trim().min(1).max(80),
   beneficiarySheetId: z.string().trim().min(1).max(80),
-  documents: z.array(documentSchema).min(1).max(RENDITION_LIMITS.MAX_DOCUMENTS_PER_UPLOAD),
+  documents: z.array(renditionDocumentFileSchema).min(1).max(RENDITION_LIMITS.MAX_DOCUMENTS_PER_UPLOAD),
 }).strict().superRefine((payload, context) => {
-  const totalBytes = payload.documents.reduce((total, document) => total + Math.ceil(document.contentBase64.length * 3 / 4), 0);
+  const totalBytes = payload.documents.reduce((total, document) => {
+    if (!document.attachmentId) {
+      let paddingLength = 0;
+      if (document.contentBase64.endsWith("==")) paddingLength = 2;
+      else if (document.contentBase64.endsWith("=")) paddingLength = 1;
+      return total + Math.floor(document.contentBase64.length * 3 / 4) - paddingLength;
+    }
+    return total + (document.byteSize ?? 0);
+  }, 0);
 
   if (totalBytes > RENDITION_LIMITS.MAX_UPLOAD_BYTES) {
     context.addIssue({ code: "custom", message: RENDITION_VALIDATION_MESSAGES.UPLOAD_TOO_LARGE, path: ["documents"] });

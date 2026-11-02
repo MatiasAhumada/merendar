@@ -12,7 +12,7 @@ Las firmas son manuscritas en el papel. La app no captura, valida ni guarda traz
 
 ## Rendición documental
 
-Cada planilla emitida puede tener una rendición asociada por su versión inmutable. Los PDF de planillas firmadas, remitos y respaldos se guardan en `RenditionDocument`, fuera de recursos públicos. La carga admite hasta cinco archivos PDF por envío, 512 KiB por archivo, 700 KiB por envío y veinte documentos por rendición; estos límites están centralizados en `src/constants/rendition.constant.ts`. La API verifica extensión, MIME declarado, firma `%PDF-` y marcador final `%%EOF` antes de persistir.
+Cada planilla emitida puede tener una rendición asociada por su versión inmutable. Los PDF de planillas firmadas, remitos y respaldos se guardan en `RenditionDocument`, fuera de recursos públicos, en PostgreSQL. La carga admite hasta cinco archivos PDF por envío, 2 MiB por archivo, 8 MiB por envío y veinte documentos por rendición; estos límites están centralizados en `src/constants/rendition.constant.ts`. La API verifica extensión, MIME declarado, firma `%PDF-` y marcador final `%%EOF` antes de persistir. La persistencia en R2 no está implementada ni forma parte del alcance de COD-1541.
 
 Una corrección selecciona el documento anterior explícitamente; ambas versiones permanecen disponibles y la nueva carga vuelve la rendición al estado pendiente de revisión. La previsualización y descarga requieren una sesión autorizada y respuestas `private, no-store`. Solo presidencia y secretaría conservan las funciones confirmadas para registrar y revisar documentación mientras COD-1454/COD-1456 no definan una matriz aprobada.
 

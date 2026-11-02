@@ -15,8 +15,8 @@ import { synchronizationService } from "@/server/services/synchronization.servic
 import type { JsonValue } from "@/types/json-value";
 import { merchandisePayloadSchema } from "@/schemas/merchandise.schema";
 
-test("merchandise document policy accepts valid PDFs up to 512 KiB and rejects images or larger files", () => {
-  const validPdf = Buffer.alloc(512 * 1024, 32);
+test("merchandise document policy accepts valid PDFs up to 2 MiB and rejects images or larger files", () => {
+  const validPdf = Buffer.alloc(2 * 1024 * 1024, 32);
   validPdf.write("%PDF-1.7", 0, "ascii");
   validPdf.write("%%EOF", validPdf.length - 5, "ascii");
   const basePayload = {
@@ -100,6 +100,7 @@ test("merchandise periods, requests, quotas, remittances and private documents p
   const supplyRemittanceId = randomUUID();
   const secondSupplyRemittanceId = randomUUID();
   let apiPeriodId = "";
+  let uploadedRequestId = "";
   let unauthorizedUserId = "";
   const pdfContent = Buffer.from("%PDF-1.7 test document\n%%EOF").toString("base64");
   const periodOperation = createOperation(user.id, periodId, {
@@ -314,6 +315,127 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     });
     const apiPeriodResponse = await postSynchronization(createRequest(apiPeriodOperation, token));
     assert.equal(apiPeriodResponse.status, 200);
+
+    const uploadedRemittanceId = randomUUID();
+    const attachmentId = randomUUID();
+    const uploadedPdf = Buffer.alloc(924_622, 32);
+    uploadedPdf.write("%PDF-1.7", 0, "ascii");
+    uploadedPdf.write("%%EOF", uploadedPdf.length - 5, "ascii");
+    const attachmentChecksum = createHash("sha256").update(uploadedPdf).digest("hex");
+    const uploadedOperation = createOperation(user.id, uploadedRemittanceId, {
+      kind: "remittance",
+      id: uploadedRemittanceId,
+      requestId,
+      quotaId,
+      remittanceNumber: `REM-UPLOAD-${suffix}`,
+      receivedAt: "2026-10-06",
+      receivedQuantity: 1,
+      responsibleName: "Synthetic Browser QA",
+      document: {
+        originalName: "S5-synthetic.pdf",
+        contentType: "application/pdf",
+        contentBase64: "",
+        attachmentId,
+        byteSize: uploadedPdf.byteLength,
+        checksum: attachmentChecksum,
+      },
+    }, [requestOperation.operationId, quotaOperation.operationId]);
+    async function submitMultipartOperation() {
+      const formData = new FormData();
+      formData.append("operation", JSON.stringify(uploadedOperation));
+      formData.append(`attachment:${attachmentId}`, new Blob([uploadedPdf], { type: "application/pdf" }), "S5-synthetic.pdf");
+      return await postSynchronization(new NextRequest("http://localhost:3000/api/synchronizations", {
+        method: "POST",
+        headers: {
+          origin: "http://localhost:3000",
+          host: "localhost:3000",
+          cookie: `${AUTH.SESSION_COOKIE}=${token}`,
+        },
+        body: formData,
+      }));
+    }
+    const uploadedResponse = await submitMultipartOperation();
+    assert.equal(uploadedResponse.status, 200);
+    const uploadedReplayResponse = await submitMultipartOperation();
+    assert.equal(uploadedReplayResponse.status, 200);
+    const uploadedDocument = await prisma.merchandiseDocument.findFirstOrThrow({ where: { remittanceId: uploadedRemittanceId } });
+    assert.equal(uploadedDocument.content.byteLength, 924_622);
+    assert.equal(createHash("sha256").update(uploadedDocument.content).digest("hex"), attachmentChecksum);
+    assert.equal(await prisma.merchandiseRemittance.count({ where: { id: uploadedRemittanceId } }), 1);
+
+    uploadedRequestId = randomUUID();
+    const uploadedRequestAttachmentId = randomUUID();
+    const uploadedRequestOperation = createOperation(user.id, uploadedRequestId, {
+      kind: "request",
+      id: uploadedRequestId,
+      periodId: apiPeriodId,
+      requestNumber: `REQ-UPLOAD-${suffix}`,
+      requestedAt: "2026-10-06",
+      requestedQuantity: 1,
+      document: {
+        originalName: "S5-request-synthetic.pdf",
+        contentType: "application/pdf",
+        contentBase64: "",
+        attachmentId: uploadedRequestAttachmentId,
+        byteSize: uploadedPdf.byteLength,
+        checksum: attachmentChecksum,
+      },
+    }, [apiPeriodOperation.operationId]);
+    async function submitMultipartRequestOperation() {
+      const formData = new FormData();
+      formData.append("operation", JSON.stringify(uploadedRequestOperation));
+      formData.append(`attachment:${uploadedRequestAttachmentId}`, new Blob([uploadedPdf], { type: "application/pdf" }), "S5-request-synthetic.pdf");
+      return await postSynchronization(new NextRequest("http://localhost:3000/api/synchronizations", {
+        method: "POST",
+        headers: {
+          origin: "http://localhost:3000",
+          host: "localhost:3000",
+          cookie: `${AUTH.SESSION_COOKIE}=${token}`,
+        },
+        body: formData,
+      }));
+    }
+    const uploadedRequestResponse = await submitMultipartRequestOperation();
+    assert.equal(uploadedRequestResponse.status, 200);
+    assert.equal((await submitMultipartRequestOperation()).status, 200);
+    const uploadedRequestDocument = await prisma.merchandiseDocument.findFirstOrThrow({ where: { requestId: uploadedRequestId } });
+    assert.equal(uploadedRequestDocument.content.byteLength, uploadedPdf.byteLength);
+    assert.equal(createHash("sha256").update(uploadedRequestDocument.content).digest("hex"), attachmentChecksum);
+    assert.equal(await prisma.merchandiseRequest.count({ where: { id: uploadedRequestId } }), 1);
+
+    const corruptedRequestId = randomUUID();
+    const corruptedAttachmentId = randomUUID();
+    const corruptedRequestOperation = createOperation(user.id, corruptedRequestId, {
+      kind: "request",
+      id: corruptedRequestId,
+      periodId: apiPeriodId,
+      requestNumber: `REQ-CORRUPTED-${suffix}`,
+      requestedAt: "2026-10-06",
+      requestedQuantity: 1,
+      document: {
+        originalName: "S5-corrupted-synthetic.pdf",
+        contentType: "application/pdf",
+        contentBase64: "",
+        attachmentId: corruptedAttachmentId,
+        byteSize: uploadedPdf.byteLength,
+        checksum: "0".repeat(64),
+      },
+    }, [apiPeriodOperation.operationId]);
+    const corruptedFormData = new FormData();
+    corruptedFormData.append("operation", JSON.stringify(corruptedRequestOperation));
+    corruptedFormData.append(`attachment:${corruptedAttachmentId}`, new Blob([uploadedPdf], { type: "application/pdf" }), "S5-corrupted-synthetic.pdf");
+    const corruptedResponse = await postSynchronization(new NextRequest("http://localhost:3000/api/synchronizations", {
+      method: "POST",
+      headers: {
+        origin: "http://localhost:3000",
+        host: "localhost:3000",
+        cookie: `${AUTH.SESSION_COOKIE}=${token}`,
+      },
+      body: corruptedFormData,
+    }));
+    assert.equal(corruptedResponse.status, 400);
+    assert.equal(await prisma.merchandiseRequest.count({ where: { id: corruptedRequestId } }), 0);
+
     const savedDocument = await prisma.merchandiseDocument.findFirst({ where: { remittanceId }, select: { id: true } });
     assert.ok(savedDocument);
     const downloadResponse = await getPrivateDocument(
@@ -367,6 +489,9 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     await prisma.merchandiseRemittance.deleteMany({ where: { requestId } });
     await prisma.merchandiseQuota.deleteMany({ where: { requestId } });
     await prisma.merchandiseRequest.deleteMany({ where: { id: requestId } });
+    if (uploadedRequestId) {
+      await prisma.merchandiseRequest.deleteMany({ where: { id: uploadedRequestId } });
+    }
     await prisma.merchandisePeriod.deleteMany({ where: { id: periodId } });
     await prisma.merchandisePeriod.deleteMany({ where: { id: apiPeriodId } });
     await prisma.user.delete({ where: { id: user.id } });

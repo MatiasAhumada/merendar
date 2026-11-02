@@ -22,7 +22,7 @@ Los campos de destino y renglones son opcionales al leer cargas offline antiguas
 
 Solo los roles `PRESIDENTE` y `SECRETARIA` pueden consultar o registrar estas entidades. El servidor repite la comprobación de sesión y rol en cada endpoint de lectura, sincronización y descarga.
 
-Los comprobantes aceptados son archivos PDF aportados desde celular o PC, de hasta 512 KiB por archivo. La interfaz y el servidor validan extensión, MIME, firma `%PDF-` y marcador `%%EOF`; el rechazo mantiene el formulario abierto. La descarga usa `/api/merchandise/documents/[id]`, responde con `Cache-Control: private, no-store` y `X-Content-Type-Options: nosniff`.
+Los comprobantes aceptados son archivos PDF aportados desde celular o PC, de hasta 2 MiB por archivo. La interfaz y el servidor validan extensión, MIME, firma `%PDF-` y marcador `%%EOF`; el rechazo mantiene el formulario abierto. La descarga usa `/api/merchandise/documents/[id]`, responde con `Cache-Control: private, no-store` y `X-Content-Type-Options: nosniff`.
 
 La autorización conserva por separado la referencia de la orden externa, la persona autorizada y la vigencia transcripta solo cuando aparece en el documento. La orden externa se adjunta como PDF privado al registro de solicitud/cupo existente. El número se ingresa desde el respaldo: la aplicación nunca genera una numeración oficial ni calcula vencimientos. El informe de recepción descargable es interno y compara el cupo autorizado con las recepciones vigentes en la unidad propia del destino; enumera también recepciones anuladas y documentos vinculados. Una autorización no representa recepción efectiva.
 

@@ -83,7 +83,7 @@ async function appendOriginalDocuments(
   packageDocument: PDFDocument,
   sourceDocumentIds: string[],
   preparedDocuments: OfflinePreparedDocument[],
-  pendingDocuments: Array<{ id: string; originalName: string; contentBase64: string }>,
+  pendingDocuments: Array<{ id: string; originalName: string; content: Blob }>,
 ) {
   const preparedAttachments = sourceDocumentIds.flatMap((sourceDocumentId) => {
     const preparedDocument = preparedDocuments.find((document) => document.id === sourceDocumentId);
@@ -110,10 +110,8 @@ async function appendOriginalDocuments(
     if (!pendingDocument) {
       continue;
     }
-    const binary = atob(pendingDocument.contentBase64);
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
     try {
-      const source = await PDFDocument.load(bytes);
+      const source = await PDFDocument.load(await pendingDocument.content.arrayBuffer());
       const pages = await packageDocument.copyPages(source, source.getPageIndices());
       for (const page of pages) {
         packageDocument.addPage(page);
@@ -131,7 +129,7 @@ export async function createOfflineRenditionPackage(input: {
   template: RenditionEmissionTemplate;
   sourceDocumentIds: string[];
   preparedDocuments: OfflinePreparedDocument[];
-  pendingDocuments?: Array<{ id: string; originalName: string; contentBase64: string }>;
+  pendingDocuments?: Array<{ id: string; originalName: string; content: Blob }>;
 }) {
   const packageDocument = await PDFDocument.create();
   const font = await packageDocument.embedFont(StandardFonts.Helvetica);

@@ -19,7 +19,7 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { synchronizeOfflineQueue, enqueueOfflineOperation, listOfflineOperations, retryOfflineOperation, updateOfflineOperationPayload } from "@/services/offline-queue.service";
+import { synchronizeOfflineQueue, enqueueOfflineOperation, listOfflineOperations, readOfflineOperationAttachments, retryOfflineOperation, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { jsonValueSchema } from "@/schemas/offline.schema";
 import clientAxios from "@/utils/clientAxios.util";
@@ -176,34 +176,47 @@ function sourceDocumentIds(period: MerchandisePeriodRecord, renditionDocuments: 
   return [...new Set(ids)];
 }
 
-function PendingOfflineEmissionDownload({ payload, period, sheet, preparedDocuments, pendingDocuments }: {
+function PendingOfflineEmissionDownload({ userId, payload, period, sheet, preparedDocuments, pendingUploads }: {
+  userId: string;
   payload: RenditionEmissionOperationPayload;
   period: MerchandisePeriodRecord;
   sheet: { id: string; version: number; beneficiaryCount: number };
   preparedDocuments: OfflinePreparedDocument[];
-  pendingDocuments: RenditionDocumentPayload["documents"];
+  pendingUploads: Array<{ operation: OfflineOperation; payload: RenditionDocumentPayload }>;
 }) {
   const [downloadUrl, setDownloadUrl] = useState("");
 
   useEffect(() => {
     let active = true;
     let generatedUrl = "";
-    void createOfflineRenditionPackage({
-      period,
-      sheet,
-      renditionId: payload.renditionId,
-      template: payload.template,
-      sourceDocumentIds: payload.sourceDocumentIds,
-      preparedDocuments,
-      pendingDocuments,
-    }).then((bytes) => {
+    async function createPackage() {
+      const pendingDocuments = (await Promise.all(pendingUploads.map(async (upload) => {
+        const attachments = await readOfflineOperationAttachments(userId, upload.operation.operationId);
+        return upload.payload.documents.flatMap((document) => {
+          const attachment = attachments.find((candidate) => candidate.id === document.attachmentId);
+          if (!attachment) {
+            return [];
+          }
+          return [{ id: document.id, originalName: document.originalName, content: attachment.content }];
+        });
+      }))).flat();
+      const bytes = await createOfflineRenditionPackage({
+        period,
+        sheet,
+        renditionId: payload.renditionId,
+        template: payload.template,
+        sourceDocumentIds: payload.sourceDocumentIds,
+        preparedDocuments,
+        pendingDocuments,
+      });
       generatedUrl = URL.createObjectURL(new Blob([bytes], { type: HTTP_CONTENT_TYPES.PDF }));
       if (active) {
         setDownloadUrl(generatedUrl);
       } else {
         URL.revokeObjectURL(generatedUrl);
       }
-    }).catch(() => setDownloadUrl(""));
+    }
+    void createPackage().catch(() => setDownloadUrl(""));
 
     return () => {
       active = false;
@@ -211,7 +224,7 @@ function PendingOfflineEmissionDownload({ payload, period, sheet, preparedDocume
         URL.revokeObjectURL(generatedUrl);
       }
     };
-  }, [payload, period, pendingDocuments, preparedDocuments, sheet]);
+  }, [payload, period, pendingUploads, preparedDocuments, sheet, userId]);
 
   if (!downloadUrl) {
     return <Badge variant="secondary">{RENDITION_UI_TEXT.GENERANDO}</Badge>;
@@ -634,36 +647,44 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
 
       setIsSubmitting(true);
       setSubmissionMessage("");
-      if (!isOnline || offlineMode) {
-        const latestEmissionId = latestQueuedEmission?.payload.id ?? selectedRendition?.emissions[0]?.id;
-        if (!latestEmissionId) {
-          throw new Error(RENDITION_ERROR_MESSAGES.EMITE_UN_BORRADOR_ANTES_DE_REGISTRAR_LA_PRESENTACION);
+      const latestEmissionId = latestQueuedEmission?.payload.id ?? selectedRendition?.emissions[0]?.id;
+      if (!latestEmissionId) {
+        throw new Error(RENDITION_ERROR_MESSAGES.EMITE_UN_BORRADOR_ANTES_DE_REGISTRAR_LA_PRESENTACION);
+      }
+      const queuedPayload = renditionSubmissionOperationPayloadSchema.parse({
+        kind: "rendition_submission",
+        id: renditionId,
+        renditionId,
+        emissionId: latestEmissionId,
+        ...payload.data,
+      });
+      const dependencies: string[] = [];
+      if (latestQueuedEmission) {
+        dependencies.push(latestQueuedEmission.operation.operationId);
+      }
+      const queuedSubmission = await enqueueOfflineOperation(userId, sessionExpiresAt, {
+        resource: "renditions",
+        resourceId: renditionId,
+        operation: "create",
+        baseVersion: null,
+        dependencies,
+        payload: jsonValueSchema.parse(JSON.parse(JSON.stringify(queuedPayload))),
+      });
+      if (isOnline && !offlineMode) {
+        await synchronizeOfflineQueue(userId);
+        await Promise.all([refreshQueue(), onRefresh()]);
+        const refreshedOperations = await listOfflineOperations(userId);
+        const savedSubmission = refreshedOperations.find((operation) => operation.operationId === queuedSubmission.operationId);
+        if (savedSubmission?.status === "synced") {
+          setSubmissionMessage(RENDITION_UI_TEXT.PRESENTACION_NO_AUTOMATICA);
+        } else if (savedSubmission?.message) {
+          setSubmissionMessage(savedSubmission.message);
+        } else {
+          setSubmissionMessage(RENDITION_UI_TEXT.PRESENTACION_PENDIENTE_EN_ESTE_DISPOSITIVO);
         }
-        const queuedPayload = renditionSubmissionOperationPayloadSchema.parse({
-          kind: "rendition_submission",
-          id: renditionId,
-          renditionId,
-          emissionId: latestEmissionId,
-          ...payload.data,
-        });
-        const dependencies: string[] = [];
-        if (latestQueuedEmission) {
-          dependencies.push(latestQueuedEmission.operation.operationId);
-        }
-        await enqueueOfflineOperation(userId, sessionExpiresAt, {
-          resource: "renditions",
-          resourceId: renditionId,
-          operation: "create",
-          baseVersion: null,
-          dependencies,
-          payload: jsonValueSchema.parse(JSON.parse(JSON.stringify(queuedPayload))),
-        });
+      } else {
         setSubmissionMessage(RENDITION_UI_TEXT.PRESENTACION_PENDIENTE_EN_ESTE_DISPOSITIVO);
         await refreshQueue();
-      } else {
-        await clientAxios.post(API_ROUTES.RENDITION_SUBMISSION(renditionId), payload.data);
-        setSubmissionMessage(RENDITION_UI_TEXT.PRESENTACION_NO_AUTOMATICA);
-        await onRefresh();
       }
       formElement.reset();
     } catch (error) {
@@ -741,7 +762,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         </li>)}</ul> : null}
         {queuedEmissions.map(({ operation, payload }) => <Alert key={operation.operationId} variant={operation.status === "error" || operation.status === "conflict" ? "destructive" : "info"}>
           <AlertTitle>{RENDITION_UI_TEXT.EMISION_OFFLINE_PENDIENTE}</AlertTitle>
-          <AlertDescription className="flex flex-wrap items-center gap-2">{operation.message ?? RENDITION_UI_TEXT.BORRADOR_OFFLINE_PENDIENTE_DE_SINCRONIZACION}<PendingOfflineEmissionDownload payload={payload} period={selectedPeriod} sheet={selectedSheet} preparedDocuments={preparedDocuments} pendingDocuments={queuedUploads.flatMap(({ payload: uploadPayload }) => uploadPayload.documents)} /></AlertDescription>
+          <AlertDescription className="flex flex-wrap items-center gap-2">{operation.message ?? RENDITION_UI_TEXT.BORRADOR_OFFLINE_PENDIENTE_DE_SINCRONIZACION}<PendingOfflineEmissionDownload userId={userId} payload={payload} period={selectedPeriod} sheet={selectedSheet} preparedDocuments={preparedDocuments} pendingUploads={queuedUploads} /></AlertDescription>
         </Alert>)}
         <div className="space-y-3 border-t pt-4">
           <div><h4 className="font-semibold">{RENDITION_UI_TEXT.REGISTRAR_PRESENTACION}</h4><p className="text-sm text-muted-foreground">{RENDITION_UI_TEXT.PRESENTACION_NO_AUTOMATICA}</p></div>

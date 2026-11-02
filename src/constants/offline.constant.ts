@@ -3,9 +3,10 @@ import { HTTP_CONTENT_TYPES, HTTP_HEADERS } from "@/constants/http.constant";
 
 export const OFFLINE_STORAGE = {
   DATABASE_PREFIX: "merendar-offline",
-  DATABASE_VERSION: 1,
+  DATABASE_VERSION: 2,
   OPERATIONS_STORE: "operations",
-  MAX_OPERATION_BYTES: 1_000_000,
+  ATTACHMENTS_STORE: "attachments",
+  MAX_OPERATION_BYTES: 12_000_000,
   LEASE_DURATION_MS: 30_000,
   STORAGE_RESERVE_BYTES: 2_000_000,
   SYNC_HISTORY_LIMIT: 1_000,
@@ -25,8 +26,8 @@ export const OFFLINE_PREPARATION = {
   PREPARATION_CHANGE_DEBOUNCE_MS: 1_000,
   PREPARATION_MAX_ATTEMPTS: 3,
   PREPARATION_RETRY_DELAY_MS: 2_000,
-  MAX_DOCUMENT_BYTES: 512 * 1024,
-  MAX_DOCUMENTS_TOTAL_BYTES: 20 * 1024 * 1024,
+  MAX_DOCUMENT_BYTES: 2 * 1024 * 1024,
+  MAX_DOCUMENTS_TOTAL_BYTES: 40 * 1024 * 1024,
   STORAGE_RESERVE_BYTES: 2_000_000,
   ROUTES: OFFLINE_PREPARED_ROUTES,
   ROUTE_CAPABILITIES: {
@@ -83,6 +84,7 @@ export const SYNC_MESSAGES = {
   ACCOUNT_CHANGED: "Esta operación pertenece a otra cuenta y no se enviará con el usuario actual.",
   PERMISSION_REVOKED: "La cuenta ya no tiene permiso para enviar este cambio. Los datos siguen guardados en este dispositivo.",
   STORAGE_FULL: "No hay espacio suficiente para guardar el cambio sin conexión. Liberá espacio o conectate antes de volver a intentarlo.",
+  INVALID_ATTACHMENT: "No se pudo verificar el PDF adjunto. Conservamos el cambio para que puedas volver a intentarlo.",
 } as const;
 
 export const OFFLINE_OPERATION_MESSAGES = {
