@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineOperation, listOfflineOperations, resolveOfflineConflict, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace";
+import { CycleReconciliationReport } from "@/components/merchandise/CycleReconciliationReport";
 import { MerchandiseRequestDocumentComposer } from "@/components/merchandise/MerchandiseRequestDocumentComposer";
 import { createMerchandiseReconciliationPdf } from "@/services/merchandise-reconciliation-pdf.service";
 import { duplicateRemittanceConflictSchema, merchandiseCancellationPayloadSchema, merchandiseOperationPayloadSchema, merchandisePayloadSchema, merchandiseUpdatePayloadSchema, receiptLimitConflictSchema } from "@/schemas/merchandise.schema";
@@ -229,6 +230,7 @@ function queuedPeriod(payload: Extract<MerchandisePayload, { kind: "period" }>, 
     startsAt: new Date(`${payload.startsAt}T00:00:00.000Z`).toISOString(),
     endsAt: new Date(`${payload.endsAt}T00:00:00.000Z`).toISOString(),
     status: "VIGENTE",
+    reportDetails: { authorized: false, events: [] },
     requests: [],
     beneficiarySheets: [],
     renditions: [],
@@ -638,6 +640,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
   const isOnline = useNetworkStatus();
   const offlineMode = !isOnline;
   const [periods, setPeriods] = useState<MerchandisePeriodRecord[]>(initialPeriods);
+  const [reportCapturedAt, setReportCapturedAt] = useState<string | null>(null);
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
   const [loading, setLoading] = useState(!offlineMode);
   const [loadError, setLoadError] = useState("");
@@ -656,6 +659,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
       const result = await getMerchandiseCollection(userId, isOnline);
 
       setPeriods(result.data.periods);
+      setReportCapturedAt(result.capturedAt);
       setLoadError("");
     } catch (error) {
       setLoadError(errorMessage(error));
@@ -983,10 +987,13 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
         </Alert>
       ) : null}
 
-      {canReadMerchandise ? <nav aria-label={MERCHANDISE_UI_TEXT.SECCIONES_DE_MERCADERIA} className="grid grid-cols-3 gap-1 rounded-2xl bg-secondary p-1">
-        <Button asChild variant="inverse" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#periodos"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.PERIODOS}</a></Button>
-        <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#cupos"><HugeiconsIcon icon={PackageIcon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.CUPOS}</a></Button>
-        <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#remitos"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.REMITOS}</a></Button>
+      {canReadMerchandise || canReadRenditions ? <nav aria-label={MERCHANDISE_UI_TEXT.SECCIONES_DE_MERCADERIA} className={`grid gap-1 rounded-2xl bg-secondary p-1 ${canReadMerchandise ? "grid-cols-4" : "grid-cols-1"}`}>
+        {canReadMerchandise ? <>
+          <Button asChild variant="inverse" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#periodos"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.PERIODOS}</a></Button>
+          <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#cupos"><HugeiconsIcon icon={PackageIcon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.CUPOS}</a></Button>
+          <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#remitos"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.REMITOS}</a></Button>
+        </> : null}
+        <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#conciliacion">Conciliación</a></Button>
       </nav> : null}
 
       {canReadMerchandise ? <>
@@ -1039,6 +1046,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
         {!visiblePeriods.some((period) => period.requests.some((request) => request.remittances.length)) ? <Card variant="muted"><CardContent className="flex items-center gap-3 py-5"><HugeiconsIcon icon={TruckIcon} strokeWidth={1.8} className="size-6 text-primary" /><p className="text-sm text-muted-foreground">{MERCHANDISE_UI_TEXT.LOS_REMITOS_RECIBIDOS_APARECERAN_VINCULADOS_A_SU_SOLICITUD_Y_CUPO_APROBA}</p></CardContent></Card> : null}
       </section></> : null}
 
+      {canReadMerchandise || canReadRenditions ? <div id="conciliacion" className="scroll-mt-28"><CycleReconciliationReport periods={visiblePeriods} offlineMode={offlineMode} capturedAt={reportCapturedAt} pendingOperations={canReadMerchandise ? pendingOperations : []} /></div> : null}
       {canReadRenditions ? <RenditionWorkspace periods={visiblePeriods} userId={userId} sessionExpiresAt={sessionExpiresAt} onRefresh={refreshServerData} canWrite={canWriteRenditions} canReview={canReviewRenditions} canCreatePeriods={canReadMerchandise && canWriteMerchandise} periodStatus={periodStatus} offlineMode={offlineMode} preparedDocuments={preparedDocuments} /> : null}
     </div>
   );

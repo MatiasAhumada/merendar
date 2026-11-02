@@ -184,6 +184,18 @@ export const merchandiseResponseSchema = z.object({
     agency: z.string(),
     destination: z.enum(["FAMILIES", "MERENDERO"]).default("FAMILIES"),
     status: z.enum(["VIGENTE", "ANULADO"]),
+    reportDetails: z.object({
+      authorized: z.boolean(),
+      events: z.array(z.object({
+        id: z.string(),
+        scheduledAt: z.iso.datetime(),
+        location: z.string(),
+        responsibleNames: z.string(),
+        allocations: z.array(z.object({ familyId: z.string(), familyName: z.string(), remittanceNumber: z.string(), moduleQuantity: z.number().int().nonnegative() }).strict()),
+        familyDeliveries: z.array(z.object({ familyId: z.string(), familyName: z.string(), moduleQuantity: z.number().int().nonnegative(), participants: z.array(z.string()) }).strict()),
+        supplyAllocations: z.array(z.object({ productName: z.string(), presentation: z.string(), unit: z.string(), remittanceNumber: z.string(), quantity: z.number().nonnegative() }).strict()).default([]),
+      }).strict()),
+    }).strict().default({ authorized: false, events: [] }),
     startsAt: z.iso.datetime(),
     endsAt: z.iso.datetime(),
     beneficiarySheets: z.array(z.object({
@@ -209,7 +221,7 @@ export const merchandiseResponseSchema = z.object({
         byteSize: z.number().int(),
         createdAt: z.iso.datetime(),
       })),
-      emissions: z.array(z.object({ id: z.string(), version: z.number().int().positive(), createdAt: z.iso.datetime() })),
+      emissions: z.array(z.object({ id: z.string(), version: z.number().int().positive(), createdAt: z.iso.datetime(), reportSummary: z.object({ deliveredModules: z.number().int().nonnegative(), registeredModuleQuantity: z.number().int().nonnegative(), familyCount: z.number().int().nonnegative(), participantCount: z.number().int().nonnegative(), event: z.object({ scheduledAt: z.string(), location: z.string() }).nullable() }).strict().nullable() })),
       submissions: z.array(z.object({
         id: z.string(),
         submittedAt: z.iso.datetime(),

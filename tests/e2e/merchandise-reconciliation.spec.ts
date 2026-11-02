@@ -97,9 +97,26 @@ test("captures an external authorization, records partial receipts and downloads
     assert.ok(secondReport.length > 500);
     await testInfo.attach("reconciliation-report.pdf", { body: secondReport, contentType: "application/pdf" });
     await expect(requestCard.getByText("4.5 kg")).toBeVisible();
+
+    await page.getByRole("link", { name: "Conciliación" }).click();
+    await expect(page.getByText("Conciliación histórica del ciclo", { exact: true })).toBeVisible();
+    await expect(page.getByText("4.5 kg")).toBeVisible();
+    const cycleReportScreenshotPath = testInfo.outputPath("cycle-report.png");
+    await page.screenshot({ path: cycleReportScreenshotPath, fullPage: false });
+    await testInfo.attach("cycle-reconciliation-screen.png", { path: cycleReportScreenshotPath, contentType: "image/png" });
+    const cycleReportDownloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Exportar reporte PDF" }).click();
+    const cycleReportDownload = await cycleReportDownloadPromise;
+    const cycleReportPath = `${evidenceDirectory}/cycle-report.pdf`;
+    await cycleReportDownload.saveAs(cycleReportPath);
+    const cycleReport = await readFile(cycleReportPath);
+    assert.equal(cycleReport.toString("ascii", 0, 5), "%PDF-");
+    assert.ok(cycleReport.length > 500);
+    await testInfo.attach("cycle-reconciliation-report.pdf", { body: cycleReport, contentType: "application/pdf" });
+
     const savedRemittance = await prisma.merchandiseRemittance.findUniqueOrThrow({ where: { remittanceNumber: `REM-${suffix}` } });
     assert.equal(savedRemittance.receivedQuantity.toNumber(), 4.5);
-    await expect(page).toHaveURL(/\/mercaderia$/);
+    await expect(page).toHaveURL(/\/mercaderia#conciliacion$/);
     const hasHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     expect(hasHorizontalOverflow).toBe(false);
     expect(browser.version()).toBeTruthy();

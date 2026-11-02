@@ -4,6 +4,7 @@ import { authService } from "@/server/services/auth.service";
 import { requireMerchandiseReadAccess } from "@/server/services/merchandise-access";
 import { getEffectiveCapabilities } from "@/server/services/access-policy.service";
 import { ApiError } from "@/utils/handlers/apiError.handler";
+import { findDistributionEvents } from "@/server/repository/record.repository";
 
 export async function getVisibleMerchandisePeriods(token: string | undefined) {
   const session = await authService.getSession(token);
@@ -15,12 +16,17 @@ export async function getVisibleMerchandisePeriods(token: string | undefined) {
   const effectiveCapabilities = await getEffectiveCapabilities(session.user.role);
   const canReadMerchandise = effectiveCapabilities.includes("merchandise.read");
   const canReadRenditions = effectiveCapabilities.includes("renditions.read");
+  const canReadDelivery = effectiveCapabilities.includes("delivery.read");
 
   if (!canReadMerchandise && !canReadRenditions) {
     await requireMerchandiseReadAccess(token);
   }
 
   const periods = await merchandiseRepository.findAll();
+  let distributionEvents: Awaited<ReturnType<typeof findDistributionEvents>> = [];
+  if (canReadDelivery) {
+    distributionEvents = await findDistributionEvents();
+  }
 
   return periods.map((period) => {
     let requests = period.requests;
@@ -34,7 +40,27 @@ export async function getVisibleMerchandisePeriods(token: string | undefined) {
       renditions = [];
     }
 
-    return { ...period, requests, renditions };
+    const reportEvents = distributionEvents.filter((event) => event.periodId === period.id).map((event) => ({
+      id: event.id,
+      scheduledAt: event.scheduledAt.toISOString(),
+      location: event.location,
+      responsibleNames: event.responsibleNames,
+      allocations: event.allocations.map((allocation) => ({ familyId: allocation.familyId, familyName: allocation.familyName, remittanceNumber: allocation.remittanceNumber, moduleQuantity: allocation.moduleQuantity })),
+      familyDeliveries: event.familyDeliveries.map((delivery) => ({
+        familyId: delivery.familyId,
+        familyName: delivery.familyName,
+        moduleQuantity: delivery.moduleQuantity,
+        participants: delivery.participants.map((participant) => participant.name),
+      })),
+      supplyAllocations: event.supplyAllocations.map((allocation) => ({
+        productName: allocation.productName,
+        presentation: allocation.presentation,
+        unit: allocation.unit,
+        remittanceNumber: allocation.remittanceNumber,
+        quantity: allocation.quantity,
+      })),
+    }));
+    return { ...period, requests, renditions, reportDetails: { authorized: canReadDelivery, events: reportEvents } };
   });
 }
 

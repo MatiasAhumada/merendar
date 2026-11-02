@@ -1,6 +1,7 @@
 import { beneficiaryCountSchema } from "@/schemas/synchronization.schema";
 import { prisma } from "@/lib/prisma";
 import { merchandiseRequestDocumentSnapshotSchema } from "@/schemas/merchandise-request-document.schema";
+import { renditionEmissionReportSourceSchema } from "@/schemas/rendition.schema";
 
 const documentSummarySelect = {
   id: true,
@@ -42,7 +43,7 @@ export const merchandiseRepository = {
               select: { id: true, documentType: true, version: true, supersedesId: true, originalName: true, byteSize: true, createdAt: true },
               orderBy: [{ documentType: "asc" }, { version: "asc" }],
             },
-            emissions: { select: { id: true, version: true, createdAt: true }, orderBy: { version: "desc" } },
+            emissions: { select: { id: true, version: true, createdAt: true, snapshot: true }, orderBy: { version: "desc" } },
             submissions: {
               include: { recordedBy: { select: { id: true, name: true } } },
               orderBy: { submittedAt: "desc" },
@@ -85,6 +86,20 @@ export const merchandiseRepository = {
       })),
       renditions: period.renditions.map((rendition) => ({
         ...rendition,
+        emissions: rendition.emissions.map((emission) => {
+          const snapshot = renditionEmissionReportSourceSchema.safeParse(emission.snapshot);
+          let reportSummary = null;
+          if (snapshot.success) {
+            reportSummary = {
+              deliveredModules: snapshot.data.deliveredModules,
+              registeredModuleQuantity: snapshot.data.registeredModuleQuantity,
+              familyCount: snapshot.data.familyCount,
+              participantCount: snapshot.data.participants.length,
+              event: snapshot.data.event,
+            };
+          }
+          return { id: emission.id, version: emission.version, createdAt: emission.createdAt, reportSummary };
+        }),
         beneficiarySheet: {
           id: rendition.beneficiarySheet.id,
           version: rendition.beneficiarySheet.version,

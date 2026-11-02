@@ -12,6 +12,13 @@ export interface RenditionEmissionSummary {
   id: string;
   version: number;
   createdAt: string;
+  reportSummary: {
+    deliveredModules: number;
+    registeredModuleQuantity: number;
+    familyCount: number;
+    participantCount: number;
+    event: { scheduledAt: string; location: string } | null;
+  } | null;
 }
 
 export interface RenditionSubmissionRecord {

@@ -2,6 +2,14 @@ import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
 import { z } from "zod";
 import { RENDITION_LIMITS, RENDITION_DOCUMENT_TYPES, RENDITION_VALIDATION_MESSAGES } from "@/constants/rendition.constant";
 
+export const renditionEmissionReportSourceSchema = z.object({
+  deliveredModules: z.number().int().nonnegative(),
+  registeredModuleQuantity: z.number().int().nonnegative(),
+  familyCount: z.number().int().nonnegative(),
+  participants: z.array(z.unknown()),
+  event: z.object({ scheduledAt: z.string(), location: z.string() }).nullable(),
+});
+
 export const renditionDocumentTypeSchema = z.enum([
   RENDITION_DOCUMENT_TYPES.SIGNED_SHEET,
   RENDITION_DOCUMENT_TYPES.REMITTANCE,
