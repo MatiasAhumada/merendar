@@ -44,6 +44,15 @@ test("distribution preparations keep receipt sources and family module quantitie
     ],
   });
   const syncPayload = { operationId: randomUUID(), userId: user.id, resource: "records", resourceId: eventId, operation: "create", baseVersion: null, dependencies: [], payload };
+  const supplyPeriodId = randomUUID();
+  const supplyRequestId = randomUUID();
+  const supplyQuotaId = randomUUID();
+  const supplyRequestItemId = randomUUID();
+  const supplyQuotaItemId = randomUUID();
+  const supplyRemittanceId = randomUUID();
+  const supplyReceiptItemId = randomUUID();
+  const supplyEventId = randomUUID();
+  const excessiveSupplyId = randomUUID();
 
   try {
     await prisma.authSession.create({ data: { userId: user.id, tokenHash, expiresAt: new Date(Date.now() + 60_000) } });
@@ -80,7 +89,35 @@ test("distribution preparations keep receipt sources and family module quantitie
     assert.equal(excessiveResponse.status, 400);
     assert.match(JSON.stringify(await excessiveResponse.json()), /supera los módulos recibidos/);
     assert.equal(await prisma.distributionEvent.count({ where: { id: excessiveEventId } }), 0);
+
+    await prisma.merchandisePeriod.create({ data: { id: supplyPeriodId, label: `Insumos ${suffix}`, agency: "Desarrollo Social", destination: "MERENDERO", startsAt: new Date("2026-11-01T00:00:00Z"), endsAt: new Date("2026-11-30T00:00:00Z") } });
+    await prisma.merchandiseRequest.create({ data: { id: supplyRequestId, periodId: supplyPeriodId, requestNumber: `S-${suffix}`, requestedAt: new Date("2026-11-01T00:00:00Z"), requestedQuantity: 5, createdById: user.id } });
+    await prisma.merchandiseRequestItem.create({ data: { id: supplyRequestItemId, requestId: supplyRequestId, productName: "Arroz", presentation: "Bolsa de 5 kg", unit: "kg", requestedQuantity: 5 } });
+    await prisma.merchandiseQuota.create({ data: { id: supplyQuotaId, requestId: supplyRequestId, approvedQuantity: 5, approvedAt: new Date("2026-11-01T00:00:00Z"), approvedById: user.id, items: { create: { id: supplyQuotaItemId, requestItemId: supplyRequestItemId, authorizedQuantity: 5 } } } });
+    await prisma.merchandiseRemittance.create({ data: { id: supplyRemittanceId, requestId: supplyRequestId, quotaId: supplyQuotaId, remittanceNumber: `RS-${suffix}`, receivedAt: new Date("2026-11-02T00:00:00Z"), receivedQuantity: 0, responsibleName: "Equipo de prueba", createdById: user.id, items: { create: { id: supplyReceiptItemId, quotaItemId: supplyQuotaItemId, receivedQuantity: 3.5 } } } });
+    const supplyPayload = distributionPreparationPayloadSchema.parse({ kind: "distribution-preparation", id: supplyEventId, periodId: supplyPeriodId, scheduledAt: "2026-11-06", location: "Merendero", responsibleNames: "Equipo de prueba", allocations: [], supplyAllocations: [{ receiptItemId: supplyReceiptItemId, quantity: 2.25 }] });
+    const supplySyncPayload = { ...syncPayload, operationId: randomUUID(), resourceId: supplyEventId, payload: supplyPayload };
+    const supplySyncResponse = await postSynchronization(createRequest("http://localhost:3000/api/synchronizations", "POST", token, supplySyncPayload));
+    assert.equal(supplySyncResponse.status, 200);
+    assert.equal(await prisma.distributionSupplyAllocation.count({ where: { eventId: supplyEventId } }), 1);
+    const supplyCollectionResponse = await getRecords(createRequest("http://localhost:3000/api/records?includePeriodDetails=true", "GET", token));
+    const supplyCollection = recordsCollectionSchema.parse(await supplyCollectionResponse.json());
+    assert.equal(supplyCollection.supplyReceipts.find((receipt) => receipt.id === supplyReceiptItemId)?.remainingQuantity, 1.25);
+    assert.equal(supplyCollection.distributionEvents.find((entry) => entry.id === supplyEventId)?.supplyAllocations[0]?.unit, "kg");
+    const excessiveSupplyPayload = distributionPreparationPayloadSchema.parse({ ...supplyPayload, id: excessiveSupplyId, supplyAllocations: [{ receiptItemId: supplyReceiptItemId, quantity: 2 }] });
+    const excessiveSupplyResponse = await postSynchronization(createRequest("http://localhost:3000/api/synchronizations", "POST", token, { ...supplySyncPayload, operationId: randomUUID(), resourceId: excessiveSupplyId, payload: excessiveSupplyPayload }));
+    assert.equal(excessiveSupplyResponse.status, 400);
+    assert.match(JSON.stringify(await excessiveSupplyResponse.json()), /cantidad asignada supera lo recibido disponible/);
   } finally {
+    await prisma.distributionSupplyAllocation.deleteMany({ where: { eventId: { in: [supplyEventId, excessiveSupplyId] } } });
+    await prisma.distributionEvent.deleteMany({ where: { id: { in: [supplyEventId, excessiveSupplyId] } } });
+    await prisma.merchandiseReceiptItem.deleteMany({ where: { id: supplyReceiptItemId } });
+    await prisma.merchandiseQuotaItem.deleteMany({ where: { id: supplyQuotaItemId } });
+    await prisma.merchandiseRemittance.deleteMany({ where: { id: supplyRemittanceId } });
+    await prisma.merchandiseQuota.deleteMany({ where: { id: supplyQuotaId } });
+    await prisma.merchandiseRequestItem.deleteMany({ where: { id: supplyRequestItemId } });
+    await prisma.merchandiseRequest.deleteMany({ where: { id: supplyRequestId } });
+    await prisma.merchandisePeriod.deleteMany({ where: { id: supplyPeriodId } });
     await prisma.distributionAllocation.deleteMany({ where: { event: { periodId } } });
     await prisma.distributionEvent.deleteMany({ where: { periodId } });
     await prisma.familyMember.deleteMany({ where: { personId: { in: signerIds } } });

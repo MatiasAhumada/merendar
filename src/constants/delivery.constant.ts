@@ -9,18 +9,22 @@ export const DELIVERY_VALIDATION_MESSAGES = {
   MODULE_TYPE_REQUIRED: "Ingresá el tipo de módulo",
   REPEATED_SELECTION: "La selección contiene personas repetidas",
   REPEATED_BENEFICIARIES: "La planilla contiene beneficiarios repetidos",
+  ASIGNACION_REQUERIDA: "Agregá al menos un destino o producto para preparar la jornada",
 } as const;
 
 export const DELIVERY_REPORT_TEXT = {
-  TITLE: "Preparación y disponibilidad de módulos",
+  TITLE: "Preparación y disponibilidad",
   DATE: "Fecha",
   LOCATION: "Lugar",
   RESPONSIBLE: "Responsables de la jornada",
   TOTAL_FAMILIES: "Familias asignadas",
   TOTAL_MODULES: "Módulos asignados",
+  TOTAL_ASSIGNMENTS: "Destinos y productos organizados",
+  DESTINATION: "Destino o producto",
+  MERENDERO_SUPPLIES: "Insumos para el merendero",
   FAMILY: "Familia",
   RECEIPT: "Remito de origen",
-  MODULES: "Módulos",
+  MODULES: "Cantidad / unidad",
   NOTES: "Observaciones",
   OBSERVATIONS: "Observaciones de la jornada",
   INTERNAL_DOCUMENT: "Documento interno - La preparación no confirma una entrega",
@@ -76,6 +80,7 @@ export const DELIVERY_UI_TEXT = {
   CONECTATE_PARA_CARGAR_UN_PERIODO_Y_VOLVE_A_PREPARAR_REGISTRO: "Conectate para cargar un período y volvé a preparar Registro.",
   CREAR_UN_PERIODO_EN_MERCADERIA: "Crear un período en Mercadería",
   VIGENCIA: "Vigencia: ",
+  PERIODO_DE_INSUMOS_MERENDERO: "Este período registra insumos del merendero. La preparación conserva las cantidades en la unidad del producto y no habilita entregas de módulos a familias.",
   AL: " al ",
   REGISTRAR_BENEFICIARIO: " Registrar beneficiario",
   LOS_CAMBIOS_SE_GUARDAN_EN_EL_SERVIDOR_O_QUEDAN_EN_LA_COLA_LOCAL_HASTA_RE: "Los cambios se guardan en el servidor o quedan en la cola local hasta recuperar conexión.",
@@ -163,6 +168,8 @@ export const DELIVERY_UI_TEXT = {
 
 export const DELIVERY_ERROR_MESSAGES = {
   ASIGNACION_SUPERA_MODULOS_DISPONIBLES: "La asignación supera los módulos recibidos que siguen disponibles.",
+  ASIGNACION_SUPERA_INSUMOS_DISPONIBLES: "La cantidad asignada supera lo recibido disponible para este producto.",
+  DESTINO_NO_COINCIDE_CON_RECEPCIONES: "El destino elegido no coincide con el tipo de recepción.",
   LA_FAMILIA_SELECCIONADA_NO_ESTA_ACTIVA: "La familia seleccionada ya no está activa en el padrón.",
   LA_DISPONIBILIDAD_CAMBIO_MIENTRAS_SE_GUARDABA: "La disponibilidad cambió mientras se guardaba la jornada. Actualizá los datos e intentá de nuevo.",
   NO_SE_PUDO_GUARDAR_LA_PREPARACION: "No se pudo guardar la preparación de la jornada.",

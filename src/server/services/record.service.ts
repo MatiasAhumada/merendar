@@ -12,6 +12,7 @@ import {
   findDistributionRecords,
   findDistributionEvents,
   findModuleReceipts,
+  findMerenderoSupplyReceipts,
   findFamilyMemberships,
   findMerchandisePeriod,
   findRecordPeriods,
@@ -54,8 +55,14 @@ export async function getRecordWorkbench(periodId?: string, includePeriodDetails
     moduleReceiptsPromise = findModuleReceipts();
   }
 
-  const [moduleReceipts, distributionEvents] = await Promise.all([
+  let supplyReceiptsPromise: ReturnType<typeof findMerenderoSupplyReceipts> | Promise<[]> = Promise.resolve([]);
+  if (includeInventory) {
+    supplyReceiptsPromise = findMerenderoSupplyReceipts();
+  }
+
+  const [moduleReceipts, supplyReceipts, distributionEvents] = await Promise.all([
     moduleReceiptsPromise,
+    supplyReceiptsPromise,
     findDistributionEvents(periodId),
   ]);
 
@@ -70,6 +77,7 @@ export async function getRecordWorkbench(periodId?: string, includePeriodDetails
     })),
     sheets,
     moduleReceipts,
+    supplyReceipts,
     distributionEvents: distributionEvents.map((event) => ({ ...event, scheduledAt: event.scheduledAt.toISOString().slice(0, 10) })),
   };
 }
@@ -81,6 +89,9 @@ export async function issueBeneficiarySheet(input: { periodId: string; personIds
 
       if (!period) {
         throw new ApiError({ status: 404, message: DELIVERY_ERROR_MESSAGES.NO_ENCONTRAMOS_ESE_MODULO_O_PERIODO });
+      }
+      if (period.destination !== "FAMILIES") {
+        throw new ApiError({ status: 400, message: DELIVERY_ERROR_MESSAGES.DESTINO_NO_COINCIDE_CON_RECEPCIONES });
       }
 
       const existingMemberships = await findFamilyMemberships(transaction, input.personIds);

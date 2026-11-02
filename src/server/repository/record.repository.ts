@@ -3,8 +3,39 @@ import { prisma } from "@/lib/prisma";
 
 export async function findRecordPeriods() {
   return prisma.merchandisePeriod.findMany({
-    select: { id: true, label: true, agency: true, startsAt: true, endsAt: true },
+    select: { id: true, label: true, agency: true, destination: true, startsAt: true, endsAt: true },
     orderBy: { startsAt: "desc" },
+  });
+}
+
+export async function findMerenderoSupplyReceipts() {
+  const receipts = await prisma.merchandiseReceiptItem.findMany({
+    where: { remittance: { status: "VIGENTE", request: { period: { destination: "MERENDERO", status: "VIGENTE" } } } },
+    select: {
+      id: true, receivedQuantity: true,
+      remittance: { select: { remittanceNumber: true, receivedAt: true, request: { select: { periodId: true, requestNumber: true, period: { select: { label: true } } } } } },
+      quotaItem: { select: { requestItem: { select: { productName: true, presentation: true, unit: true } } } },
+      distributionAllocations: { select: { quantity: true } },
+    },
+    orderBy: [{ remittance: { receivedAt: "desc" } }, { id: "asc" }],
+  });
+  return receipts.map((receipt) => {
+    const receivedQuantity = receipt.receivedQuantity.toNumber();
+    const assignedQuantity = receipt.distributionAllocations.reduce((total, allocation) => total + allocation.quantity.toNumber(), 0);
+    return {
+      id: receipt.id,
+      periodId: receipt.remittance.request.periodId,
+      periodLabel: receipt.remittance.request.period.label,
+      requestNumber: receipt.remittance.request.requestNumber,
+      remittanceNumber: receipt.remittance.remittanceNumber,
+      receivedAt: receipt.remittance.receivedAt.toISOString(),
+      productName: receipt.quotaItem.requestItem.productName,
+      presentation: receipt.quotaItem.requestItem.presentation,
+      unit: receipt.quotaItem.requestItem.unit,
+      receivedQuantity,
+      assignedQuantity,
+      remainingQuantity: receivedQuantity - assignedQuantity,
+    };
   });
 }
 
@@ -56,6 +87,7 @@ export async function findDistributionEvents(periodId?: string) {
     select: {
       id: true, version: true, periodId: true, scheduledAt: true, location: true, responsibleNames: true, notes: true,
       allocations: { select: { id: true, familyId: true, family: { select: { name: true } }, remittanceId: true, remittance: { select: { remittanceNumber: true } }, moduleQuantity: true, notes: true }, orderBy: [{ family: { name: "asc" } }, { remittance: { remittanceNumber: "asc" } }] },
+      supplyAllocations: { select: { id: true, receiptItemId: true, receiptItem: { select: { quotaItem: { select: { requestItem: { select: { productName: true, presentation: true, unit: true } } } }, remittance: { select: { remittanceNumber: true } } } }, quantity: true, notes: true } },
     },
     orderBy: [{ scheduledAt: "desc" }, { createdAt: "desc" }],
   });
@@ -69,6 +101,16 @@ export async function findDistributionEvents(periodId?: string) {
       remittanceId: allocation.remittanceId,
       remittanceNumber: allocation.remittance.remittanceNumber,
       moduleQuantity: allocation.moduleQuantity,
+      notes: allocation.notes,
+    })),
+    supplyAllocations: event.supplyAllocations.map((allocation) => ({
+      id: allocation.id,
+      receiptItemId: allocation.receiptItemId,
+      productName: allocation.receiptItem.quotaItem.requestItem.productName,
+      presentation: allocation.receiptItem.quotaItem.requestItem.presentation,
+      unit: allocation.receiptItem.quotaItem.requestItem.unit,
+      remittanceNumber: allocation.receiptItem.remittance.remittanceNumber,
+      quantity: allocation.quantity.toNumber(),
       notes: allocation.notes,
     })),
   }));

@@ -30,6 +30,7 @@ model User {
   merchandiseCycles               MerchandiseCycle[]        @relation("MerchandiseCycleCreator")
   distributionEvents              DistributionEvent[]       @relation("DistributionEventCreator")
   distributionAllocations         DistributionAllocation[]  @relation("DistributionAllocationCreator")
+  distributionSupplyAllocations   DistributionSupplyAllocation[] @relation("DistributionSupplyAllocationCreator")
   familyDeliveries                FamilyDelivery[]          @relation("FamilyDeliveryRecorder")
   distributionParticipants        DistributionParticipant[] @relation("DistributionParticipantRecorder")
   distributionRecords             DistributionRecord[]      @relation("DistributionRecordCreator")
@@ -415,6 +416,7 @@ model MerchandiseReceiptItem {
   receivedQuantity Decimal               @db.Decimal(12, 3)
   remittance       MerchandiseRemittance @relation(fields: [remittanceId], references: [id], onDelete: Restrict)
   quotaItem        MerchandiseQuotaItem  @relation(fields: [quotaItemId], references: [id], onDelete: Restrict)
+  distributionAllocations DistributionSupplyAllocation[]
   createdAt        DateTime              @default(now())
 
   @@unique([remittanceId, quotaItemId])
@@ -450,6 +452,7 @@ model DistributionEvent {
   createdBy        User              @relation("DistributionEventCreator", fields: [createdById], references: [id], onDelete: Restrict)
   familyDeliveries FamilyDelivery[]
   allocations      DistributionAllocation[]
+  supplyAllocations DistributionSupplyAllocation[]
   renditions       Rendition[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -475,6 +478,23 @@ model DistributionAllocation {
   @@unique([eventId, familyId, remittanceId])
   @@index([remittanceId, createdAt])
   @@index([familyId, createdAt])
+}
+
+model DistributionSupplyAllocation {
+  id               String                @id @default(cuid())
+  eventId          String
+  receiptItemId    String
+  quantity         Decimal               @db.Decimal(12, 3)
+  notes            String?
+  event            DistributionEvent     @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  receiptItem      MerchandiseReceiptItem @relation(fields: [receiptItemId], references: [id], onDelete: Restrict)
+  createdById      String
+  createdBy        User                  @relation("DistributionSupplyAllocationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@unique([eventId, receiptItemId])
+  @@index([receiptItemId, createdAt])
 }
 
 model FamilyDelivery {

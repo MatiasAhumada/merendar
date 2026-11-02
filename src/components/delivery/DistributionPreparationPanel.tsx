@@ -36,8 +36,25 @@ interface AllocationRow {
   notes: string;
 }
 
+interface SupplyAllocationRow {
+  receiptItemId: string;
+  quantity: string;
+  notes: string;
+}
+
 function createEmptyAllocationRow(): AllocationRow {
   return { familyId: "", remittanceId: "", moduleQuantity: "1", notes: "" };
+}
+
+function createEmptySupplyAllocationRow(): SupplyAllocationRow {
+  return { receiptItemId: "", quantity: "1", notes: "" };
+}
+
+function formatSupplyAllocationCount(count: number) {
+  if (count === 1) {
+    return "1 producto";
+  }
+  return `${count} productos`;
 }
 
 function todayLocalDate() {
@@ -65,11 +82,15 @@ export function DistributionPreparationPanel({ data, periodId, userId, sessionEx
   const [responsibleNames, setResponsibleNames] = useState("");
   const [notes, setNotes] = useState("");
   const [allocations, setAllocations] = useState<AllocationRow[]>([createEmptyAllocationRow()]);
+  const [supplyAllocations, setSupplyAllocations] = useState<SupplyAllocationRow[]>([createEmptySupplyAllocationRow()]);
   const [isSaving, setIsSaving] = useState(false);
   const [offlineOperations, setOfflineOperations] = useState<OfflineOperation[]>([]);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const receipts = data.moduleReceipts.filter((receipt) => receipt.periodId === periodId && receipt.remainingQuantity > 0 && Number.isInteger(receipt.remainingQuantity));
+  const supplyReceipts = data.supplyReceipts.filter((receipt) => receipt.periodId === periodId && receipt.remainingQuantity > 0);
+  const selectedPeriod = data.periods.find((period) => period.id === periodId);
+  const isMerendero = selectedPeriod?.destination === "MERENDERO";
   const families = data.families;
   const totalAssigned = allocations.reduce((total, allocation) => total + Number(allocation.moduleQuantity || 0), 0);
   const pendingPreparations = offlineOperations.flatMap((operation) => {
@@ -104,7 +125,12 @@ export function DistributionPreparationPanel({ data, periodId, userId, sessionEx
     event.preventDefault();
     setError("");
     setNotice("");
-    const selectedPeriod = data.periods.find((period) => period.id === periodId);
+    let preparationAllocations = allocations.map((allocation) => ({ familyId: allocation.familyId, remittanceId: allocation.remittanceId, moduleQuantity: Number(allocation.moduleQuantity), notes: allocation.notes }));
+    let preparationSupplyAllocations: Array<{ receiptItemId: string; quantity: number; notes: string }> = [];
+    if (isMerendero) {
+      preparationAllocations = [];
+      preparationSupplyAllocations = supplyAllocations.map((allocation) => ({ receiptItemId: allocation.receiptItemId, quantity: Number(allocation.quantity), notes: allocation.notes }));
+    }
     const parsed = distributionPreparationPayloadSchema.safeParse({
       kind: "distribution-preparation",
       id: crypto.randomUUID(),
@@ -113,12 +139,8 @@ export function DistributionPreparationPanel({ data, periodId, userId, sessionEx
       location,
       responsibleNames,
       notes,
-      allocations: allocations.map((allocation) => ({
-        familyId: allocation.familyId,
-        remittanceId: allocation.remittanceId,
-        moduleQuantity: Number(allocation.moduleQuantity),
-        notes: allocation.notes,
-      })),
+      allocations: preparationAllocations,
+      supplyAllocations: preparationSupplyAllocations,
     });
     if (!parsed.success || !selectedPeriod) {
       setError(parsed.error?.issues[0]?.message ?? DELIVERY_ERROR_MESSAGES.NO_ENCONTRAMOS_ESE_MODULO_O_PERIODO);
@@ -143,6 +165,7 @@ export function DistributionPreparationPanel({ data, periodId, userId, sessionEx
         setResponsibleNames("");
         setNotes("");
         setAllocations([createEmptyAllocationRow()]);
+        setSupplyAllocations([createEmptySupplyAllocationRow()]);
         await onRefresh();
       } else {
         setNotice("La preparación quedó guardada en este dispositivo, pendiente de validación del servidor. El PDF descargado es un borrador local.");
@@ -183,6 +206,7 @@ export function DistributionPreparationPanel({ data, periodId, userId, sessionEx
       responsibleNames: event.responsibleNames,
       notes: event.notes ?? "",
       allocations: event.allocations.map((allocation) => ({ familyId: allocation.familyId, remittanceId: allocation.remittanceId, moduleQuantity: allocation.moduleQuantity, notes: allocation.notes ?? "" })),
+      supplyAllocations: event.supplyAllocations.map((allocation) => ({ receiptItemId: allocation.receiptItemId, quantity: allocation.quantity, notes: allocation.notes ?? "" })),
     });
   }
 
@@ -197,13 +221,14 @@ export function DistributionPreparationPanel({ data, periodId, userId, sessionEx
       <Card>
         <CardHeader>
           <CardTitle id="distribution-preparation-title" className="flex items-center gap-2"><HugeiconsIcon icon={PackageIcon} className="text-primary" /> Preparar jornada de entrega</CardTitle>
-          <CardDescription>Organizá módulos recibidos, familias, fecha, lugar y responsables. La preparación no registra entregas ni consume mercadería.</CardDescription>
+          <CardDescription>{isMerendero ? "Organizá productos recibidos, cantidades, fecha, lugar y responsables. La preparación no registra entregas ni consume mercadería." : "Organizá módulos recibidos, familias, fecha, lugar y responsables. La preparación no registra entregas ni consume mercadería."}</CardDescription>
         </CardHeader>
         <CardContent>
           {error ? <Alert variant="destructive" className="mb-4"><AlertTitle>No se pudo guardar la preparación</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
           {notice ? <Alert variant="info" className="mb-4"><AlertTitle>Estado de la preparación</AlertTitle><AlertDescription>{notice}</AlertDescription></Alert> : null}
-          {!periodId ? <p className="text-sm text-muted-foreground">Seleccioná un período de módulos familiares para ver las recepciones disponibles.</p> : null}
-          {periodId && !receipts.length ? <p className="text-sm text-muted-foreground">No hay módulos recibidos disponibles para este período.</p> : null}
+          {!periodId ? <p className="text-sm text-muted-foreground">Seleccioná un período para ver sus recepciones disponibles.</p> : null}
+          {periodId && !isMerendero && !receipts.length ? <p className="text-sm text-muted-foreground">No hay módulos recibidos disponibles para este período.</p> : null}
+          {periodId && isMerendero && !supplyReceipts.length ? <p className="text-sm text-muted-foreground">No hay productos recibidos disponibles para este período.</p> : null}
           <form onSubmit={(event) => void createPreparation(event)} className="flex flex-col gap-5">
             <FieldGroup className="grid gap-4 sm:grid-cols-2">
               <Field><FieldLabel htmlFor="distribution-date">Fecha de la jornada</FieldLabel><Input id="distribution-date" type="date" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} required disabled={!canWrite || isSaving} /></Field>
@@ -211,7 +236,7 @@ export function DistributionPreparationPanel({ data, periodId, userId, sessionEx
               <Field className="sm:col-span-2"><FieldLabel htmlFor="distribution-responsible">Responsables</FieldLabel><Input id="distribution-responsible" value={responsibleNames} onChange={(event) => setResponsibleNames(event.target.value)} maxLength={300} required disabled={!canWrite || isSaving} /></Field>
               <Field className="sm:col-span-2"><FieldLabel htmlFor="distribution-notes">Observaciones</FieldLabel><Textarea id="distribution-notes" value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={1000} disabled={!canWrite || isSaving} /></Field>
             </FieldGroup>
-            <div className="flex flex-col gap-3">
+            {!isMerendero ? <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-end justify-between gap-2"><div><h3 className="text-sm font-semibold">Asignaciones por familia</h3><p className="text-xs text-muted-foreground">Cada fila vincula una familia con el remito que respalda sus módulos.</p></div><Badge variant="outline">{totalAssigned} módulos previstos</Badge></div>
               {allocations.map((allocation, index) => {
                 const selectedReceipt = receipts.find((receipt) => receipt.id === allocation.remittanceId);
@@ -228,16 +253,32 @@ export function DistributionPreparationPanel({ data, periodId, userId, sessionEx
                 </div>;
               })}
               <Button type="button" variant="outline" className="w-fit" onClick={() => setAllocations((current) => [...current, createEmptyAllocationRow()])} disabled={!canWrite || isSaving}><HugeiconsIcon icon={PlusSignIcon} data-icon="inline-start" /> Agregar familia</Button>
-            </div>
+            </div> : <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-end justify-between gap-2"><div><h3 className="text-sm font-semibold">Insumos para el merendero</h3><p className="text-xs text-muted-foreground">Las cantidades conservan la unidad del producto en su recepción. No se convierten en módulos ni se descuentan al preparar.</p></div><Badge variant="outline">{formatSupplyAllocationCount(supplyAllocations.length)}</Badge></div>
+              {supplyAllocations.map((allocation, index) => {
+                const receipt = supplyReceipts.find((entry) => entry.id === allocation.receiptItemId);
+                const alreadySelected = supplyAllocations.filter((entry) => entry.receiptItemId === allocation.receiptItemId).reduce((total, entry) => total + Number(entry.quantity || 0), 0);
+                let available: number | undefined;
+                if (receipt) {
+                  available = receipt.remainingQuantity - (alreadySelected - Number(allocation.quantity || 0));
+                }
+                return <div key={index} className="grid gap-3 rounded-xl border border-border p-3 sm:grid-cols-[1.7fr_0.8fr_1fr] sm:items-end">
+                  <Field><FieldLabel htmlFor={`supply-source-${index}`}>Producto y remito</FieldLabel><Select value={allocation.receiptItemId} onValueChange={(receiptItemId) => setSupplyAllocations((current) => current.map((entry, row) => row === index ? { ...entry, receiptItemId } : entry))} disabled={!canWrite || isSaving}><SelectTrigger id={`supply-source-${index}`}><SelectValue placeholder="Seleccionar recepción" /></SelectTrigger><SelectContent>{supplyReceipts.map((item) => <SelectItem key={item.id} value={item.id}>{item.productName} {item.presentation} - {item.remittanceNumber} - disponibles {item.remainingQuantity} {item.unit}</SelectItem>)}</SelectContent></Select></Field>
+                  <Field><FieldLabel htmlFor={`supply-quantity-${index}`}>Cantidad {receipt?.unit ?? ""}</FieldLabel><Input id={`supply-quantity-${index}`} type="number" min="0.001" step="0.001" max={available} value={allocation.quantity} onChange={(event) => setSupplyAllocations((current) => current.map((entry, row) => row === index ? { ...entry, quantity: event.target.value } : entry))} required disabled={!canWrite || isSaving} /></Field>
+                  <Field><FieldLabel htmlFor={`supply-notes-${index}`}>Observación</FieldLabel><Input id={`supply-notes-${index}`} maxLength={500} value={allocation.notes} onChange={(event) => setSupplyAllocations((current) => current.map((entry, row) => row === index ? { ...entry, notes: event.target.value } : entry))} disabled={!canWrite || isSaving} /></Field>
+                </div>;
+              })}
+              <Button type="button" variant="outline" className="w-fit" onClick={() => setSupplyAllocations((current) => [...current, createEmptySupplyAllocationRow()])} disabled={!canWrite || isSaving}><HugeiconsIcon icon={PlusSignIcon} data-icon="inline-start" /> Agregar producto</Button>
+            </div>}
             {!canWrite ? <p className="text-sm text-muted-foreground">Tu rol puede consultar las jornadas, pero no preparar nuevas.</p> : null}
-            <Button type="submit" className="w-full sm:w-fit" disabled={!canWrite || isSaving || !receipts.length}>{isSaving ? "Guardando preparación…" : "Guardar y descargar planilla"}</Button>
+            <Button type="submit" className="w-full sm:w-fit" disabled={!canWrite || isSaving || (isMerendero && !supplyReceipts.length) || (!isMerendero && !receipts.length)}>{isSaving ? "Guardando preparación…" : "Guardar y descargar planilla"}</Button>
           </form>
         </CardContent>
       </Card>
       <Card>
         <CardHeader><CardTitle>Jornadas preparadas</CardTitle><CardDescription>Los reportes se pueden volver a descargar sin crear movimientos nuevos.</CardDescription></CardHeader>
         <CardContent>
-          {data.distributionEvents.filter((event) => event.periodId === periodId).length ? <ul className="divide-y divide-border">{data.distributionEvents.filter((event) => event.periodId === periodId).map((event) => <li key={event.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium">{event.scheduledAt} · {event.location}</p><p className="text-sm text-muted-foreground">{event.allocations.length} asignaciones · {event.allocations.reduce((total, allocation) => total + allocation.moduleQuantity, 0)} módulos · {event.responsibleNames}</p><p className="text-xs text-muted-foreground">{event.allocations.map((allocation) => `${allocation.familyName} (${allocation.remittanceNumber})`).join(" · ")}</p></div><Button variant="outline" size="sm" onClick={() => void downloadEventReport(event)}><HugeiconsIcon icon={Download04Icon} data-icon="inline-start" /> {DELIVERY_REPORT_TEXT.DOWNLOAD}</Button></li>)}</ul> : <p className="rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">No hay jornadas guardadas para este período todavía.</p>}
+          {data.distributionEvents.filter((event) => event.periodId === periodId).length ? <ul className="divide-y divide-border">{data.distributionEvents.filter((event) => event.periodId === periodId).map((event) => <li key={event.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium">{event.scheduledAt} · {event.location}</p><p className="text-sm text-muted-foreground">{event.allocations.length ? `${event.allocations.length} familias · ${event.allocations.reduce((total, allocation) => total + allocation.moduleQuantity, 0)} módulos` : `${event.supplyAllocations.length} insumos · cantidades por unidad de producto`} · {event.responsibleNames}</p><p className="text-xs text-muted-foreground">{[...event.allocations.map((allocation) => `${allocation.familyName} (${allocation.remittanceNumber})`), ...event.supplyAllocations.map((allocation) => `${allocation.productName} ${allocation.presentation}: ${allocation.quantity} ${allocation.unit} (${allocation.remittanceNumber})`)].join(" · ")}</p></div><Button variant="outline" size="sm" onClick={() => void downloadEventReport(event)}><HugeiconsIcon icon={Download04Icon} data-icon="inline-start" /> {DELIVERY_REPORT_TEXT.DOWNLOAD}</Button></li>)}</ul> : <p className="rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">No hay jornadas guardadas para este período todavía.</p>}
         </CardContent>
       </Card>
     </section>

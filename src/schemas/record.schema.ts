@@ -28,11 +28,19 @@ export const distributionPreparationPayloadSchema = z.object({
     remittanceId: z.string().trim().min(1).max(80),
     moduleQuantity: z.number().int().positive().max(1000),
     notes: z.string().trim().max(500).optional(),
-  }).strict()).min(1).max(1000),
-}).strict().refine((payload) => {
+  }).strict()).max(1000),
+  supplyAllocations: z.array(z.object({
+    receiptItemId: z.string().trim().min(1).max(80),
+    quantity: z.number().positive().max(100000),
+    notes: z.string().trim().max(500).optional(),
+  }).strict()).max(1000).default([]),
+}).strict().refine((payload) => payload.allocations.length + payload.supplyAllocations.length > 0, { message: DELIVERY_VALIDATION_MESSAGES.ASIGNACION_REQUERIDA, path: ["allocations"] }).refine((payload) => {
   const keys = payload.allocations.map((allocation) => `${allocation.familyId}:${allocation.remittanceId}`);
   return new Set(keys).size === keys.length;
-}, { message: DELIVERY_VALIDATION_MESSAGES.REPEATED_SELECTION, path: ["allocations"] });
+}, { message: DELIVERY_VALIDATION_MESSAGES.REPEATED_SELECTION, path: ["allocations"] }).refine((payload) => {
+  const keys = payload.supplyAllocations.map((allocation) => allocation.receiptItemId);
+  return new Set(keys).size === keys.length;
+}, { message: DELIVERY_VALIDATION_MESSAGES.REPEATED_SELECTION, path: ["supplyAllocations"] });
 
 export const beneficiarySheetSchema = z.object({
   periodId: z.string().trim().min(1).max(80),
@@ -71,6 +79,7 @@ export const recordsCollectionSchema = z.object({
     id: z.string().min(1),
     label: z.string(),
     agency: z.string(),
+    destination: z.enum(["FAMILIES", "MERENDERO"]).default("FAMILIES"),
     startsAt: z.iso.datetime(),
     endsAt: z.iso.datetime(),
   })),
@@ -100,11 +109,15 @@ export const recordsCollectionSchema = z.object({
     id: z.string(), periodId: z.string(), periodLabel: z.string(), requestNumber: z.string(), remittanceNumber: z.string(), receivedAt: z.iso.datetime(),
     receivedQuantity: z.number(), assignedQuantity: z.number(), remainingQuantity: z.number(),
   })).default([]),
+  supplyReceipts: z.array(z.object({
+    id: z.string(), periodId: z.string(), periodLabel: z.string(), requestNumber: z.string(), remittanceNumber: z.string(), receivedAt: z.iso.datetime(),
+    productName: z.string(), presentation: z.string(), unit: z.string(), receivedQuantity: z.number(), assignedQuantity: z.number(), remainingQuantity: z.number(),
+  })).default([]),
   distributionEvents: z.array(z.object({
     id: z.string(), version: z.number().int().positive(), periodId: z.string(), scheduledAt: z.iso.date(), location: z.string(),
     responsibleNames: z.string(), notes: z.string().nullable(), allocations: z.array(z.object({
       id: z.string(), familyId: z.string(), familyName: z.string(), remittanceId: z.string(), remittanceNumber: z.string(), moduleQuantity: z.number().int().positive(), notes: z.string().nullable(),
-    })),
+    })), supplyAllocations: z.array(z.object({ id: z.string(), receiptItemId: z.string(), productName: z.string(), presentation: z.string(), unit: z.string(), remittanceNumber: z.string(), quantity: z.number(), notes: z.string().nullable() })).default([]),
   })).default([]),
 });
 

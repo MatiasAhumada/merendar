@@ -48,7 +48,7 @@ interface DeliveryWorkbenchProps {
   preparedDocuments?: OfflinePreparedDocument[];
 }
 
-const emptyData: WorkbenchData = { periods: [], families: [], records: [], sheets: [], moduleReceipts: [], distributionEvents: [] };
+const emptyData: WorkbenchData = { periods: [], families: [], records: [], sheets: [], moduleReceipts: [], supplyReceipts: [], distributionEvents: [] };
 
 function localDate() {
   const date = new Date();
@@ -149,6 +149,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
   }, [userId]);
 
   const selectedPeriod = data.periods.find((period) => period.id === periodId);
+  const isFamilyPeriod = selectedPeriod?.destination === "FAMILIES";
   const selectedFamily = data.families.find((family) => family.id === familyId);
   const familyMembers = selectedFamily?.members ?? [];
   const currentRecords = data.records.filter((record) => record.periodId === periodId);
@@ -490,11 +491,12 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
             {periodAvailabilityMessage ? <div className="mt-2 flex flex-col items-start gap-2 sm:flex-row sm:items-center"><FieldDescription>{periodAvailabilityMessage}</FieldDescription>{offlineMode && !data.periods.length ? <FieldDescription>{DELIVERY_UI_TEXT.CONECTATE_PARA_CARGAR_UN_PERIODO_Y_VOLVE_A_PREPARAR_REGISTRO}</FieldDescription> : null}{!isLoading && !loadFailed && isOnline && !offlineMode && !data.periods.length && canCreatePeriods ? <Button asChild variant="outline" size="sm"><Link href="/mercaderia#periodos">{DELIVERY_UI_TEXT.CREAR_UN_PERIODO_EN_MERCADERIA}</Link></Button> : null}{!isLoading && !loadFailed && isOnline && !offlineMode && !data.periods.length && !canCreatePeriods ? <FieldDescription>{APPLICATION_UI_TEXT.PEDILE_A_PRESIDENCIA_O_SECRETARIA_QUE_CARGUE_UN_PERIODO}</FieldDescription> : null}</div> : null}
           </Field>
           {selectedPeriod ? <p className="mt-3 text-xs text-muted-foreground">{DELIVERY_UI_TEXT.VIGENCIA}{selectedPeriod.startsAt.slice(0, 10)} {DELIVERY_UI_TEXT.AL}{selectedPeriod.endsAt.slice(0, 10)}</p> : null}
+          {selectedPeriod && !isFamilyPeriod ? <p className="mt-2 text-sm text-muted-foreground">{DELIVERY_UI_TEXT.PERIODO_DE_INSUMOS_MERENDERO}</p> : null}
         </CardContent>
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
-        {canWrite ? <Card>
+        {canWrite && isFamilyPeriod ? <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><HugeiconsIcon icon={PackageIcon} className="text-primary" /> {DELIVERY_UI_TEXT.REGISTRAR_BENEFICIARIO}</CardTitle>
             <CardDescription>{DELIVERY_UI_TEXT.LOS_CAMBIOS_SE_GUARDAN_EN_EL_SERVIDOR_O_QUEDAN_EN_LA_COLA_LOCAL_HASTA_RE}</CardDescription>
@@ -550,7 +552,7 @@ export function DeliveryWorkbench({ userId, sessionExpiresAt, canWrite, canCreat
           </CardContent>
         </Card> : null}
 
-        {canWrite ? <Card>
+        {canWrite && isFamilyPeriod ? <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><HugeiconsIcon icon={UserGroupIcon} className="text-primary" /> {DELIVERY_UI_TEXT.PLANILLA_PARA_FIRMA_EN_PAPEL}</CardTitle>
             <CardDescription>{DELIVERY_UI_TEXT.SELECCIONA_PERSONAS_DEL_PADRON_LA_DESCARGA_NO_DEPENDE_DE_CONFIRMAR_SUS_E}</CardDescription>
