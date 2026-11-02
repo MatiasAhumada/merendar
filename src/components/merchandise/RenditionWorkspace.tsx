@@ -5,7 +5,7 @@ import type { z } from "zod";
 import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
 import { COMMON_UI_TEXT } from "@/constants/common-ui.constant";
 import { MERCHANDISE_UI_TEXT, MERCHANDISE_ERROR_MESSAGES } from "@/constants/merchandise.constant";
-import { RENDITION_UI_TEXT, RENDITION_DOCUMENT_LABELS, RENDITION_DOCUMENT_TYPES, RENDITION_LIMITS } from "@/constants/rendition.constant";
+import { RENDITION_UI_TEXT, RENDITION_ERROR_MESSAGES, RENDITION_DOCUMENT_LABELS, RENDITION_DOCUMENT_TYPES, RENDITION_LIMITS } from "@/constants/rendition.constant";
 import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
 import { API_ROUTES } from "@/constants/routes.constant";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
@@ -22,17 +22,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { synchronizeOfflineQueue, enqueueOfflineOperation, listOfflineOperations, retryOfflineOperation, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { jsonValueSchema } from "@/schemas/offline.schema";
+import clientAxios from "@/utils/clientAxios.util";
 import Link from "next/link";
 
 import type { MerchandisePeriodRecord } from "@/interfaces/merchandise.interface";
+import type { RenditionEmissionOperationPayload, RenditionSubmissionOperationPayload } from "@/interfaces/rendition.interface";
 import type { OfflinePreparedDocument } from "@/services/offline-preparation.service";
 import type { OfflineOperation } from "@/types/offline-operation";
+import { createOfflineRenditionPackage } from "@/services/rendition-offline-pdf.service";
 import {
   renditionDocumentPayloadSchema,
   renditionReviewOperationPayloadSchema,
   renditionReviewPayloadSchema,
   renditionDocumentTypeSchema,
   renditionReviewStatusSchema,
+  renditionEmissionPayloadSchema,
+  renditionEmissionOperationPayloadSchema,
+  renditionSubmissionPayloadSchema,
+  renditionSubmissionOperationPayloadSchema,
 } from "@/schemas/rendition.schema";
 import type { RenditionDocumentPayload } from "@/types/schema-contracts";
 
@@ -127,6 +134,92 @@ function pendingReviewOperations(operations: OfflineOperation[]) {
   return pendingReviews;
 }
 
+function pendingSubmissionOperations(operations: OfflineOperation[]) {
+  const pendingSubmissions: Array<{ operation: OfflineOperation; payload: RenditionSubmissionOperationPayload }> = [];
+
+  for (const operation of operations) {
+    if (operation.resource !== "renditions" || operation.status === "synced") {
+      continue;
+    }
+    const parsedPayload = renditionSubmissionOperationPayloadSchema.safeParse(operation.payload);
+    if (parsedPayload.success) {
+      pendingSubmissions.push({ operation, payload: parsedPayload.data });
+    }
+  }
+  return pendingSubmissions;
+}
+
+function pendingEmissionOperations(operations: OfflineOperation[]) {
+  const pendingEmissions: Array<{ operation: OfflineOperation; payload: RenditionEmissionOperationPayload }> = [];
+
+  for (const operation of operations) {
+    if (operation.resource !== "renditions" || operation.status === "synced") {
+      continue;
+    }
+    const parsedPayload = renditionEmissionOperationPayloadSchema.safeParse(operation.payload);
+    if (parsedPayload.success) {
+      pendingEmissions.push({ operation, payload: parsedPayload.data });
+    }
+  }
+  return pendingEmissions;
+}
+
+function sourceDocumentIds(period: MerchandisePeriodRecord, renditionDocuments: Array<{ id: string }>) {
+  const ids = [
+    ...renditionDocuments.map((document) => document.id),
+    ...period.requests.flatMap((request) => [
+      ...request.documents.filter((document) => document.contentType === HTTP_CONTENT_TYPES.PDF).map((document) => document.id),
+      ...request.issuedDocuments.filter((document) => document.contentType === HTTP_CONTENT_TYPES.PDF).map((document) => document.id),
+      ...request.remittances.flatMap((remittance) => remittance.documents.filter((document) => document.contentType === HTTP_CONTENT_TYPES.PDF).map((document) => document.id)),
+    ]),
+  ];
+  return [...new Set(ids)];
+}
+
+function PendingOfflineEmissionDownload({ payload, period, sheet, preparedDocuments, pendingDocuments }: {
+  payload: RenditionEmissionOperationPayload;
+  period: MerchandisePeriodRecord;
+  sheet: { id: string; version: number; beneficiaryCount: number };
+  preparedDocuments: OfflinePreparedDocument[];
+  pendingDocuments: RenditionDocumentPayload["documents"];
+}) {
+  const [downloadUrl, setDownloadUrl] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    let generatedUrl = "";
+    void createOfflineRenditionPackage({
+      period,
+      sheet,
+      renditionId: payload.renditionId,
+      template: payload.template,
+      sourceDocumentIds: payload.sourceDocumentIds,
+      preparedDocuments,
+      pendingDocuments,
+    }).then((bytes) => {
+      generatedUrl = URL.createObjectURL(new Blob([bytes], { type: HTTP_CONTENT_TYPES.PDF }));
+      if (active) {
+        setDownloadUrl(generatedUrl);
+      } else {
+        URL.revokeObjectURL(generatedUrl);
+      }
+    }).catch(() => setDownloadUrl(""));
+
+    return () => {
+      active = false;
+      if (generatedUrl) {
+        URL.revokeObjectURL(generatedUrl);
+      }
+    };
+  }, [payload, period, pendingDocuments, preparedDocuments, sheet]);
+
+  if (!downloadUrl) {
+    return <Badge variant="secondary">{RENDITION_UI_TEXT.GENERANDO}</Badge>;
+  }
+
+  return <Button asChild size="sm" variant="outline"><a href={downloadUrl} download={`borrador-rendicion-offline-${payload.id}.pdf`}>{RENDITION_UI_TEXT.DESCARGAR_BORRADOR_LOCAL}</a></Button>;
+}
+
 function operationLabel(status: OfflineOperation["status"]) {
   if (status === "error" || status === "conflict") {
     return MERCHANDISE_UI_TEXT.ERROR_DE_CARGA;
@@ -182,6 +275,18 @@ function reviewLabel(status: "PENDIENTE" | "REVISADA" | "OBSERVADA") {
   return MERCHANDISE_UI_TEXT.PENDIENTE_DE_REVISION;
 }
 
+function emissionButtonLabel(isEmitting: boolean, isOnline: boolean, offlineMode: boolean) {
+  if (isEmitting) {
+    return RENDITION_UI_TEXT.GENERANDO;
+  }
+
+  if (!isOnline || offlineMode) {
+    return RENDITION_UI_TEXT.GENERAR_BORRADOR_LOCAL;
+  }
+
+  return RENDITION_UI_TEXT.REGISTRAR_EMISION_Y_DESCARGAR;
+}
+
 function reviewBadgeVariant(status: "PENDIENTE" | "REVISADA" | "OBSERVADA") {
   if (status === "REVISADA") {
     return "success" as const;
@@ -214,6 +319,10 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
   const [reviewStatus, setReviewStatus] = useState<"REVISADA" | "OBSERVADA">("REVISADA");
   const [reviewNotes, setReviewNotes] = useState("");
   const [reviewMessage, setReviewMessage] = useState("");
+  const [emissionMessage, setEmissionMessage] = useState("");
+  const [submissionMessage, setSubmissionMessage] = useState("");
+  const [isEmitting, setIsEmitting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const isOnline = useNetworkStatus();
 
   const refreshQueue = useCallback(async () => {
@@ -243,11 +352,21 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
   const selectedSheet = selectedPeriod?.beneficiarySheets.find((sheet) => sheet.id === selectedSheetId) ?? selectedPeriod?.beneficiarySheets[0];
   const selectedRendition = selectedPeriod?.renditions.find((rendition) => rendition.beneficiarySheetId === selectedSheet?.id);
   const visibleOperations = useMemo(() => renditionOperations(operations), [operations]);
+  const visibleEmissionOperations = useMemo(() => pendingEmissionOperations(operations), [operations]);
   const visibleReviewOperations = useMemo(() => pendingReviewOperations(operations), [operations]);
+  const visibleSubmissionOperations = useMemo(() => pendingSubmissionOperations(operations), [operations]);
   const visibleDocuments = selectedRendition?.documents ?? [];
   const currentDocuments = visibleDocuments.filter((document) => !visibleDocuments.some((candidate) => candidate.supersedesId === document.id));
   const queuedUploads = visibleOperations.filter(({ payload }) => payload.beneficiarySheetId === selectedSheet?.id);
   const pendingDocumentCount = queuedUploads.reduce((count, upload) => count + upload.payload.documents.length, 0);
+  const queuedEmissionsForSheet = visibleEmissionOperations.filter(({ payload }) => payload.beneficiarySheetId === selectedSheet?.id);
+  const renditionId = selectedRendition?.id ?? queuedUploads[0]?.payload.id ?? queuedEmissionsForSheet[0]?.payload.renditionId ?? "";
+  const queuedEmissions = queuedEmissionsForSheet.filter(({ payload }) => payload.renditionId === renditionId);
+  const latestQueuedEmission = queuedEmissions.at(-1);
+  let emissionSourceIds: string[] = [];
+  if (selectedPeriod) {
+    emissionSourceIds = [...new Set([...sourceDocumentIds(selectedPeriod, visibleDocuments), ...queuedUploads.flatMap(({ payload }) => payload.documents.map((document) => document.id))])];
+  }
   const queuedReview = visibleReviewOperations.find(({ payload }) => payload.id === selectedRendition?.id);
   const hasSignedSheet = currentDocuments.some((document) => document.documentType === RENDITION_DOCUMENT_TYPES.SIGNED_SHEET) ||
     queuedUploads.some(({ payload }) => payload.documents.some((document) => document.type === RENDITION_DOCUMENT_TYPES.SIGNED_SHEET));
@@ -402,6 +521,158 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
     }
   }
 
+  async function emitDraft(event: FormEvent<HTMLFormElement>, selectedRenditionId: string) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const payload = renditionEmissionPayloadSchema.safeParse({
+      renditionId,
+      template: {
+        issueDate: String(formData.get("issueDate") ?? ""),
+        locality: String(formData.get("locality") ?? ""),
+        recipient: String(formData.get("recipient") ?? ""),
+        recipientTitle: String(formData.get("recipientTitle") ?? ""),
+        associationName: String(formData.get("associationName") ?? ""),
+        associationResolution: String(formData.get("associationResolution") ?? ""),
+        associationAddress: String(formData.get("associationAddress") ?? ""),
+        associationPhone: String(formData.get("associationPhone") ?? ""),
+        associationEmail: String(formData.get("associationEmail") ?? ""),
+        observations: String(formData.get("observations") ?? ""),
+        signatories: [{ name: String(formData.get("signatoryName") ?? ""), title: String(formData.get("signatoryTitle") ?? "") }],
+      },
+    });
+
+    if (!payload.success) {
+      setEmissionMessage(payload.error.issues[0]?.message ?? RENDITION_ERROR_MESSAGES.REVISA_LOS_DATOS_INGRESADOS);
+      return;
+    }
+
+    setIsEmitting(true);
+    setEmissionMessage("");
+    try {
+      if (!isOnline || offlineMode) {
+        if (!selectedPeriod || !selectedSheet) {
+          throw new Error(RENDITION_ERROR_MESSAGES.LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP);
+        }
+        const resolvedRenditionId = selectedRenditionId || crypto.randomUUID();
+        const operationPayload = renditionEmissionOperationPayloadSchema.safeParse({
+          kind: "rendition_emission",
+          id: crypto.randomUUID(),
+          renditionId: resolvedRenditionId,
+          periodId: selectedPeriod.id,
+          beneficiarySheetId: selectedSheet.id,
+          sourceDocumentIds: emissionSourceIds,
+          template: payload.data.template,
+        });
+        if (!operationPayload.success) {
+          throw new Error(operationPayload.error.issues[0]?.message ?? RENDITION_ERROR_MESSAGES.REVISA_LOS_DATOS_DE_LA_EMISION);
+        }
+
+        const dependencies = queuedUploads.map(({ operation }) => operation.operationId);
+        await enqueueOfflineOperation(userId, sessionExpiresAt, {
+          resource: "renditions",
+          resourceId: operationPayload.data.id,
+          operation: "create",
+          baseVersion: null,
+          dependencies,
+          payload: jsonValueSchema.parse(JSON.parse(JSON.stringify(operationPayload.data))),
+        });
+        setEmissionMessage(RENDITION_UI_TEXT.BORRADOR_OFFLINE_PENDIENTE_DE_SINCRONIZACION);
+        await refreshQueue();
+        return;
+      }
+
+      if (!selectedRenditionId) {
+        throw new Error(RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_RENDICION_SELECCIONADA);
+      }
+
+      const response = await clientAxios.post<{ emission: { id: string; version: number } }>(API_ROUTES.RENDITION_EMISSION(selectedRenditionId), payload.data);
+      const packageUrl = API_ROUTES.RENDITION_EMISSION_DOCUMENT(response.data.emission.id, "package");
+      const downloadLink = document.createElement("a");
+      downloadLink.href = packageUrl;
+      downloadLink.download = `expediente-rendicion-v${response.data.emission.version}.pdf`;
+      downloadLink.click();
+      setEmissionMessage(`${RENDITION_UI_TEXT.EMISION_DOCUMENTAL}: v${response.data.emission.version}. ${RENDITION_UI_TEXT.LA_EMISION_NO_ACREDITA_PRESENTACION}`);
+      await onRefresh();
+    } catch (error) {
+      setEmissionMessage(errorMessage(error));
+    } finally {
+      setIsEmitting(false);
+    }
+  }
+
+  async function registerSubmission(event: FormEvent<HTMLFormElement>, renditionId: string) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const formData = new FormData(formElement);
+    const evidenceFile = formData.get("evidenceDocument");
+    let evidenceDocument: { id: string; originalName: string; contentBase64: string } | undefined;
+
+    try {
+      if (evidenceFile instanceof File && evidenceFile.size > 0) {
+        const encodedEvidence = await encodePdf(evidenceFile);
+        evidenceDocument = {
+          id: crypto.randomUUID(),
+          originalName: encodedEvidence.originalName,
+          contentBase64: encodedEvidence.contentBase64,
+        };
+      }
+      const submissionInput = {
+        submittedAt: String(formData.get("submittedAt") ?? ""),
+        recipient: String(formData.get("submissionRecipient") ?? ""),
+        externalReference: String(formData.get("externalReference") ?? ""),
+        notes: String(formData.get("submissionNotes") ?? ""),
+      };
+      if (evidenceDocument) {
+        Object.assign(submissionInput, { evidenceDocument });
+      }
+      const payload = renditionSubmissionPayloadSchema.safeParse(submissionInput);
+
+      if (!payload.success) {
+        setSubmissionMessage(payload.error.issues[0]?.message ?? RENDITION_ERROR_MESSAGES.REVISA_LOS_DATOS_INGRESADOS);
+        return;
+      }
+
+      setIsSubmitting(true);
+      setSubmissionMessage("");
+      if (!isOnline || offlineMode) {
+        const latestEmissionId = latestQueuedEmission?.payload.id ?? selectedRendition?.emissions[0]?.id;
+        if (!latestEmissionId) {
+          throw new Error(RENDITION_ERROR_MESSAGES.EMITE_UN_BORRADOR_ANTES_DE_REGISTRAR_LA_PRESENTACION);
+        }
+        const queuedPayload = renditionSubmissionOperationPayloadSchema.parse({
+          kind: "rendition_submission",
+          id: renditionId,
+          renditionId,
+          emissionId: latestEmissionId,
+          ...payload.data,
+        });
+        const dependencies: string[] = [];
+        if (latestQueuedEmission) {
+          dependencies.push(latestQueuedEmission.operation.operationId);
+        }
+        await enqueueOfflineOperation(userId, sessionExpiresAt, {
+          resource: "renditions",
+          resourceId: renditionId,
+          operation: "create",
+          baseVersion: null,
+          dependencies,
+          payload: jsonValueSchema.parse(JSON.parse(JSON.stringify(queuedPayload))),
+        });
+        setSubmissionMessage(RENDITION_UI_TEXT.PRESENTACION_PENDIENTE_EN_ESTE_DISPOSITIVO);
+        await refreshQueue();
+      } else {
+        await clientAxios.post(API_ROUTES.RENDITION_SUBMISSION(renditionId), payload.data);
+        setSubmissionMessage(RENDITION_UI_TEXT.PRESENTACION_NO_AUTOMATICA);
+        await onRefresh();
+      }
+      formElement.reset();
+    } catch (error) {
+      setSubmissionMessage(errorMessage(error));
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   return <Card id="rendiciones" aria-labelledby="renditions-title" className="scroll-mt-28">
     <CardHeader>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -437,6 +708,67 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         <p className="text-sm"><strong>{RENDITION_UI_TEXT.REFERENCIA_VINCULADA}</strong> {RENDITION_UI_TEXT.PLANILLA_VERSION}{selectedSheet.version} {APPLICATION_UI_TEXT.TEXT}{selectedSheet.beneficiaryCount} {RENDITION_UI_TEXT.BENEFICIARIOS_EMITIDA_EL}{formatDate(selectedSheet.createdAt)}{RENDITION_UI_TEXT.TEXT}</p>
         <SheetDocumentLink sheetId={selectedSheet.id} offlineMode={offlineMode} preparedDocuments={preparedDocuments} />
       </div> : null}
+
+      {canWrite && selectedPeriod && selectedSheet ? <section className="space-y-4 rounded-2xl border p-4" aria-labelledby="rendition-emission-title">
+        <div className="space-y-1">
+          <h3 id="rendition-emission-title" className="font-semibold">{RENDITION_UI_TEXT.EMITIR_NOTA_Y_EXPEDIENTE}</h3>
+          <p className="text-sm text-muted-foreground">{RENDITION_UI_TEXT.LA_EMISION_NO_ACREDITA_PRESENTACION}</p>
+        </div>
+        <Alert variant="info"><AlertTitle>{RENDITION_UI_TEXT.BORRADOR_INTERNO}</AlertTitle><AlertDescription>{RENDITION_UI_TEXT.LA_EMISION_NO_ACREDITA_PRESENTACION}</AlertDescription></Alert>
+        <form className="space-y-4" onSubmit={(event) => void emitDraft(event, renditionId)}>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field><FieldLabel htmlFor="rendition-issue-date">{RENDITION_UI_TEXT.FECHA_EMISION}</FieldLabel><Input id="rendition-issue-date" name="issueDate" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required /></Field>
+            <Field><FieldLabel htmlFor="rendition-locality">{RENDITION_UI_TEXT.LOCALIDAD}</FieldLabel><Input id="rendition-locality" name="locality" maxLength={120} required /></Field>
+            <Field><FieldLabel htmlFor="rendition-recipient">{RENDITION_UI_TEXT.ORGANISMO_DESTINATARIO}</FieldLabel><Input id="rendition-recipient" name="recipient" defaultValue={selectedPeriod?.agency ?? ""} maxLength={160} required /></Field>
+            <Field><FieldLabel htmlFor="rendition-recipient-title">{RENDITION_UI_TEXT.CARGO_DESTINATARIO}</FieldLabel><Input id="rendition-recipient-title" name="recipientTitle" maxLength={160} /></Field>
+            <Field><FieldLabel htmlFor="rendition-association-name">{RENDITION_UI_TEXT.ASOCIACION}</FieldLabel><Input id="rendition-association-name" name="associationName" maxLength={160} required /></Field>
+            <Field><FieldLabel htmlFor="rendition-association-resolution">{RENDITION_UI_TEXT.RESOLUCION_INSTITUCIONAL}</FieldLabel><Input id="rendition-association-resolution" name="associationResolution" maxLength={120} /></Field>
+            <Field className="sm:col-span-2"><FieldLabel htmlFor="rendition-association-address">{RENDITION_UI_TEXT.DOMICILIO_INSTITUCIONAL}</FieldLabel><Input id="rendition-association-address" name="associationAddress" maxLength={200} /></Field>
+            <Field><FieldLabel htmlFor="rendition-association-phone">{RENDITION_UI_TEXT.TELEFONO_INSTITUCIONAL}</FieldLabel><Input id="rendition-association-phone" name="associationPhone" maxLength={40} /></Field>
+            <Field><FieldLabel htmlFor="rendition-association-email">{RENDITION_UI_TEXT.CORREO_INSTITUCIONAL}</FieldLabel><Input id="rendition-association-email" name="associationEmail" type="email" maxLength={160} /></Field>
+            <Field className="sm:col-span-2"><FieldLabel htmlFor="rendition-observations">{RENDITION_UI_TEXT.OBSERVACIONES_Y_JUSTIFICACIONES}</FieldLabel><Textarea id="rendition-observations" name="observations" maxLength={1000} rows={3} /></Field>
+            <Field><FieldLabel htmlFor="rendition-signatory-name">{RENDITION_UI_TEXT.FIRMANTE}</FieldLabel><Input id="rendition-signatory-name" name="signatoryName" maxLength={120} required /></Field>
+            <Field><FieldLabel htmlFor="rendition-signatory-title">{RENDITION_UI_TEXT.CARGO_FIRMANTE}</FieldLabel><Input id="rendition-signatory-title" name="signatoryTitle" maxLength={120} required /></Field>
+          </div>
+          {emissionMessage ? <Alert variant={emissionMessage.includes(RENDITION_UI_TEXT.EMISION_DOCUMENTAL) ? "info" : "destructive"}><AlertDescription>{emissionMessage}</AlertDescription></Alert> : null}
+          <Button type="submit" disabled={isEmitting}>{emissionButtonLabel(isEmitting, isOnline, offlineMode)}</Button>
+        </form>
+        {selectedRendition?.emissions.length ? <ul className="space-y-2" aria-label={RENDITION_UI_TEXT.EMISIONES_ANTERIORES}>{selectedRendition.emissions.map((emission) => <li key={emission.id} className="flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm">
+          <span>{RENDITION_UI_TEXT.EMISION_DOCUMENTAL} v{emission.version} · {formatDate(emission.createdAt)}</span>
+          <Button asChild size="sm" variant="outline"><a href={API_ROUTES.RENDITION_EMISSION_DOCUMENT(emission.id, "note")}>{RENDITION_UI_TEXT.DESCARGAR_NOTA}</a></Button>
+          <Button asChild size="sm" variant="outline"><a href={API_ROUTES.RENDITION_EMISSION_DOCUMENT(emission.id, "summary")}>{RENDITION_UI_TEXT.DESCARGAR_RESUMEN}</a></Button>
+          <Button asChild size="sm" variant="secondary"><a href={API_ROUTES.RENDITION_EMISSION_DOCUMENT(emission.id, "package")}>{RENDITION_UI_TEXT.DESCARGAR_EXPEDIENTE}</a></Button>
+        </li>)}</ul> : null}
+        {queuedEmissions.map(({ operation, payload }) => <Alert key={operation.operationId} variant={operation.status === "error" || operation.status === "conflict" ? "destructive" : "info"}>
+          <AlertTitle>{RENDITION_UI_TEXT.EMISION_OFFLINE_PENDIENTE}</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center gap-2">{operation.message ?? RENDITION_UI_TEXT.BORRADOR_OFFLINE_PENDIENTE_DE_SINCRONIZACION}<PendingOfflineEmissionDownload payload={payload} period={selectedPeriod} sheet={selectedSheet} preparedDocuments={preparedDocuments} pendingDocuments={queuedUploads.flatMap(({ payload: uploadPayload }) => uploadPayload.documents)} /></AlertDescription>
+        </Alert>)}
+        <div className="space-y-3 border-t pt-4">
+          <div><h4 className="font-semibold">{RENDITION_UI_TEXT.REGISTRAR_PRESENTACION}</h4><p className="text-sm text-muted-foreground">{RENDITION_UI_TEXT.PRESENTACION_NO_AUTOMATICA}</p></div>
+          {!isOnline || offlineMode ? <form className="space-y-3" onSubmit={(event) => void registerSubmission(event, renditionId)}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field><FieldLabel htmlFor="rendition-submission-date">{RENDITION_UI_TEXT.FECHA_PRESENTACION}</FieldLabel><Input id="rendition-submission-date" name="submittedAt" type="date" defaultValue={new Date().toISOString().slice(0, 10)} required /></Field>
+              <Field><FieldLabel htmlFor="rendition-submission-recipient">{RENDITION_UI_TEXT.DESTINATARIO_PRESENTACION}</FieldLabel><Input id="rendition-submission-recipient" name="submissionRecipient" defaultValue={selectedPeriod?.agency ?? ""} maxLength={160} required /></Field>
+              <Field><FieldLabel htmlFor="rendition-external-reference">{RENDITION_UI_TEXT.REFERENCIA_PRESENTACION}</FieldLabel><Input id="rendition-external-reference" name="externalReference" maxLength={160} /></Field>
+              <Field><FieldLabel htmlFor="rendition-evidence">{RENDITION_UI_TEXT.EVIDENCIA_PRESENTACION}</FieldLabel><Input id="rendition-evidence" name="evidenceDocument" type="file" accept="application/pdf,.pdf" /></Field>
+              <Field className="sm:col-span-2"><FieldLabel htmlFor="rendition-submission-notes">{RENDITION_UI_TEXT.NOTAS_PRESENTACION}</FieldLabel><Textarea id="rendition-submission-notes" name="submissionNotes" maxLength={1000} rows={2} /></Field>
+            </div>
+            {submissionMessage ? <Alert variant={submissionMessage === RENDITION_UI_TEXT.PRESENTACION_NO_AUTOMATICA ? "info" : "destructive"}><AlertDescription>{submissionMessage}</AlertDescription></Alert> : null}
+            <Button type="submit" variant="outline" disabled={isSubmitting || (!selectedRendition?.emissions.length && !queuedEmissions.length)}>{isSubmitting ? MERCHANDISE_UI_TEXT.GUARDANDO : RENDITION_UI_TEXT.GUARDAR_PRESENTACION}</Button>
+          </form> : <Alert variant="info"><AlertDescription>{RENDITION_UI_TEXT.LA_PRESENTACION_REQUIERE_CONEXION_PARA_CONFIRMAR_EL_REGISTRO}</AlertDescription></Alert>}
+          {selectedRendition?.submissions.length ? <ul className="space-y-2" aria-label={RENDITION_UI_TEXT.PRESENTACIONES_REGISTRADAS}>{selectedRendition.submissions.map((submission) => <li key={submission.id} className="space-y-1 rounded-lg border p-3 text-sm">
+            <p className="font-medium">{formatDate(submission.submittedAt)} · {submission.recipient}</p>
+            <p className="text-muted-foreground">{RENDITION_UI_TEXT.EMISION_DOCUMENTAL} {selectedRendition.emissions.find((emission) => emission.id === submission.emissionId)?.version ?? ""}</p>
+      <p className="text-muted-foreground">{RENDITION_UI_TEXT.RESPONSABLE} {submission.recordedBy.name}{submission.externalReference ? ` · ${RENDITION_UI_TEXT.REFERENCIA}: ${submission.externalReference}` : ""}</p>
+            {submission.notes ? <p>{submission.notes}</p> : null}
+            {submission.evidenceDocumentId ? <Button asChild size="sm" variant="outline"><a href={API_ROUTES.RENDITION_DOCUMENT(submission.evidenceDocumentId)}>{RENDITION_UI_TEXT.ABRIR_CONSTANCIA}</a></Button> : null}
+          </li>)}</ul> : null}
+          {visibleSubmissionOperations.filter(({ payload }) => payload.renditionId === renditionId).map(({ operation, payload }) => <Alert key={operation.operationId} variant={operation.status === "error" || operation.status === "conflict" ? "destructive" : "info"}>
+            <AlertTitle>{payload.recipient} · {formatDate(payload.submittedAt)}</AlertTitle>
+            <AlertDescription>{operation.message ?? RENDITION_UI_TEXT.PRESENTACION_PENDIENTE_EN_ESTE_DISPOSITIVO}</AlertDescription>
+          </Alert>)}
+        </div>
+      </section> : null}
 
       {canWrite && selectedSheet ? <form className="space-y-4 rounded-2xl border p-4" onSubmit={(event) => void submitDocuments(event)}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

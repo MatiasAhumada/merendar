@@ -42,6 +42,11 @@ export const merchandiseRepository = {
               select: { id: true, documentType: true, version: true, supersedesId: true, originalName: true, byteSize: true, createdAt: true },
               orderBy: [{ documentType: "asc" }, { version: "asc" }],
             },
+            emissions: { select: { id: true, version: true, createdAt: true }, orderBy: { version: "desc" } },
+            submissions: {
+              include: { recordedBy: { select: { id: true, name: true } } },
+              orderBy: { submittedAt: "desc" },
+            },
           },
           orderBy: { createdAt: "desc" },
         },

@@ -9,6 +9,55 @@ export const renditionDocumentTypeSchema = z.enum([
 ]);
 export const renditionReviewStatusSchema = z.enum(["REVISADA", "OBSERVADA"]);
 
+export const renditionEmissionTemplateSchema = z.object({
+  issueDate: z.iso.date(),
+  locality: z.string().trim().min(2).max(120),
+  recipient: z.string().trim().min(2).max(160),
+  recipientTitle: z.string().trim().max(160),
+  associationName: z.string().trim().min(2).max(160),
+  associationResolution: z.string().trim().max(120),
+  associationAddress: z.string().trim().max(200),
+  associationPhone: z.string().trim().max(40),
+  associationEmail: z.union([z.email().max(160), z.literal("")]),
+  observations: z.string().trim().max(1000),
+  signatories: z.array(z.object({ name: z.string().trim().min(2).max(120), title: z.string().trim().min(2).max(120) }).strict()).min(1).max(4),
+}).strict();
+
+export const renditionEmissionPayloadSchema = z.object({
+  renditionId: z.string().trim().min(1).max(80),
+  template: renditionEmissionTemplateSchema,
+}).strict();
+
+export const renditionEmissionOperationPayloadSchema = z.object({
+  kind: z.literal("rendition_emission"),
+  id: z.uuid(),
+  renditionId: z.string().trim().min(1).max(80),
+  periodId: z.string().trim().min(1).max(80),
+  beneficiarySheetId: z.string().trim().min(1).max(80),
+  sourceDocumentIds: z.array(z.string().trim().min(1).max(80)).max(30),
+  template: renditionEmissionTemplateSchema,
+}).strict();
+
+export const renditionSubmissionPayloadSchema = z.object({
+  submittedAt: z.iso.date(),
+  recipient: z.string().trim().min(2).max(160),
+  externalReference: z.string().trim().max(160).optional(),
+  notes: z.string().trim().max(1000).optional(),
+  evidenceDocument: z.object({
+    id: z.uuid(),
+    originalName: z.string().trim().min(1).max(RENDITION_LIMITS.MAX_FILENAME_LENGTH),
+    contentBase64: z.string().max(1_000_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+  }).optional(),
+}).strict();
+
+export const renditionSubmissionOperationPayloadSchema = z.object({
+  kind: z.literal("rendition_submission"),
+  id: z.string().trim().min(1).max(80),
+  renditionId: z.string().trim().min(1).max(80),
+  emissionId: z.string().trim().min(1).max(80),
+  ...renditionSubmissionPayloadSchema.shape,
+}).strict();
+
 const documentSchema = z.object({
   id: z.string().trim().min(1).max(80),
   type: renditionDocumentTypeSchema,
@@ -64,6 +113,8 @@ export const renditionReviewOperationPayloadSchema = z.object({
 
 export const renditionSynchronizationPayloadSchema = z.discriminatedUnion("kind", [
   renditionDocumentPayloadSchema,
+  renditionEmissionOperationPayloadSchema,
   renditionReviewOperationPayloadSchema,
+  renditionSubmissionOperationPayloadSchema,
 ]);
 

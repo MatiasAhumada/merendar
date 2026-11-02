@@ -64,6 +64,11 @@ self.addEventListener("fetch", (event) => {
       if (cachedShell) {
         return cachedShell;
       }
+      const preparedShellCache = await caches.open(CONFIG.PREPARED_SHELL_CACHE_NAME);
+      const preparedShell = await preparedShellCache.match(requestUrl.pathname);
+      if (preparedShell) {
+        return preparedShell;
+      }
       return Response.error();
     }));
     return;

@@ -37,6 +37,8 @@ model User {
   beneficiarySheets               BeneficiarySheet[]        @relation("BeneficiarySheetCreator")
   createdRenditions               Rendition[]               @relation("RenditionCreator")
   reviewedRenditions              Rendition[]               @relation("RenditionReviewer")
+  renditionEmissions              RenditionEmission[]       @relation("RenditionEmissionCreator")
+  renditionSubmissions            RenditionSubmission[]     @relation("RenditionSubmissionRecorder")
   renditionDocuments              RenditionDocument[]       @relation("RenditionDocumentUploader")
   synchronizationReceipts         SynchronizationReceipt[]
   accessPolicyChanges             AccessPolicyChange[]      @relation("AccessPolicyChangeActor")
@@ -619,6 +621,8 @@ model Rendition {
   createdBy           User                  @relation("RenditionCreator", fields: [createdById], references: [id], onDelete: Restrict)
   reviewedBy          User?                 @relation("RenditionReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
   documents           RenditionDocument[]
+  emissions           RenditionEmission[]
+  submissions         RenditionSubmission[]
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
 
@@ -641,6 +645,7 @@ model RenditionDocument {
   rendition    Rendition             @relation(fields: [renditionId], references: [id], onDelete: Restrict)
   supersedes   RenditionDocument?    @relation("RenditionDocumentVersions", fields: [supersedesId], references: [id], onDelete: Restrict)
   supersededBy RenditionDocument[]   @relation("RenditionDocumentVersions")
+  submissions  RenditionSubmission[] @relation("RenditionSubmissionEvidence")
   uploadedById String
   uploadedBy   User                  @relation("RenditionDocumentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
   createdAt    DateTime              @default(now())
@@ -648,4 +653,43 @@ model RenditionDocument {
   @@unique([renditionId, documentType, version])
   @@index([renditionId, documentType, createdAt])
   @@index([operationId])
+}
+
+model RenditionEmission {
+  id          String    @id @default(cuid())
+  renditionId String
+  version     Int
+  snapshot    Json
+  notePdf     Bytes
+  summaryPdf  Bytes
+  packagePdf  Bytes
+  createdById String
+  rendition   Rendition @relation(fields: [renditionId], references: [id], onDelete: Restrict)
+  createdBy   User      @relation("RenditionEmissionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  submissions RenditionSubmission[]
+  createdAt   DateTime  @default(now())
+
+  @@unique([renditionId, version])
+  @@index([renditionId, createdAt])
+}
+
+model RenditionSubmission {
+  id                 String             @id @default(cuid())
+  renditionId        String
+  submittedAt        DateTime           @db.Date
+  recipient          String
+  externalReference  String?
+  notes              String?
+  emissionId         String
+  evidenceDocumentId String?
+  rendition          Rendition          @relation(fields: [renditionId], references: [id], onDelete: Restrict)
+  emission           RenditionEmission  @relation(fields: [emissionId], references: [id], onDelete: Restrict)
+  recordedById       String
+  recordedBy         User               @relation("RenditionSubmissionRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+  evidenceDocument   RenditionDocument? @relation("RenditionSubmissionEvidence", fields: [evidenceDocumentId], references: [id], onDelete: Restrict)
+  createdAt          DateTime           @default(now())
+
+  @@index([renditionId, submittedAt])
+  @@index([emissionId, submittedAt])
+  @@index([recordedById, createdAt])
 }

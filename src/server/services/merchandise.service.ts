@@ -2,7 +2,7 @@ import { MERCHANDISE_ERROR_MESSAGES } from "@/constants/merchandise.constant";
 import { merchandiseRepository } from "@/server/repository/merchandise.repository";
 import { authService } from "@/server/services/auth.service";
 import { requireMerchandiseReadAccess } from "@/server/services/merchandise-access";
-import { hasEffectiveCapability } from "@/server/services/access-policy.service";
+import { getEffectiveCapabilities } from "@/server/services/access-policy.service";
 import { ApiError } from "@/utils/handlers/apiError.handler";
 
 export async function getVisibleMerchandisePeriods(token: string | undefined) {
@@ -12,10 +12,9 @@ export async function getVisibleMerchandisePeriods(token: string | undefined) {
     throw new ApiError({ status: 401, message: MERCHANDISE_ERROR_MESSAGES.INICIA_SESION_PARA_CONSULTAR_MERCADERIA });
   }
 
-  const [canReadMerchandise, canReadRenditions] = await Promise.all([
-    hasEffectiveCapability(session.user.role, "merchandise.read"),
-    hasEffectiveCapability(session.user.role, "renditions.read"),
-  ]);
+  const effectiveCapabilities = await getEffectiveCapabilities(session.user.role);
+  const canReadMerchandise = effectiveCapabilities.includes("merchandise.read");
+  const canReadRenditions = effectiveCapabilities.includes("renditions.read");
 
   if (!canReadMerchandise && !canReadRenditions) {
     await requireMerchandiseReadAccess(token);
