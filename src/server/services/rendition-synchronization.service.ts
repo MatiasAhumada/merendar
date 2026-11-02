@@ -92,7 +92,7 @@ async function applyDocuments(
 ) {
   const sheet = await transaction.beneficiarySheet.findUnique({
     where: { id: payload.beneficiarySheetId },
-    select: { id: true, periodId: true },
+    select: { id: true, periodId: true, distributionEventId: true },
   });
 
   if (!sheet || sheet.periodId !== payload.periodId) {
@@ -104,6 +104,7 @@ async function applyDocuments(
     create: {
       id: payload.id,
       periodId: sheet.periodId,
+      distributionEventId: sheet.distributionEventId,
       beneficiarySheetId: sheet.id,
       createdById: operation.userId,
     },

@@ -101,9 +101,17 @@ export async function deactivateFamilyInTransaction(
     where: { familyMemberId: { in: affectedMemberIds } },
     select: { id: true },
   });
+  let familyDelivery = null;
+  if (target.kind === "family") {
+    familyDelivery = await transaction.familyDelivery.findFirst({ where: { familyId: family.id }, select: { id: true } });
+  }
+  let distributionParticipant = null;
+  if (target.kind === "member") {
+    distributionParticipant = await transaction.distributionParticipant.findFirst({ where: { familyMemberId: { in: affectedMemberIds } }, select: { id: true } });
+  }
   const hasSheetReference = await hasBeneficiarySheetReference(transaction, affectedPersonIds);
 
-  if (distributionRecord || hasSheetReference) {
+  if (distributionRecord || familyDelivery || distributionParticipant || hasSheetReference) {
     return { type: "has-records" };
   }
 

@@ -4,7 +4,7 @@ import { CAPABILITY_BY_SYNC_RESOURCE, PRISMA_RESOURCE_BY_CLIENT_RESOURCE } from 
 import { createSynchronizationHandlers, synchronizationService } from "@/server/services/synchronization.service";
 import { familyDeactivationTargetSchema, familyMemberChangeSchema, familyPayloadSchema } from "@/schemas/family.schema";
 import { MerchandiseDocumentError } from "@/server/services/merchandise-synchronization.service";
-import { beneficiarySheetDraftSchema, distributionPreparationPayloadSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
+import { beneficiarySheetDraftSchema, distributionPreparationPayloadSchema, distributionRecordPayloadSchema, familyDeliveryPayloadSchema } from "@/schemas/record.schema";
 import { renditionSynchronizationPayloadSchema } from "@/schemas/rendition.schema";
 import { RenditionDocumentError } from "@/server/services/rendition-synchronization.service";
 import { RecordSynchronizationError } from "@/server/services/record-synchronization.service";
@@ -149,11 +149,14 @@ export async function processSynchronizationRequest(
   if (parsedOperation.data.resource === "records") {
     const validBaseVersion = nullableSchema.safeParse(parsedOperation.data.baseVersion);
     const parsedRecordPayload = distributionRecordPayloadSchema.safeParse(parsedOperation.data.payload);
+    const parsedFamilyDelivery = familyDeliveryPayloadSchema.safeParse(parsedOperation.data.payload);
     const parsedSheetDraft = beneficiarySheetDraftSchema.safeParse(parsedOperation.data.payload);
     const parsedPreparation = distributionPreparationPayloadSchema.safeParse(parsedOperation.data.payload);
 
     if (parsedRecordPayload.success && parsedRecordPayload.data.id === parsedOperation.data.resourceId) {
       parsedOperation.data.payload = parsedRecordPayload.data;
+    } else if (parsedFamilyDelivery.success && parsedFamilyDelivery.data.id === parsedOperation.data.resourceId) {
+      parsedOperation.data.payload = parsedFamilyDelivery.data;
     } else if (parsedSheetDraft.success && parsedSheetDraft.data.id === parsedOperation.data.resourceId) {
       parsedOperation.data.payload = parsedSheetDraft.data;
     } else if (parsedPreparation.success && parsedPreparation.data.id === parsedOperation.data.resourceId) {

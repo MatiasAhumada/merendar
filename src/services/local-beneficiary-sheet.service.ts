@@ -68,7 +68,12 @@ export async function createLocalBeneficiarySheetPdf(draft: BeneficiarySheetDraf
   const pageWidth = 595.28;
   const pageHeight = 841.89;
   const textSize = 6.5;
-  const headerTop = pageHeight - 104;
+  const eventLines: string[] = [];
+  if (draft.event) {
+    eventLines.push(...wrapText(`Jornada ${draft.event.scheduledAt} · ${draft.event.location}`, regularFont, 6.2, pageWidth - 104));
+    eventLines.push(...wrapText(`Responsables: ${draft.event.responsibleNames}`, regularFont, 6.2, pageWidth - 104));
+  }
+  const headerTop = pageHeight - 104 - eventLines.length * 8;
   const rows: PrintableRow[] = draft.beneficiaries.map((beneficiary, index) => {
     const nameLines = wrapText(beneficiary.name, regularFont, textSize, tableBounds[2] - tableBounds[1] - 6);
     const addressLines = wrapText(beneficiary.address, regularFont, textSize, tableBounds[4] - tableBounds[3] - 6);
@@ -97,6 +102,7 @@ export async function createLocalBeneficiarySheetPdf(draft: BeneficiarySheetDraf
     page.drawImage(logo, { x: pageWidth - 52 - logoSize.width, y: pageHeight - 48 - logoSize.height, ...logoSize });
     const titleWidth = boldFont.widthOfTextAtSize(title, 8.4);
     page.drawText(title, { x: (pageWidth - titleWidth) / 2, y: pageHeight - 94, size: 8.4, font: boldFont, color: rgb(0, 0, 0) });
+    eventLines.forEach((line, lineIndex) => page.drawText(line, { x: 52, y: pageHeight - 108 - lineIndex * 8, size: 6.2, font: regularFont, color: rgb(0, 0, 0) }));
     const labels = Object.values(BENEFICIARY_SHEET_COLUMN_HEADERS);
 
     labels.forEach((label, index) => {

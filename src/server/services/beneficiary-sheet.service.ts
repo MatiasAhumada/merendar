@@ -161,7 +161,12 @@ async function createApprovedBeneficiarySheetPdf(snapshot: BeneficiarySheetSnaps
   const logo = await pdf.embedPng(await readFile(path.join(process.cwd(), "public/brand/ministerio-desarrollo-social-tucuman.png")));
   const pageWidth = 595.28;
   const pageHeight = 841.89;
-  const headerTop = pageHeight - 104;
+  const eventLines: string[] = [];
+  if (snapshot.event) {
+    eventLines.push(...wrapToWidth(`Jornada ${snapshot.event.scheduledAt} · ${snapshot.event.location}`, regularFont, 6.2, pageWidth - 104));
+    eventLines.push(...wrapToWidth(`Responsables: ${snapshot.event.responsibleNames}`, regularFont, 6.2, pageWidth - 104));
+  }
+  const headerTop = pageHeight - 104 - eventLines.length * 8;
   const textSize = 6.5;
   const rows: ApprovedPrintableRow[] = snapshot.beneficiaries.map((beneficiary, index) => {
     const nameLines = wrapToWidth(beneficiary.name, regularFont, textSize, tableBounds[2] - tableBounds[1] - 6);
@@ -188,6 +193,7 @@ async function createApprovedBeneficiarySheetPdf(snapshot: BeneficiarySheetSnaps
   for (const pageRows of printablePages) {
     const page = pdf.addPage([pageWidth, pageHeight]);
     drawApprovedHeader(page, logo, boldFont, pageWidth, pageHeight);
+    eventLines.forEach((line, lineIndex) => page.drawText(line, { x: 52, y: pageHeight - 108 - lineIndex * 8, size: 6.2, font: regularFont, color: rgb(0, 0, 0) }));
     drawApprovedColumnHeaders(page, boldFont, headerTop);
     const rowHeights = pageRows.map((row) => row.height);
     let usedRowsHeight = rowHeights.reduce((total, height) => total + height, 0);

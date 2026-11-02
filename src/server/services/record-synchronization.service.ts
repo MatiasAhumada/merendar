@@ -2,7 +2,7 @@
 
 import { OFFLINE_OPERATION_MESSAGES, SYNC_SERVER_MESSAGES } from "@/constants/offline.constant";
 import { DELIVERY_ERROR_MESSAGES } from "@/constants/delivery.constant";
-import { beneficiarySheetDraftSchema, distributionPreparationPayloadSchema, distributionRecordPayloadSchema } from "@/schemas/record.schema";
+import { beneficiarySheetDraftSchema, distributionPreparationPayloadSchema, distributionRecordPayloadSchema, familyDeliveryPayloadSchema } from "@/schemas/record.schema";
 import { Prisma } from "@prisma/client";
 import { lockFamilyRows } from "@/server/repository/record.repository";
 import { nullableSchema } from "@/schemas/offline.schema";
@@ -10,8 +10,8 @@ import type { SynchronizationHandler } from "@/interfaces/synchronization.interf
 import type { JsonObject } from "@/types/json-value";
 
 export class RecordSynchronizationError extends Error {
-  readonly code: "period_not_found" | "beneficiary_not_in_roster" | "beneficiary_dni_missing";
-  readonly status: 400 | 404;
+  readonly code: "period_not_found" | "beneficiary_not_in_roster" | "beneficiary_dni_missing" | "family_not_allocated" | "family_already_received" | "delivery_unavailable";
+  readonly status: 400 | 404 | 409;
 
   constructor(code: RecordSynchronizationError["code"], status: RecordSynchronizationError["status"], message: string) {
     super(message);
@@ -60,16 +60,53 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
         throw new RecordSynchronizationError("beneficiary_dni_missing", 400, `${beneficiaryName} no tiene un DNI válido registrado. Corregilo en Familias y volvé a emitir la planilla.`);
       }
 
+      let event: { id: string; scheduledAt: Date; location: string; responsibleNames: string } | null = null;
+      if (draft.distributionEventId) {
+        event = await transaction.distributionEvent.findFirst({
+          where: { id: draft.distributionEventId, periodId: draft.periodId },
+          select: { id: true, scheduledAt: true, location: true, responsibleNames: true },
+        });
+        if (!event) {
+          throw new RecordSynchronizationError("period_not_found", 404, SYNC_SERVER_MESSAGES.EL_PERIODO_YA_NO_ESTA_DISPONIBLE_CONECTATE_Y_ELEGI_OTRO_PERIODO_ANTES_DE_E);
+        }
+
+        const deliveryParticipantIds = await transaction.distributionParticipant.findMany({
+          where: {
+            familyDelivery: { eventId: event.id },
+            familyMemberId: { in: draft.beneficiaries.map((beneficiary) => beneficiary.familyMemberId).filter((familyMemberId): familyMemberId is string => Boolean(familyMemberId)) },
+          },
+          select: { familyDeliveryId: true, familyMemberId: true, paperSignatureChecked: true, physicalDniChecked: true },
+        });
+        const participantKeys = new Set(deliveryParticipantIds.map((participant) => `${participant.familyDeliveryId}:${participant.familyMemberId}`));
+        const allParticipantsBelongToEvent = draft.beneficiaries.every((beneficiary) => {
+          if (!beneficiary.familyMemberId || !beneficiary.familyDeliveryId) {
+            return false;
+          }
+          return participantKeys.has(`${beneficiary.familyDeliveryId}:${beneficiary.familyMemberId}`);
+        });
+        if (!allParticipantsBelongToEvent) {
+          throw new RecordSynchronizationError("beneficiary_not_in_roster", 400, DELIVERY_ERROR_MESSAGES.PLANILLA_SIN_VINCULOS_DE_RETIRO_DE_LA_JORNADA);
+        }
+      } else {
+        const preparedEvent = await transaction.distributionEvent.findFirst({ where: { periodId: draft.periodId }, select: { id: true } });
+        if (preparedEvent) {
+          throw new RecordSynchronizationError("family_not_allocated", 409, DELIVERY_ERROR_MESSAGES.LA_PLANILLA_DEBE_VINCULARSE_A_UNA_JORNADA_CON_RETIROS_REGISTRADOS);
+        }
+      }
+
       const version = await transaction.beneficiarySheet.count({ where: { periodId: draft.periodId } }) + 1;
       const createdAt = new Date().toISOString();
-      const snapshot: Prisma.InputJsonValue = {
+      let snapshot: Prisma.InputJsonObject = {
         period: draft.period,
         version,
         createdAt,
         beneficiaries: draft.beneficiaries,
       };
+      if (event) {
+        snapshot = { ...snapshot, event: { id: event.id, scheduledAt: event.scheduledAt.toISOString().slice(0, 10), location: event.location, responsibleNames: event.responsibleNames } };
+      }
       const sheet = await transaction.beneficiarySheet.create({
-        data: { id: draft.id, periodId: draft.periodId, version, snapshot, createdById: operation.userId },
+        data: { id: draft.id, periodId: draft.periodId, distributionEventId: event?.id, version, snapshot, createdById: operation.userId },
         select: { id: true, version: true },
       });
 
@@ -78,6 +115,70 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
         type: "synchronized",
         resourceVersion: sheet.version,
         result,
+      };
+    }
+
+    const parsedFamilyDelivery = familyDeliveryPayloadSchema.safeParse(operation.payload);
+    if (parsedFamilyDelivery.success && parsedFamilyDelivery.data.id === operation.resourceId) {
+      const delivery = parsedFamilyDelivery.data;
+      const event = await transaction.distributionEvent.findUnique({
+        where: { id: delivery.eventId },
+        select: { id: true, periodId: true, period: { select: { destination: true, status: true } } },
+      });
+      if (!event || event.period.destination !== "FAMILIES" || event.period.status !== "VIGENTE") {
+        throw new RecordSynchronizationError("period_not_found", 404, SYNC_SERVER_MESSAGES.EL_PERIODO_YA_NO_ESTA_DISPONIBLE_CONECTATE_Y_ELEGI_OTRO_PERIODO_ANTES_DE_E);
+      }
+
+      await lockFamilyRows(transaction, [delivery.familyId]);
+      const family = await transaction.family.findFirst({ where: { id: delivery.familyId, deactivatedAt: null }, select: { id: true } });
+      const participantIds = delivery.participants.map((participant) => participant.familyMemberId);
+      const memberships = await transaction.familyMember.findMany({
+        where: { id: { in: participantIds }, familyId: delivery.familyId, deactivatedAt: null, family: { deactivatedAt: null } },
+        select: { id: true },
+      });
+      if (!family || memberships.length !== participantIds.length) {
+        throw new RecordSynchronizationError("beneficiary_not_in_roster", 400, DELIVERY_ERROR_MESSAGES.FAMILIA_O_FIRMANTE_YA_NO_PERTENECE_AL_PADRON_ACTIVO);
+      }
+
+      const allocated = await transaction.distributionAllocation.aggregate({
+        where: { eventId: event.id, familyId: delivery.familyId },
+        _sum: { moduleQuantity: true },
+      });
+      if ((allocated._sum.moduleQuantity ?? 0) < 1) {
+        throw new RecordSynchronizationError("family_not_allocated", 409, DELIVERY_ERROR_MESSAGES.LA_FAMILIA_NO_TIENE_UN_MODULO_ASIGNADO_A_ESTA_JORNADA);
+      }
+
+      const existingFamilyDelivery = await transaction.familyDelivery.findFirst({
+        where: { familyId: delivery.familyId, event: { periodId: event.periodId } },
+        select: { id: true },
+      });
+      if (existingFamilyDelivery) {
+        throw new RecordSynchronizationError("family_already_received", 409, DELIVERY_ERROR_MESSAGES.LA_FAMILIA_YA_TIENE_UN_RETIRO_REGISTRADO_EN_ESTE_PERIODO);
+      }
+
+      const familyDelivery = await transaction.familyDelivery.create({
+        data: {
+          id: delivery.id,
+          eventId: event.id,
+          familyId: delivery.familyId,
+          moduleQuantity: 1,
+          recordedById: operation.userId,
+          participants: {
+            create: delivery.participants.map((participant) => ({
+              familyMemberId: participant.familyMemberId,
+              paperSignatureChecked: participant.paperSignatureChecked,
+              physicalDniChecked: participant.physicalDniChecked,
+              recordedById: operation.userId,
+            })),
+          },
+        },
+        select: { id: true, participants: { select: { id: true } } },
+      });
+
+      return {
+        type: "synchronized",
+        resourceVersion: 1,
+        result: { resourceId: familyDelivery.id, moduleQuantity: 1, participantCount: familyDelivery.participants.length },
       };
     }
 
@@ -154,6 +255,10 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
 
     const input = parsedPayload.data;
     const period = await transaction.merchandisePeriod.findUnique({ where: { id: input.periodId }, select: { id: true, destination: true } });
+    const preparedEvent = await transaction.distributionEvent.findFirst({ where: { periodId: input.periodId }, select: { id: true } });
+    if (preparedEvent) {
+      throw new RecordSynchronizationError("family_already_received", 409, DELIVERY_ERROR_MESSAGES.LOS_RETIROS_DE_ESTE_PERIODO_SE_REGISTRAN_POR_FAMILIA_Y_JORNADA);
+    }
     await lockFamilyRows(transaction, [input.familyId]);
     const membership = await transaction.familyMember.findFirst({
       where: { familyId: input.familyId, personId: input.personId, deactivatedAt: null, family: { deactivatedAt: null } },

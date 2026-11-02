@@ -453,6 +453,7 @@ model DistributionEvent {
   familyDeliveries FamilyDelivery[]
   allocations      DistributionAllocation[]
   supplyAllocations DistributionSupplyAllocation[]
+  beneficiarySheets BeneficiarySheet[]
   renditions       Rendition[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -520,6 +521,7 @@ model DistributionParticipant {
   familyDeliveryId      String
   familyMemberId        String
   paperSignatureChecked Boolean        @default(false)
+  physicalDniChecked    Boolean        @default(false)
   familyDelivery        FamilyDelivery @relation(fields: [familyDeliveryId], references: [id], onDelete: Restrict)
   familyMember          FamilyMember   @relation(fields: [familyMemberId], references: [id], onDelete: Restrict)
   recordedById          String
@@ -572,18 +574,21 @@ model DistributionRecord {
 }
 
 model BeneficiarySheet {
-  id          String            @id @default(cuid())
-  periodId    String
-  version     Int
-  snapshot    Json
-  period      MerchandisePeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
-  createdById String
-  createdBy   User              @relation("BeneficiarySheetCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  renditions  Rendition[]
-  createdAt   DateTime          @default(now())
+  id                  String             @id @default(cuid())
+  periodId            String
+  distributionEventId String?
+  version             Int
+  snapshot            Json
+  period              MerchandisePeriod  @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  distributionEvent   DistributionEvent? @relation(fields: [distributionEventId], references: [id], onDelete: Restrict)
+  createdById         String
+  createdBy           User               @relation("BeneficiarySheetCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  renditions          Rendition[]
+  createdAt           DateTime           @default(now())
 
   @@unique([periodId, version])
   @@index([periodId, createdAt])
+  @@index([distributionEventId])
 }
 
 enum RenditionReviewStatus {

@@ -15,6 +15,21 @@ export const distributionRecordPayloadSchema = z.object({
   notes: z.string().trim().max(1000).optional(),
 }).strict();
 
+export const familyDeliveryPayloadSchema = z.object({
+  kind: z.literal("family-delivery"),
+  id: z.uuid(),
+  eventId: z.string().trim().min(1).max(80),
+  familyId: z.string().trim().min(1).max(80),
+  participants: z.array(z.object({
+    familyMemberId: z.string().trim().min(1).max(80),
+    paperSignatureChecked: z.boolean(),
+    physicalDniChecked: z.boolean(),
+  }).strict()).min(1).max(100),
+}).strict().refine((payload) => new Set(payload.participants.map((participant) => participant.familyMemberId)).size === payload.participants.length, {
+  message: DELIVERY_VALIDATION_MESSAGES.REPEATED_SELECTION,
+  path: ["participants"],
+});
+
 export const distributionPreparationPayloadSchema = z.object({
   kind: z.literal("distribution-preparation"),
   id: z.uuid(),
@@ -44,6 +59,7 @@ export const distributionPreparationPayloadSchema = z.object({
 
 export const beneficiarySheetSchema = z.object({
   periodId: z.string().trim().min(1).max(80),
+  distributionEventId: z.string().trim().min(1).max(80).optional(),
   personIds: z.array(z.string().trim().min(1).max(80)).min(1).max(1000),
 }).strict().refine((input) => new Set(input.personIds).size === input.personIds.length, {
   message: DELIVERY_VALIDATION_MESSAGES.REPEATED_SELECTION,
@@ -54,6 +70,8 @@ export const beneficiarySheetDraftSchema = z.object({
   kind: z.literal("beneficiary-sheet"),
   id: z.uuid(),
   periodId: z.string().trim().min(1).max(80),
+  distributionEventId: z.string().trim().min(1).max(80).optional(),
+  event: z.object({ scheduledAt: z.iso.date(), location: z.string().trim().min(2).max(180), responsibleNames: z.string().trim().min(2).max(300) }).strict().optional(),
   period: z.object({
     label: z.string().trim().min(1).max(120),
     agency: z.string().trim().min(1).max(120),
@@ -62,11 +80,15 @@ export const beneficiarySheetDraftSchema = z.object({
   }).strict(),
   beneficiaries: z.array(z.object({
     personId: z.string().trim().min(1).max(80),
+    familyMemberId: z.string().trim().min(1).max(80).optional(),
+    familyDeliveryId: z.string().trim().min(1).max(80).optional(),
     name: z.string().trim().min(1).max(160),
     dni: z.string().trim().regex(/^\d{7,8}$/),
     familyName: z.string().trim().min(1).max(120),
     address: z.string().trim().min(1).max(180),
     neighborhood: z.string().trim().max(120).optional(),
+    paperSignatureChecked: z.boolean().optional(),
+    physicalDniChecked: z.boolean().optional(),
   }).strict()).min(1).max(1000),
   templateVersion: z.literal(2).optional(),
 }).strict().refine((draft) => new Set(draft.beneficiaries.map((beneficiary) => beneficiary.personId)).size === draft.beneficiaries.length, {
@@ -104,7 +126,7 @@ export const recordsCollectionSchema = z.object({
     person: z.object({ firstName: z.string(), lastName: z.string(), dni: z.string().nullable() }),
     family: z.object({ id: z.string(), name: z.string() }),
   })),
-  sheets: z.array(z.object({ id: z.string(), periodId: z.string(), version: z.number().int().positive(), createdAt: z.iso.datetime() })),
+  sheets: z.array(z.object({ id: z.string(), periodId: z.string(), distributionEventId: z.string().nullable().optional(), version: z.number().int().positive(), createdAt: z.iso.datetime() })),
   moduleReceipts: z.array(z.object({
     id: z.string(), periodId: z.string(), periodLabel: z.string(), requestNumber: z.string(), remittanceNumber: z.string(), receivedAt: z.iso.datetime(),
     receivedQuantity: z.number(), assignedQuantity: z.number(), remainingQuantity: z.number(),
@@ -115,7 +137,10 @@ export const recordsCollectionSchema = z.object({
   })).default([]),
   distributionEvents: z.array(z.object({
     id: z.string(), version: z.number().int().positive(), periodId: z.string(), scheduledAt: z.iso.date(), location: z.string(),
-    responsibleNames: z.string(), notes: z.string().nullable(), allocations: z.array(z.object({
+    responsibleNames: z.string(), notes: z.string().nullable(), familyDeliveries: z.array(z.object({
+      id: z.string(), familyId: z.string(), moduleQuantity: z.number().int().positive(), familyName: z.string(),
+      participants: z.array(z.object({ id: z.string(), familyMemberId: z.string(), personId: z.string(), name: z.string(), dni: z.string().nullable(), paperSignatureChecked: z.boolean(), physicalDniChecked: z.boolean() })),
+    })).default([]), allocations: z.array(z.object({
       id: z.string(), familyId: z.string(), familyName: z.string(), remittanceId: z.string(), remittanceNumber: z.string(), moduleQuantity: z.number().int().positive(), notes: z.string().nullable(),
     })), supplyAllocations: z.array(z.object({ id: z.string(), receiptItemId: z.string(), productName: z.string(), presentation: z.string(), unit: z.string(), remittanceNumber: z.string(), quantity: z.number(), notes: z.string().nullable() })).default([]),
   })).default([]),
@@ -131,16 +156,21 @@ export const beneficiarySheetResponseSchema = z.object({
 
 export const beneficiarySheetSnapshotSchema = z.object({
   period: z.object({ label: z.string(), agency: z.string(), startsAt: z.string(), endsAt: z.string() }),
+  event: z.object({ id: z.string(), scheduledAt: z.string(), location: z.string(), responsibleNames: z.string() }).optional(),
   version: z.number().int().positive(),
   createdAt: z.string(),
   templateVersion: z.literal(2).optional(),
   beneficiaries: z.array(z.object({
     personId: z.string(),
+    familyMemberId: z.string().optional(),
+    familyDeliveryId: z.string().optional(),
     name: z.string(),
     dni: z.string(),
     familyName: z.string(),
     address: z.string(),
     neighborhood: z.string().optional(),
+    paperSignatureChecked: z.boolean().optional(),
+    physicalDniChecked: z.boolean().optional(),
   })),
 });
 

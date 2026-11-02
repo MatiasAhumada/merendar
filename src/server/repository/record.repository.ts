@@ -86,6 +86,13 @@ export async function findDistributionEvents(periodId?: string) {
     where,
     select: {
       id: true, version: true, periodId: true, scheduledAt: true, location: true, responsibleNames: true, notes: true,
+      familyDeliveries: { select: {
+        id: true, familyId: true, moduleQuantity: true, family: { select: { name: true } },
+        participants: { select: {
+          id: true, familyMemberId: true, paperSignatureChecked: true, physicalDniChecked: true,
+          familyMember: { select: { personId: true, person: { select: { firstName: true, lastName: true, dni: true } } } },
+        }, orderBy: { createdAt: "asc" } },
+      }, orderBy: { family: { name: "asc" } } },
       allocations: { select: { id: true, familyId: true, family: { select: { name: true } }, remittanceId: true, remittance: { select: { remittanceNumber: true } }, moduleQuantity: true, notes: true }, orderBy: [{ family: { name: "asc" } }, { remittance: { remittanceNumber: "asc" } }] },
       supplyAllocations: { select: { id: true, receiptItemId: true, receiptItem: { select: { quotaItem: { select: { requestItem: { select: { productName: true, presentation: true, unit: true } } } }, remittance: { select: { remittanceNumber: true } } } }, quantity: true, notes: true } },
     },
@@ -94,6 +101,21 @@ export async function findDistributionEvents(periodId?: string) {
 
   return events.map((event) => ({
     ...event,
+    familyDeliveries: event.familyDeliveries.map((delivery) => ({
+      id: delivery.id,
+      familyId: delivery.familyId,
+      moduleQuantity: delivery.moduleQuantity,
+      familyName: delivery.family.name,
+      participants: delivery.participants.map((participant) => ({
+        id: participant.id,
+        familyMemberId: participant.familyMemberId,
+        personId: participant.familyMember.personId,
+        name: `${participant.familyMember.person.firstName} ${participant.familyMember.person.lastName}`,
+        dni: participant.familyMember.person.dni,
+        paperSignatureChecked: participant.paperSignatureChecked,
+        physicalDniChecked: participant.physicalDniChecked,
+      })),
+    })),
     allocations: event.allocations.map((allocation) => ({
       id: allocation.id,
       familyId: allocation.familyId,
@@ -125,7 +147,7 @@ export async function findBeneficiarySheets(periodId?: string) {
 
   return prisma.beneficiarySheet.findMany({
     where,
-    select: { id: true, periodId: true, version: true, createdAt: true },
+    select: { id: true, periodId: true, distributionEventId: true, version: true, createdAt: true },
     orderBy: { version: "desc" },
   });
 }
@@ -177,6 +199,7 @@ export async function countBeneficiarySheets(transaction: PrismaTypes.Transactio
 
 export async function createBeneficiarySheet(transaction: PrismaTypes.TransactionClient, input: {
   periodId: string;
+  distributionEventId?: string;
   version: number;
   snapshot: Prisma.InputJsonValue;
   createdById: string;

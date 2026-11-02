@@ -5,6 +5,28 @@ export const DEMO_HOLDER = {
   members: 4,
 } as const;
 
+function familyDeliveryCount(families: number, modules: number) {
+  let familyLabel = "familias";
+  let moduleLabel = "módulos";
+  let recordedLabel = "registrados";
+  if (families === 1) {
+    familyLabel = "familia";
+  }
+  if (modules === 1) {
+    moduleLabel = "módulo";
+    recordedLabel = "registrado";
+  }
+  return `${families} ${familyLabel} · ${modules} ${moduleLabel} ${recordedLabel}`;
+}
+
+function beneficiaryCount(count: number) {
+  let label = "beneficiarios";
+  if (count === 1) {
+    label = "beneficiario";
+  }
+  return label;
+}
+
 export const DELIVERY_VALIDATION_MESSAGES = {
   MODULE_TYPE_REQUIRED: "Ingresá el tipo de módulo",
   REPEATED_SELECTION: "La selección contiene personas repetidas",
@@ -148,7 +170,7 @@ export const DELIVERY_UI_TEXT = {
   PENDIENTE_DE_SINCRONIZACION: (message: string) => `Pendiente de sincronización: ${message}`,
   PLANILLA_SIN_DNI: (beneficiaries: string[]) => `No se puede preparar la planilla: falta un DNI válido para ${beneficiaries.join(", ")}. Cargá o corregí el DNI en Familias y volvé a preparar la lista.`,
   BORRADOR_LOCAL_GUARDADO: (draftId: string) => `Borrador local ${draftId} guardado. El PDF conserva estos beneficiarios; todavía no tiene versión oficial.`,
-  PLANILLA_EMITIDA: (version: number, beneficiaryCount: number) => `Planilla versión ${version} emitida con ${beneficiaryCount} beneficiarios.`,
+  PLANILLA_EMITIDA: (version: number, count: number) => `Planilla versión ${version} emitida con ${count} ${beneficiaryCount(count)}.`,
   PLANILLA_EMITIDA_NO_DESCARGADA: (version: number) => `La planilla versión ${version} quedó emitida, pero no se pudo descargar. Reintentá desde Versiones sin volver a emitir.`,
   PLANILLA_EMITIDA_LISTA_DESACTUALIZADA: (version: number) => `La planilla versión ${version} quedó emitida, pero no se pudo actualizar la lista. Reintentá la carga sin volver a emitir.`,
   DETALLE_REGISTRO: (familyName: string, moduleType: string, quantity: number) => `${familyName} · ${moduleType} · ${quantity} unidad(es)`,
@@ -160,6 +182,23 @@ export const DELIVERY_UI_TEXT = {
     return "Descargar PDF";
   },
   BENEFICIARY_ACCESSIBLE_LABEL: (name: string) => `Incluir a ${name} en la planilla`,
+  FAMILY_DELIVERIES_TITLE: "Retiros por jornada",
+  FAMILY_DELIVERIES_DESCRIPTION: "Registrá un módulo por familia. Las personas y sus firmas quedan como detalle del mismo retiro.",
+  EVENT: "Jornada",
+  FAMILY: "Familia",
+  PARTICIPANTS: "Personas que retiran o firman",
+  PHYSICAL_DNI_CHECKED: "DNI presentado y cotejado",
+  PAPER_SIGNATURE_RECORDED: "Firma manuscrita documentada",
+  PAPER_SIGNATURE_PENDING: "Firma manuscrita pendiente",
+  FAMILY_DELIVERY_SAVED: "Retiro familiar guardado en el servidor.",
+  FAMILY_DELIVERY_PENDING: "Retiro pendiente. Quedó guardado en este dispositivo y se validará al reconectar.",
+  FAMILY_DELIVERY_FORM_REQUIRED: "Elegí una jornada, una familia asignada y al menos una persona del padrón.",
+  FAMILY_DELIVERY_RECORDING: "Guardando retiro…",
+  FAMILY_DELIVERY_SUBMIT: "Registrar un módulo",
+  FAMILY_DELIVERED_COUNT: familyDeliveryCount,
+  EVENT_SHEET_SUBMIT: "Emitir planilla de esta jornada",
+  EVENT_SHEET_MISSING_DNI: (people: string[]) => `No se puede emitir la planilla: falta un DNI válido para ${people.join(", ")}. Corregí el padrón en Familias.`,
+  EVENT_SHEET_DRAFT_SAVED: "Planilla local guardada con la referencia de esta jornada. Sigue pendiente de validación del servidor.",
   PERSON_DNI: (dni: string) => ` · DNI ${dni}`,
   SINCRONIZANDO_STATUS: "Sincronizando",
   MERENDAR_PLANILLA_DE_BENEFICIARIOS: "MERENDAR · PLANILLA DE BENEFICIARIOS",
@@ -179,6 +218,12 @@ export const DELIVERY_ERROR_MESSAGES = {
   NO_SE_PUDO_DESCARGAR_LA_PLANILLA: "No se pudo descargar la planilla",
   LA_SOLICITUD_NO_PERTENECE_A_ESTE_SITIO: "La solicitud no pertenece a este sitio",
   SELECCIONA_AL_MENOS_UN_BENEFICIARIO_VALIDO: "Seleccioná al menos un beneficiario válido",
+  PLANILLA_SIN_VINCULOS_DE_RETIRO_DE_LA_JORNADA: "La planilla ya no coincide con los retiros registrados en esta jornada. Actualizá Registro y volvé a emitirla.",
+  FAMILIA_O_FIRMANTE_YA_NO_PERTENECE_AL_PADRON_ACTIVO: "La familia o una persona seleccionada ya no pertenece al padrón activo. Actualizá los datos antes de sincronizar.",
+  LA_FAMILIA_NO_TIENE_UN_MODULO_ASIGNADO_A_ESTA_JORNADA: "La familia no tiene un módulo asignado a esta jornada. Revisá su origen y la preparación.",
+  LA_FAMILIA_YA_TIENE_UN_RETIRO_REGISTRADO_EN_ESTE_PERIODO: "La familia ya tiene un retiro registrado en este período. No se volvió a contar otro módulo.",
+  LOS_RETIROS_DE_ESTE_PERIODO_SE_REGISTRAN_POR_FAMILIA_Y_JORNADA: "Este período ya tiene jornadas preparadas. Registrá el retiro desde la jornada para conservar el módulo y sus firmantes en un solo movimiento.",
+  LA_PLANILLA_DEBE_VINCULARSE_A_UNA_JORNADA_CON_RETIROS_REGISTRADOS: "La planilla de este período debe vincularse a una jornada y a sus retiros registrados.",
   NO_ENCONTRAMOS_ESE_MODULO_O_PERIODO: "No encontramos ese módulo o período",
   TODOS_LOS_BENEFICIARIOS_DEBEN_PERTENECER_AL_PADRON_Y_TENER_DNI_REGISTR: "Todos los beneficiarios deben pertenecer al padrón y tener DNI registrado",
   NO_SE_PUDO_EMITIR_LA_PLANILLA: "No se pudo emitir la planilla",

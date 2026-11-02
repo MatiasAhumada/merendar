@@ -2,7 +2,7 @@ import type { z } from "zod";
 import type { policySnapshotSchema } from "@/schemas/access-policy.schema";
 import type { familyPayloadSchema } from "@/schemas/family.schema";
 import type { merchandiseCancellationPayloadSchema, merchandiseOperationPayloadSchema, merchandisePayloadSchema, merchandiseUpdatePayloadSchema } from "@/schemas/merchandise.schema";
-import type { beneficiarySheetDraftSchema, distributionPreparationPayloadSchema, distributionRecordPayloadSchema, recordsCollectionSchema } from "@/schemas/record.schema";
+import type { beneficiarySheetDraftSchema, distributionPreparationPayloadSchema, distributionRecordPayloadSchema, familyDeliveryPayloadSchema, recordsCollectionSchema } from "@/schemas/record.schema";
 import type { renditionDocumentPayloadSchema, renditionReviewOperationPayloadSchema, renditionReviewPayloadSchema } from "@/schemas/rendition.schema";
 import type { managedUsersSchema } from "@/schemas/user.schema";
 
@@ -14,6 +14,7 @@ export type MerchandiseCancellationPayload = z.infer<typeof merchandiseCancellat
 export type MerchandiseOperationPayload = z.infer<typeof merchandiseOperationPayloadSchema>;
 export type DistributionRecordPayload = z.infer<typeof distributionRecordPayloadSchema>;
 export type DistributionPreparationPayload = z.infer<typeof distributionPreparationPayloadSchema>;
+export type FamilyDeliveryPayload = z.infer<typeof familyDeliveryPayloadSchema>;
 export type BeneficiarySheetDraft = z.infer<typeof beneficiarySheetDraftSchema>;
 export type RecordsCollection = z.infer<typeof recordsCollectionSchema>;
 export type RenditionDocumentPayload = z.infer<typeof renditionDocumentPayloadSchema>;

@@ -82,7 +82,7 @@ export async function getRecordWorkbench(periodId?: string, includePeriodDetails
   };
 }
 
-export async function issueBeneficiarySheet(input: { periodId: string; personIds: string[]; userId: string }) {
+export async function issueBeneficiarySheet(input: { periodId: string; personIds: string[]; distributionEventId?: string; userId: string }) {
   try {
     return await createSerializableTransaction(async (transaction) => {
       const period = await findMerchandisePeriod(transaction, input.periodId);
@@ -102,9 +102,37 @@ export async function issueBeneficiarySheet(input: { periodId: string; personIds
         throw new ApiError({ status: 400, message: DELIVERY_ERROR_MESSAGES.TODOS_LOS_BENEFICIARIOS_DEBEN_PERTENECER_AL_PADRON_Y_TENER_DNI_REGISTR });
       }
 
+      let event: { id: string; scheduledAt: Date; location: string; responsibleNames: string } | null = null;
+      let eventParticipants: Array<{ familyDeliveryId: string; familyMemberId: string; paperSignatureChecked: boolean; physicalDniChecked: boolean }> = [];
+      if (input.distributionEventId) {
+        event = await transaction.distributionEvent.findFirst({
+          where: { id: input.distributionEventId, periodId: input.periodId },
+          select: { id: true, scheduledAt: true, location: true, responsibleNames: true },
+        });
+        if (!event) {
+          throw new ApiError({ status: 404, message: DELIVERY_ERROR_MESSAGES.PLANILLA_SIN_VINCULOS_DE_RETIRO_DE_LA_JORNADA });
+        }
+
+        eventParticipants = await transaction.distributionParticipant.findMany({
+          where: {
+            familyDelivery: { eventId: event.id },
+            familyMemberId: { in: memberships.map((membership) => membership.id) },
+          },
+          select: { familyDeliveryId: true, familyMemberId: true, paperSignatureChecked: true, physicalDniChecked: true },
+        });
+        if (eventParticipants.length !== input.personIds.length) {
+          throw new ApiError({ status: 409, message: DELIVERY_ERROR_MESSAGES.PLANILLA_SIN_VINCULOS_DE_RETIRO_DE_LA_JORNADA });
+        }
+      } else {
+        const preparedEvent = await transaction.distributionEvent.findFirst({ where: { periodId: input.periodId }, select: { id: true } });
+        if (preparedEvent) {
+          throw new ApiError({ status: 409, message: DELIVERY_ERROR_MESSAGES.LA_PLANILLA_DEBE_VINCULARSE_A_UNA_JORNADA_CON_RETIROS_REGISTRADOS });
+        }
+      }
+
       const version = await countBeneficiarySheets(transaction, input.periodId) + 1;
       const createdAt = new Date().toISOString();
-      const snapshot: Prisma.InputJsonValue = {
+      let snapshot: Prisma.InputJsonObject = {
         period: {
           label: period.label,
           agency: period.agency,
@@ -114,18 +142,37 @@ export async function issueBeneficiarySheet(input: { periodId: string; personIds
         version,
         createdAt,
         templateVersion: 2,
-        beneficiaries: memberships.map(({ person, family }) => ({
-          personId: person.id,
-          name: `${person.firstName} ${person.lastName}`,
-          dni: person.dni ?? "",
-          familyName: family.name,
-          address: family.address,
-          neighborhood: family.neighborhood,
-        })),
+        beneficiaries: memberships.map((membership) => {
+          let participant: typeof eventParticipants[number] | undefined;
+          if (event) {
+            participant = eventParticipants.find((entry) => entry.familyMemberId === membership.id);
+          }
+
+          const beneficiary = {
+            personId: membership.person.id,
+            familyMemberId: membership.id,
+            name: `${membership.person.firstName} ${membership.person.lastName}`,
+            dni: membership.person.dni ?? "",
+            familyName: membership.family.name,
+            address: membership.family.address,
+            neighborhood: membership.family.neighborhood,
+          };
+
+          if (participant) {
+            return { ...beneficiary, familyDeliveryId: participant.familyDeliveryId, paperSignatureChecked: participant.paperSignatureChecked, physicalDniChecked: participant.physicalDniChecked };
+          }
+
+          return beneficiary;
+        }),
       };
+
+      if (event) {
+        snapshot = { ...snapshot, event: { id: event.id, scheduledAt: event.scheduledAt.toISOString().slice(0, 10), location: event.location, responsibleNames: event.responsibleNames } };
+      }
 
       return createBeneficiarySheet(transaction, {
         periodId: input.periodId,
+        distributionEventId: event?.id,
         version,
         snapshot,
         createdById: input.userId,
