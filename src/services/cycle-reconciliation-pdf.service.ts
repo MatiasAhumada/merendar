@@ -5,14 +5,24 @@ import type { MerchandisePeriodRecord } from "@/interfaces/merchandise.interface
 export interface CycleReconciliationFilters {
   destination: "ALL" | MerchandisePeriodRecord["destination"];
   periodId: string;
+  agency: string;
+  responsible: string;
   from: string;
   to: string;
   dateBasis: "requested" | "received" | "delivered" | "submitted";
 }
 
+export interface CycleReconciliationPdfContext {
+  offlineMode: boolean;
+  capturedAt: string | null;
+  pendingOperations: Array<{ description: string; status: string; createdAt: string }>;
+}
+
 export function filterCyclePeriods(periods: MerchandisePeriodRecord[], filters: CycleReconciliationFilters) {
   return periods.filter((period) => (!filters.destination || filters.destination === "ALL" || period.destination === filters.destination)
-    && (!filters.periodId || filters.periodId === "ALL" || period.id === filters.periodId));
+    && (!filters.periodId || filters.periodId === "ALL" || period.id === filters.periodId)
+    && (!filters.agency.trim() || matchesText(period.agency, filters.agency))
+    && hasResponsibleMatch(period, filters.responsible));
 }
 
 function matchesRange(date: string, filters: CycleReconciliationFilters) {
@@ -20,24 +30,46 @@ function matchesRange(date: string, filters: CycleReconciliationFilters) {
   return (!filters.from || normalizedDate >= filters.from) && (!filters.to || normalizedDate <= filters.to);
 }
 
+function matchesText(value: string, query: string) {
+  return value.toLocaleLowerCase("es-AR").includes(query.trim().toLocaleLowerCase("es-AR"));
+}
+
+function hasResponsibleMatch(period: MerchandisePeriodRecord, query: string) {
+  if (!query.trim()) {
+    return true;
+  }
+  return period.reportDetails.events.some((event) => matchesText(event.responsibleNames, query))
+    || period.requests.some((request) => matchesRequestResponsible(request, query) || request.remittances.some((remittance) => matchesText(remittance.responsibleName, query)))
+    || period.renditions.some((rendition) => rendition.submissions.some((submission) => matchesText(submission.recordedBy.name, query)));
+}
+
+function matchesRequestResponsible(request: MerchandisePeriodRecord["requests"][number], query: string) {
+  return matchesText(request.createdBy.name, query)
+    || Boolean(request.quota?.approvedBy && matchesText(request.quota.approvedBy.name, query));
+}
+
 export function periodEventsInDateRange(period: MerchandisePeriodRecord, filters: CycleReconciliationFilters) {
-  return period.reportDetails.events.filter((event) => filters.dateBasis !== "delivered" || ((!filters.from && !filters.to) || matchesRange(event.scheduledAt, filters)));
+  return period.reportDetails.events.filter((event) => (!filters.responsible.trim() || matchesText(event.responsibleNames, filters.responsible))
+    && (filters.dateBasis !== "delivered" || ((!filters.from && !filters.to) || matchesRange(event.scheduledAt, filters))));
 }
 
 export function periodsInDateRange(periods: MerchandisePeriodRecord[], filters: CycleReconciliationFilters) {
   return filterCyclePeriods(periods, filters).filter((period) => {
+    if (filters.dateBasis === "submitted" && filters.responsible.trim()) {
+      return false;
+    }
     if (!filters.from && !filters.to) {
       return true;
     }
     let dates: string[] = [];
     if (filters.dateBasis === "requested") {
-      dates = period.requests.map((request) => request.requestedAt);
+      dates = period.requests.filter((request) => !filters.responsible.trim() || matchesRequestResponsible(request, filters.responsible)).map((request) => request.requestedAt);
     } else if (filters.dateBasis === "received") {
-      dates = period.requests.flatMap((request) => request.remittances.map((remittance) => remittance.receivedAt));
+      dates = period.requests.flatMap((request) => request.remittances.filter((remittance) => !filters.responsible.trim() || matchesText(remittance.responsibleName, filters.responsible)).map((remittance) => remittance.receivedAt));
     } else if (filters.dateBasis === "delivered") {
-      dates = period.reportDetails.events.map((event) => event.scheduledAt);
+      dates = period.reportDetails.events.filter((event) => !filters.responsible.trim() || matchesText(event.responsibleNames, filters.responsible)).map((event) => event.scheduledAt);
     } else {
-      dates = period.renditions.flatMap((rendition) => rendition.submissions.map((submission) => submission.submittedAt));
+      dates = period.renditions.flatMap((rendition) => rendition.submissions.filter((submission) => !filters.responsible.trim() || matchesText(submission.recordedBy.name, filters.responsible)).map((submission) => submission.submittedAt));
     }
     return dates.some((date) => matchesRange(date, filters));
   });
@@ -48,15 +80,27 @@ export function cycleReconciliationRows(periods: MerchandisePeriodRecord[], filt
     return [];
   }
   return filterCyclePeriods(periods, filters).flatMap((period) => period.requests.flatMap((request) => {
+    let remittances = request.remittances;
+    if (filters.responsible.trim()) {
+      const requestMatchesResponsible = matchesRequestResponsible(request, filters.responsible);
+      const matchingRemittances = remittances.filter((remittance) => matchesText(remittance.responsibleName, filters.responsible));
+      if (filters.dateBasis === "received") {
+        remittances = matchingRemittances;
+      } else if (!requestMatchesResponsible) {
+        remittances = matchingRemittances;
+      }
+      if (!requestMatchesResponsible && !matchingRemittances.length) {
+        return [];
+      }
+    }
     let dates = [request.requestedAt.slice(0, 10)];
     if (filters.dateBasis === "received") {
-      dates = request.remittances.map((remittance) => remittance.receivedAt.slice(0, 10));
+      dates = remittances.map((remittance) => remittance.receivedAt.slice(0, 10));
     }
     const matchesDateRange = (!filters.from && !filters.to) || dates.some((date) => (!filters.from || date >= filters.from) && (!filters.to || date <= filters.to));
     if (!matchesDateRange) {
       return [];
     }
-    let remittances = request.remittances;
     if (filters.dateBasis === "received" && (filters.from || filters.to)) {
       remittances = remittances.filter((remittance) => (!filters.from || remittance.receivedAt.slice(0, 10) >= filters.from) && (!filters.to || remittance.receivedAt.slice(0, 10) <= filters.to));
     }
@@ -67,6 +111,9 @@ export function cycleReconciliationRows(periods: MerchandisePeriodRecord[], filt
 export function periodRenditionsInDateRange(period: MerchandisePeriodRecord, filters: CycleReconciliationFilters) {
   return period.renditions.flatMap((rendition) => {
     let submissions = rendition.submissions;
+    if (filters.responsible.trim()) {
+      submissions = submissions.filter((submission) => matchesText(submission.recordedBy.name, filters.responsible));
+    }
     if (filters.dateBasis === "submitted" && (filters.from || filters.to)) {
       submissions = submissions.filter((submission) => (!filters.from || submission.submittedAt.slice(0, 10) >= filters.from) && (!filters.to || submission.submittedAt.slice(0, 10) <= filters.to));
       if (!submissions.length) {
@@ -77,7 +124,7 @@ export function periodRenditionsInDateRange(period: MerchandisePeriodRecord, fil
   });
 }
 
-export async function createCycleReconciliationPdf(periods: MerchandisePeriodRecord[], filters: CycleReconciliationFilters) {
+export async function createCycleReconciliationPdf(periods: MerchandisePeriodRecord[], filters: CycleReconciliationFilters, context: CycleReconciliationPdfContext) {
   const rows = cycleReconciliationRows(periods, filters);
   const selectedPeriods = periodsInDateRange(periods, filters);
   const pdf = await PDFDocument.create();
@@ -133,6 +180,20 @@ export async function createCycleReconciliationPdf(periods: MerchandisePeriodRec
   const cutoff = new Date().toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" });
   writeLine("Conciliación documental de módulos", true);
   writeLine(`Fecha de corte: ${cutoff}`);
+  if (context.offlineMode) {
+    let capturedAtLabel = "fecha de captura desconocida";
+    if (context.capturedAt) {
+      capturedAtLabel = new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(context.capturedAt));
+    }
+    writeLine(`Fuente: snapshot local preparado el ${capturedAtLabel}. Los totales confirmados provienen del snapshot.`);
+    writeLine(`Cambios locales pendientes: ${context.pendingOperations.length}; no se suman a los totales confirmados.`, true);
+    for (const operation of context.pendingOperations) {
+      const createdAt = new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(operation.createdAt));
+      writeLine(`Pendiente local · ${operation.description} · ${operation.status} · capturado ${createdAt}`);
+    }
+  } else {
+    writeLine("Fuente: lectura confirmada del servidor.");
+  }
   let destinationLabel = "Todos";
   if (filters.destination === "FAMILIES") {
     destinationLabel = "Familias";
@@ -140,7 +201,24 @@ export async function createCycleReconciliationPdf(periods: MerchandisePeriodRec
     destinationLabel = "Merendero";
   }
   writeLine(`Destino: ${destinationLabel}`);
-  writeLine(`Rango de fechas: ${filters.from || "sin inicio"} a ${filters.to || "sin fin"} · criterio: ${filters.dateBasis}`);
+  let periodLabel = "Todos";
+  if (filters.periodId !== "ALL") {
+    const selectedPeriod = periods.find((candidate) => candidate.id === filters.periodId);
+    if (selectedPeriod) {
+      periodLabel = selectedPeriod.label;
+    }
+  }
+  writeLine(`Período: ${periodLabel}`);
+  writeLine(`Organismo: ${filters.agency || "Todos"} · responsable: ${filters.responsible || "Todos"}`);
+  let dateBasisLabel = "Pedido";
+  if (filters.dateBasis === "received") {
+    dateBasisLabel = "Recepción";
+  } else if (filters.dateBasis === "delivered") {
+    dateBasisLabel = "Entrega";
+  } else if (filters.dateBasis === "submitted") {
+    dateBasisLabel = "Presentación";
+  }
+  writeLine(`Rango de fechas: ${filters.from || "sin inicio"} a ${filters.to || "sin fin"} · criterio: ${dateBasisLabel}`);
   cursorY -= 8;
 
   const requestedByUnit = new Map<string, number>();
@@ -191,7 +269,7 @@ export async function createCycleReconciliationPdf(periods: MerchandisePeriodRec
       }
       writeLine(`${period.label} · planilla v${rendition.beneficiarySheet.version} · rendición ${rendition.reviewStatus.toLocaleLowerCase("es-AR")} · ${submissionLabel}`, true);
       for (const submission of rendition.submissions) {
-        writeLine(`Presentación ${submission.submittedAt.slice(0, 10)} · destinatario ${submission.recipient} · emisión ${submission.emissionId}`);
+        writeLine(`Presentación ${submission.submittedAt.slice(0, 10)} · destinatario ${submission.recipient} · registrado por ${submission.recordedBy.name} · emisión ${submission.emissionId}`);
       }
       const latestEmission = rendition.emissions[0];
       const reportSummary = latestEmission?.reportSummary;

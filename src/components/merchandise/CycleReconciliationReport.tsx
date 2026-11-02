@@ -14,6 +14,8 @@ import type { OfflineOperation } from "@/types/offline-operation";
 const INITIAL_FILTERS: CycleReconciliationFilters = {
   destination: "ALL",
   periodId: "ALL",
+  agency: "",
+  responsible: "",
   from: "",
   to: "",
   dateBasis: "requested",
@@ -21,6 +23,24 @@ const INITIAL_FILTERS: CycleReconciliationFilters = {
 
 function formatQuantity(quantity: number, unit: string) {
   return `${new Intl.NumberFormat("es-AR", { maximumFractionDigits: 3 }).format(quantity)} ${unit}`;
+}
+
+function pendingOperationDescription(operation: OfflineOperation) {
+  const parsedPayload = merchandiseOperationPayloadSchema.safeParse(operation.payload);
+  let description = "Cambio de mercadería";
+  if (parsedPayload.success) {
+    const payload = parsedPayload.data;
+    if (payload.kind === "request" && !("action" in payload)) {
+      description = `Solicitud ${payload.requestNumber} · ${payload.requestedQuantity} unidades solicitadas`;
+    } else if (payload.kind === "quota" && !("action" in payload)) {
+      description = `Cupo pendiente · ${payload.approvedQuantity} unidades`;
+    } else if (payload.kind === "remittance" && !("action" in payload)) {
+      description = `Remito ${payload.remittanceNumber} · ${payload.receivedQuantity} unidades recibidas`;
+    } else if (payload.kind === "period" && !("action" in payload)) {
+      description = `Período pendiente · ${payload.label}`;
+    }
+  }
+  return description;
 }
 
 export function CycleReconciliationReport({ periods, offlineMode, capturedAt, pendingOperations }: { periods: MerchandisePeriodRecord[]; offlineMode: boolean; capturedAt: string | null; pendingOperations: OfflineOperation[] }) {
@@ -43,7 +63,11 @@ export function CycleReconciliationReport({ periods, offlineMode, capturedAt, pe
   async function exportReport() {
     setExporting(true);
     try {
-      const bytes = await createCycleReconciliationPdf(periods, filters);
+      const bytes = await createCycleReconciliationPdf(periods, filters, {
+        offlineMode,
+        capturedAt,
+        pendingOperations: pendingOperations.map((operation) => ({ description: pendingOperationDescription(operation), status: operation.status, createdAt: operation.createdAt })),
+      });
       const pdfBytes = new Uint8Array(bytes);
       const url = URL.createObjectURL(new Blob([pdfBytes.buffer], { type: "application/pdf" }));
       const anchor = document.createElement("a");
@@ -65,24 +89,8 @@ export function CycleReconciliationReport({ periods, offlineMode, capturedAt, pe
         </CardHeader>
         <CardContent className="space-y-4">
           {offlineMode && <p className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">Lectura sin conexión · datos preparados {capturedAt ? `el ${new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(capturedAt))}` : "sin fecha de captura disponible"}. Los cambios pendientes aparecen aparte.</p>}
-          {pendingOperations.length ? <Card variant="muted"><CardHeader><CardTitle className="text-base">Cambios locales pendientes · no confirmados</CardTitle><CardDescription>Se muestran aparte y no se suman a cantidades confirmadas.</CardDescription></CardHeader><CardContent><ul className="space-y-2 text-sm">{pendingOperations.map((operation) => {
-            const parsedPayload = merchandiseOperationPayloadSchema.safeParse(operation.payload);
-            let description = "Cambio de mercadería";
-            if (parsedPayload.success) {
-              const payload = parsedPayload.data;
-              if (payload.kind === "request" && !("action" in payload)) {
-                description = `Solicitud ${payload.requestNumber} · ${payload.requestedQuantity} unidades solicitadas`;
-              } else if (payload.kind === "quota" && !("action" in payload)) {
-                description = `Cupo pendiente · ${payload.approvedQuantity} unidades`;
-              } else if (payload.kind === "remittance" && !("action" in payload)) {
-                description = `Remito ${payload.remittanceNumber} · ${payload.receivedQuantity} unidades recibidas`;
-              } else if (payload.kind === "period" && !("action" in payload)) {
-                description = `Período pendiente · ${payload.label}`;
-              }
-            }
-            return <li key={operation.operationId} className="flex flex-wrap justify-between gap-2"><span>{description}</span><span className="text-muted-foreground">{operation.status} · fecha local {new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(operation.createdAt))}</span></li>;
-          })}</ul></CardContent></Card> : null}
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          {pendingOperations.length ? <Card variant="muted"><CardHeader><CardTitle className="text-base">Cambios locales pendientes · no confirmados</CardTitle><CardDescription>Se muestran aparte y no se suman a cantidades confirmadas.</CardDescription></CardHeader><CardContent><ul className="space-y-2 text-sm">{pendingOperations.map((operation) => <li key={operation.operationId} className="flex flex-wrap justify-between gap-2"><span>{pendingOperationDescription(operation)}</span><span className="text-muted-foreground">{operation.status} · fecha local {new Intl.DateTimeFormat("es-AR", { dateStyle: "short", timeStyle: "short" }).format(new Date(operation.createdAt))}</span></li>)}</ul></CardContent></Card> : null}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
             <Field>
               <FieldLabel htmlFor="cycle-report-destination">Destino</FieldLabel>
               <Select value={filters.destination} onValueChange={(destination: CycleReconciliationFilters["destination"]) => { setFilters({ ...filters, destination, periodId: "ALL" }); setPageNumber(0); }}>
@@ -97,6 +105,8 @@ export function CycleReconciliationReport({ periods, offlineMode, capturedAt, pe
                 <SelectContent><SelectItem value="ALL">Todos</SelectItem>{periods.filter((period) => filters.destination === "ALL" || period.destination === filters.destination).map((period) => <SelectItem key={period.id} value={period.id}>{period.label} · {period.agency}</SelectItem>)}</SelectContent>
               </Select>
             </Field>
+            <Field><FieldLabel htmlFor="cycle-report-agency">Organismo</FieldLabel><Input id="cycle-report-agency" value={filters.agency} onChange={(event) => { setFilters({ ...filters, agency: event.target.value }); setPageNumber(0); }} /></Field>
+            <Field><FieldLabel htmlFor="cycle-report-responsible">Responsable</FieldLabel><Input id="cycle-report-responsible" value={filters.responsible} onChange={(event) => { setFilters({ ...filters, responsible: event.target.value }); setPageNumber(0); }} /></Field>
             <Field>
               <FieldLabel htmlFor="cycle-report-date-basis">Fecha de</FieldLabel>
               <Select value={filters.dateBasis} onValueChange={(dateBasis: CycleReconciliationFilters["dateBasis"]) => { setFilters({ ...filters, dateBasis }); setPageNumber(0); }}>
@@ -131,7 +141,7 @@ export function CycleReconciliationReport({ periods, offlineMode, capturedAt, pe
       {selectedPeriods.some((period) => periodRenditionsInDateRange(period, filters).length) && <div className="space-y-3"><h3 className="font-semibold">Rendiciones y presentaciones</h3>{selectedPeriods.flatMap((period) => periodRenditionsInDateRange(period, filters).map((rendition) => {
         const latestEmission = rendition.emissions[0];
         const reportSummary = latestEmission?.reportSummary;
-        return <Card key={rendition.id}><CardContent className="space-y-2 py-4"><p className="font-medium">{period.label} · planilla v{rendition.beneficiarySheet.version} · rendición {rendition.reviewStatus.toLocaleLowerCase("es-AR")}</p>{reportSummary ? <p className="text-sm text-muted-foreground">Instantánea de emisión v{latestEmission.version}: {reportSummary.deliveredModules} módulos en {reportSummary.familyCount} familias · {reportSummary.participantCount} personas detalladas · jornada {reportSummary.event ? `${reportSummary.event.scheduledAt.slice(0, 10)}, ${reportSummary.event.location}` : "sin vínculo a jornada"} · preparación física desconocida</p> : <p className="text-sm text-muted-foreground">El histórico no contiene una instantánea de cantidades validable; preparación y entrega quedan desconocidas.</p>}{rendition.submissions.length ? <ul className="space-y-1 text-sm text-muted-foreground">{rendition.submissions.map((submission) => <li key={submission.id}>Presentación registrada {submission.submittedAt.slice(0, 10)} · destinatario {submission.recipient} · emisión {submission.emissionId}</li>)}</ul> : <p className="text-sm text-muted-foreground">Sin presentación registrada.</p>}</CardContent></Card>;
+        return <Card key={rendition.id}><CardContent className="space-y-2 py-4"><p className="font-medium">{period.label} · planilla v{rendition.beneficiarySheet.version} · rendición {rendition.reviewStatus.toLocaleLowerCase("es-AR")}</p>{reportSummary ? <p className="text-sm text-muted-foreground">Instantánea de emisión v{latestEmission.version}: {reportSummary.deliveredModules} módulos en {reportSummary.familyCount} familias · {reportSummary.participantCount} personas detalladas · jornada {reportSummary.event ? `${reportSummary.event.scheduledAt.slice(0, 10)}, ${reportSummary.event.location}` : "sin vínculo a jornada"} · preparación física desconocida</p> : <p className="text-sm text-muted-foreground">El histórico no contiene una instantánea de cantidades validable; preparación y entrega quedan desconocidas.</p>}{rendition.submissions.length ? <ul className="space-y-1 text-sm text-muted-foreground">{rendition.submissions.map((submission) => <li key={submission.id}>Presentación registrada {submission.submittedAt.slice(0, 10)} · destinatario {submission.recipient} · registrado por {submission.recordedBy.name} · emisión {submission.emissionId}</li>)}</ul> : <p className="text-sm text-muted-foreground">Sin presentación registrada.</p>}</CardContent></Card>;
       }))}</div>}
       {selectedPeriods.some((period) => period.reportDetails.authorized && periodEventsInDateRange(period, filters).length) && <div className="space-y-3"><h3 className="font-semibold">Preparación y entregas por jornada</h3>{selectedPeriods.flatMap((period) => periodEventsInDateRange(period, filters).map((event) => {
         const uniqueFamilies = new Set(event.familyDeliveries.map((delivery) => delivery.familyId)).size;

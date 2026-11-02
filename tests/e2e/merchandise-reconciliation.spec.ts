@@ -1,9 +1,10 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
-import { UserRole } from "@prisma/client";
+import { MerchandiseRecordStatus, MerchandiseRequestStatus, UserRole } from "@prisma/client";
+import { PDFDocument } from "pdf-lib";
 import { prisma } from "@/lib/prisma";
 import { createBrowserIdentity, removeBrowserIdentity, setBrowserIdentity, type BrowserIdentity } from "./browser-identity";
 
@@ -20,6 +21,11 @@ test("captures an external authorization, records partial receipts and downloads
     },
   });
   const requestNumber = `QA-${suffix}`;
+  const pageRequestIds = Array.from({ length: 26 }, () => randomUUID());
+  const pageQuotaIds = pageRequestIds.slice(6).map(() => randomUUID());
+  const pageRemittanceIds = pageRequestIds.slice(6).map(() => randomUUID());
+  const pageRequestPrefix = `QA-${suffix}-PAGE-`;
+  const pageRemittancePrefix = `REM-${suffix}-PAGE-`;
   const request = await prisma.merchandiseRequest.create({
     data: {
       periodId: period.id,
@@ -37,6 +43,45 @@ test("captures an external authorization, records partial receipts and downloads
   await writeFile(authorizationPdfPath, Buffer.from("%PDF-1.7\nSynthetic authorization\n%%EOF", "ascii"));
 
   try {
+    await prisma.merchandiseRequest.createMany({
+      data: pageRequestIds.map((id, index) => ({
+        id,
+        periodId: period.id,
+        requestNumber: `${pageRequestPrefix}${index}`,
+        requestedAt: new Date("2026-10-02"),
+        requestedQuantity: 1,
+        status: index < 6 ? [MerchandiseRequestStatus.PENDIENTE, MerchandiseRequestStatus.RECHAZADA, MerchandiseRequestStatus.CANCELADA][index % 3] as MerchandiseRequestStatus : MerchandiseRequestStatus.APROBADA,
+        createdById: identity.userId,
+      })),
+    });
+    await prisma.merchandiseQuota.createMany({
+      data: pageRequestIds.slice(6).map((requestId, index) => ({
+        id: pageQuotaIds[index],
+        requestId,
+        approvedQuantity: 1,
+        approvedAt: new Date("2026-10-03"),
+        approvedById: identity.userId,
+      })),
+    });
+    await prisma.merchandiseRemittance.createMany({
+      data: pageRequestIds.slice(6).map((requestId, index) => {
+        const isCancelled = index % 5 === 0;
+        return {
+          id: pageRemittanceIds[index],
+          requestId,
+          quotaId: pageQuotaIds[index],
+          remittanceNumber: `${pageRemittancePrefix}${index}`,
+          receivedAt: new Date("2026-10-04"),
+          receivedQuantity: 1,
+          responsibleName: "Receptor sintético QA",
+          status: isCancelled ? MerchandiseRecordStatus.ANULADO : MerchandiseRecordStatus.VIGENTE,
+          cancelledAt: isCancelled ? new Date("2026-10-05") : null,
+          cancelledById: isCancelled ? identity.userId : null,
+          cancellationReason: isCancelled ? "Remito QA anulado" : null,
+          createdById: identity.userId,
+        };
+      }),
+    });
     page.on("response", async (response) => {
       if (response.url().endsWith("/api/synchronizations")) {
         synchronizationResponses.push(`HTTP ${response.status()}`);
@@ -45,7 +90,7 @@ test("captures an external authorization, records partial receipts and downloads
     await setBrowserIdentity(context, identity);
     await page.goto("/mercaderia");
     await expect(page.getByRole("heading", { name: "Recepción de mercadería" })).toBeVisible();
-    const requestCard = page.locator("article").filter({ hasText: requestNumber });
+    const requestCard = page.locator("article").filter({ hasText: new RegExp(`Solicitud ${requestNumber}(?!-PAGE)`) });
     await expect(requestCard).toBeVisible();
     await requestCard.getByRole("button", { name: "Registrar cupo" }).click();
     await page.getByLabel("Cantidad aprobada *").fill("6");
@@ -100,7 +145,22 @@ test("captures an external authorization, records partial receipts and downloads
 
     await page.getByRole("link", { name: "Conciliación" }).click();
     await expect(page.getByText("Conciliación histórica del ciclo", { exact: true })).toBeVisible();
+    await page.getByLabel("Organismo").fill("Organismo de prueba");
+    await expect(page.getByText("Página 1 de 2")).toBeVisible();
+    await page.getByRole("button", { name: "Siguiente" }).click();
+    await expect(page.getByText("Página 2 de 2")).toBeVisible();
+    await page.getByLabel("Organismo").fill("Organismo sin coincidencias");
+    await expect(page.getByText("No hay solicitudes que coincidan con estos filtros.")).toBeVisible();
+    await page.getByLabel("Organismo").fill("Organismo de prueba");
+    await page.getByLabel("Responsable").fill("Responsable sin coincidencias");
+    await expect(page.getByText("No hay solicitudes que coincidan con estos filtros.")).toBeVisible();
+    await page.getByLabel("Responsable").fill("Receptor sintético QA");
     await expect(page.getByText("4.5 kg")).toBeVisible();
+    await expect(page.getByText("21 solicitudes correspondientes")).toBeVisible();
+    await page.getByLabel("Responsable").fill("Browser PRESIDENTE");
+    await expect(page.getByText("Página 1 de 2")).toBeVisible();
+    await page.getByRole("button", { name: "Siguiente" }).click();
+    await expect(page.getByText("Página 2 de 2")).toBeVisible();
     const cycleReportScreenshotPath = testInfo.outputPath("cycle-report.png");
     await page.screenshot({ path: cycleReportScreenshotPath, fullPage: false });
     await testInfo.attach("cycle-reconciliation-screen.png", { path: cycleReportScreenshotPath, contentType: "image/png" });
@@ -112,6 +172,8 @@ test("captures an external authorization, records partial receipts and downloads
     const cycleReport = await readFile(cycleReportPath);
     assert.equal(cycleReport.toString("ascii", 0, 5), "%PDF-");
     assert.ok(cycleReport.length > 500);
+    const parsedCycleReport = await PDFDocument.load(cycleReport);
+    assert.ok(parsedCycleReport.getPageCount() > 1);
     await testInfo.attach("cycle-reconciliation-report.pdf", { body: cycleReport, contentType: "application/pdf" });
 
     const savedRemittance = await prisma.merchandiseRemittance.findUniqueOrThrow({ where: { remittanceNumber: `REM-${suffix}` } });
@@ -123,6 +185,9 @@ test("captures an external authorization, records partial receipts and downloads
   } finally {
     await context.setOffline(false);
     await prisma.merchandiseDocument.deleteMany({ where: { requestId: request.id } });
+    await prisma.merchandiseRemittance.deleteMany({ where: { id: { in: pageRemittanceIds } } });
+    await prisma.merchandiseQuota.deleteMany({ where: { id: { in: pageQuotaIds } } });
+    await prisma.merchandiseRequest.deleteMany({ where: { id: { in: pageRequestIds } } });
     const quota = await prisma.merchandiseQuota.findUnique({ where: { requestId: request.id } });
     if (quota) {
       await prisma.merchandiseReceiptItem.deleteMany({ where: { quotaItem: { quotaId: quota.id } } });
