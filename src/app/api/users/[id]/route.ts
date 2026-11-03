@@ -1,13 +1,14 @@
 
 
-import { PRIVATE_RESPONSE_HEADERS } from "@/constants/http.constant";
+import { HTTP_CACHE_CONTROL, HTTP_HEADERS, PRIVATE_RESPONSE_HEADERS } from "@/constants/http.constant";
 import { USER_ERROR_MESSAGES } from "@/constants/user.constant";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { userService } from "@/server/services/user.service";
 import { requireAdministrativeCapability } from "@/server/services/access-policy.service";
-import apiErrorHandler, { normalizeApiError } from "@/utils/handlers/apiError.handler";
-import { updateUserStatusRequestSchema } from "@/schemas/user.schema";
+import apiErrorHandler, { ApiError, normalizeApiError } from "@/utils/handlers/apiError.handler";
+import { userIdParamsSchema, updateUserStatusRequestSchema } from "@/schemas/user.schema";
+import { isSameOriginRequest } from "@/server/services/origin.service";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -20,5 +21,28 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   } catch (error) {
     const apiError = normalizeApiError(error, 500, USER_ERROR_MESSAGES.NO_SE_PUDO_ACTUALIZAR_EL_USUARIO);
     return apiErrorHandler({ error: apiError, request });
+  }
+}
+
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    if (!isSameOriginRequest(request)) {
+      throw new ApiError({ status: 403, message: USER_ERROR_MESSAGES.WRONG_ORIGIN });
+    }
+
+    const user = await requireAdministrativeCapability(request.cookies.get(AUTH.SESSION_COOKIE)?.value, "users.manage", USER_ERROR_MESSAGES.NO_TENES_PERMISO_PARA_ADMINISTRAR_USUARIOS);
+    const parsedParams = userIdParamsSchema.safeParse(await params);
+
+    if (!parsedParams.success) {
+      return NextResponse.json({ error: { message: USER_ERROR_MESSAGES.REQUEST_ID_INVALID } }, { status: 400, headers: PRIVATE_RESPONSE_HEADERS });
+    }
+
+    await userService.logicallyDelete(parsedParams.data.id, user.id);
+    return new NextResponse(null, { status: 204, headers: PRIVATE_RESPONSE_HEADERS });
+  } catch (error) {
+    const apiError = normalizeApiError(error, 500, USER_ERROR_MESSAGES.NO_SE_PUDO_ELIMINAR_EL_USUARIO);
+    const response = apiErrorHandler({ error: apiError, request });
+    response.headers.set(HTTP_HEADERS.CACHE_CONTROL, HTTP_CACHE_CONTROL.PRIVATE_NO_STORE);
+    return response;
   }
 }

@@ -1,5 +1,6 @@
 import { BRAND } from "@/constants/brand.constant";
 import { PwaRegistration } from "@/components/shared/PwaRegistration";
+import { Toaster } from "@/components/ui/sonner";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 
@@ -45,6 +46,7 @@ export default function RootLayout({
       <body className="flex min-h-screen flex-col font-sans">
         <PwaRegistration />
         {children}
+        <Toaster position="top-center" />
       </body>
     </html>
   );

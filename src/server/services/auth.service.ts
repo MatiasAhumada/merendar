@@ -76,7 +76,7 @@ export const authService = {
     const user = await authRepository.findUserByIdentifier(normalizedIdentifier);
     const passwordMatches = await verifyPassword(password, user?.passwordHash ?? DUMMY_SALT + ":" + DUMMY_PASSWORD_HASH);
 
-    if (!user || !user.passwordHash || !user.role || !user.isActive || !passwordMatches) {
+    if (!user || !user.passwordHash || !user.role || !user.isActive || user.deletedAt || !passwordMatches) {
       await authRepository.recordFailedAttempt(candidateKey);
       return { type: "invalid-credentials" };
     }

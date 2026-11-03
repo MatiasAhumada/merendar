@@ -39,3 +39,14 @@ export async function getManagedUsers(userId: string, isOnline: boolean, search 
       : result;
   }
 }
+
+export async function removeManagedUserFromOfflineSnapshot(userId: string, removedUserId: string) {
+  try {
+    const snapshot = await readOfflineSnapshot(userId, ROUTES.USERS, managedUsersSchema);
+    const users = snapshot.data.users.filter((user) => user.id !== removedUserId);
+
+    return await updateOfflineSnapshot(userId, ROUTES.USERS, { users });
+  } catch {
+    return false;
+  }
+}

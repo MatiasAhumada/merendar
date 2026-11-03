@@ -28,13 +28,46 @@ export const userService = {
   },
 
   async updateStatus(id: string, actorId: string, isActive: boolean) {
-    const user = await userRepository.findById(id);
-    if (!user) throw new ApiError({ status: httpStatus.NOT_FOUND, message: USER_ERROR_MESSAGES.USUARIO_NO_ENCONTRADO });
-    if (!isActive && actorId === id) throw new ApiError({ status: httpStatus.FORBIDDEN, message: USER_ERROR_MESSAGES.NO_PODES_DESACTIVAR_TU_PROPIA_CUENTA });
-    if (!isActive && user.role === UserRole.PRESIDENTE && user.isActive && await userRepository.countActivePresidents() <= 1) {
+    const result = await userRepository.updateStatus(id, actorId, isActive);
+
+    if (result.type === "missing") {
+      throw new ApiError({ status: httpStatus.NOT_FOUND, message: USER_ERROR_MESSAGES.USUARIO_NO_ENCONTRADO });
+    }
+
+    if (result.type === "self") {
+      throw new ApiError({ status: httpStatus.FORBIDDEN, message: USER_ERROR_MESSAGES.NO_PODES_DESACTIVAR_TU_PROPIA_CUENTA });
+    }
+
+    if (result.type === "last-president") {
       throw new ApiError({ status: httpStatus.CONFLICT, message: USER_ERROR_MESSAGES.DEBE_PERMANECER_AL_MENOS_UNA_PRESIDENCIA_ACTIVA });
     }
-    if (!isActive) return userRepository.deactivate(id);
-    return userRepository.update(id, { isActive: true });
+
+    if (result.type === "already-deleted") {
+      throw new ApiError({ status: httpStatus.CONFLICT, message: USER_ERROR_MESSAGES.USER_ALREADY_DELETED });
+    }
+
+    if (result.type === "actor-unavailable") {
+      throw new ApiError({ status: httpStatus.FORBIDDEN, message: USER_ERROR_MESSAGES.NO_TENES_PERMISO_PARA_ADMINISTRAR_USUARIOS });
+    }
+  },
+
+  async logicallyDelete(id: string, actorId: string) {
+    const result = await userRepository.logicallyDelete(id, actorId);
+
+    if (result.type === "missing") {
+      throw new ApiError({ status: httpStatus.NOT_FOUND, message: USER_ERROR_MESSAGES.USUARIO_NO_ENCONTRADO });
+    }
+
+    if (result.type === "self") {
+      throw new ApiError({ status: httpStatus.FORBIDDEN, message: USER_ERROR_MESSAGES.NO_PODES_ELIMINAR_TU_PROPIA_CUENTA });
+    }
+
+    if (result.type === "last-president") {
+      throw new ApiError({ status: httpStatus.CONFLICT, message: USER_ERROR_MESSAGES.DEBE_PERMANECER_AL_MENOS_UNA_PRESIDENCIA_ACTIVA_PARA_ELIMINAR });
+    }
+
+    if (result.type === "actor-unavailable") {
+      throw new ApiError({ status: httpStatus.FORBIDDEN, message: USER_ERROR_MESSAGES.NO_TENES_PERMISO_PARA_ADMINISTRAR_USUARIOS });
+    }
   },
 };

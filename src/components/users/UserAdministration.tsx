@@ -2,18 +2,19 @@
 
 import { USERS_UI_TEXT, USER_ERROR_MESSAGES } from "@/constants/user.constant";
 import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_ROUTES } from "@/constants/routes.constant";
 import { USER_ROLE_OPTIONS, USER_ROLE_LABELS } from "@/constants/user-role.constant";
-import { clientErrorHandler } from "@/utils/handlers/clientHandler";
+import { clientErrorHandler, clientSuccessHandler } from "@/utils/handlers/clientHandler";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { getManagedUsers } from "@/services/client/user-administration-data.service";
+import { getManagedUsers, removeManagedUserFromOfflineSnapshot } from "@/services/client/user-administration-data.service";
 import clientAxios from "@/utils/clientAxios.util";
 
 import type { ManagedUser } from "@/types/schema-contracts";
@@ -26,12 +27,15 @@ export function UserAdministration({ userId }: { userId: string }) {
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [userPendingDeletion, setUserPendingDeletion] = useState<ManagedUser | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const deletedUserIds = useRef(new Set<string>());
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
     try {
       const result = await getManagedUsers(userId, isOnline, search);
-      setUsers(result.data.users);
+      setUsers(result.data.users.filter((user) => !deletedUserIds.current.has(user.id)));
       setError("");
     } catch (cause) {
       setError(USER_ERROR_MESSAGES.NO_SE_PUDIERON_CARGAR_LAS_CUENTAS);
@@ -76,6 +80,29 @@ export function UserAdministration({ userId }: { userId: string }) {
     } catch (cause) { clientErrorHandler(cause); }
   }
 
+  async function deleteUser() {
+    if (!userPendingDeletion) {
+      return;
+    }
+
+    const deletedUser = userPendingDeletion;
+    setDeletingUserId(deletedUser.id);
+
+    try {
+      await clientAxios.delete(`${API_ROUTES.USERS}/${deletedUser.id}`);
+      deletedUserIds.current.add(deletedUser.id);
+      setUsers((currentUsers) => currentUsers.filter((user) => user.id !== deletedUser.id));
+      await removeManagedUserFromOfflineSnapshot(userId, deletedUser.id);
+      setUserPendingDeletion(null);
+      await loadUsers();
+      clientSuccessHandler(USERS_UI_TEXT.CUENTA_DADA_DE_BAJA_CON_HISTORIAL_CONSERVADO);
+    } catch (cause) {
+      clientErrorHandler(cause);
+    } finally {
+      setDeletingUserId(null);
+    }
+  }
+
   let usersContent: ReactNode;
 
   if (loading) {
@@ -85,7 +112,7 @@ export function UserAdministration({ userId }: { userId: string }) {
   } else if (users.length === 0) {
     usersContent = <p className="text-sm text-muted-foreground">{USERS_UI_TEXT.NO_HAY_USUARIOS_PARA_MOSTRAR}</p>;
   } else {
-    usersContent = <ul className="divide-y">{users.filter((user) => `${user.name} ${user.email ?? ""}`.toLocaleLowerCase("es").includes(search.trim().toLocaleLowerCase("es"))).map((user) => <li key={user.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-medium">{user.name}</p><p className="break-all text-sm text-muted-foreground">{user.email ?? USERS_UI_TEXT.SIN_EMAIL} {APPLICATION_UI_TEXT.TEXT}{user.role ? USER_ROLE_LABELS[user.role] : USERS_UI_TEXT.SIN_ROL}</p></div><div className="flex items-center gap-3"><Badge variant={user.isActive ? "success" : "secondary"}>{user.isActive ? USERS_UI_TEXT.ACTIVO : USERS_UI_TEXT.INACTIVO}</Badge><Button variant={user.isActive ? "outline" : "secondary"} size="sm" disabled={!isOnline} onClick={() => void changeStatus(user)}>{user.isActive ? USERS_UI_TEXT.DESACTIVAR : USERS_UI_TEXT.ACTIVAR}</Button></div></li>)}</ul>;
+    usersContent = <ul className="divide-y">{users.filter((user) => `${user.name} ${user.email ?? ""}`.toLocaleLowerCase("es").includes(search.trim().toLocaleLowerCase("es"))).map((user) => <li key={user.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="font-medium">{user.name}</p><p className="break-all text-sm text-muted-foreground">{user.email ?? USERS_UI_TEXT.SIN_EMAIL} {APPLICATION_UI_TEXT.TEXT}{user.role ? USER_ROLE_LABELS[user.role] : USERS_UI_TEXT.SIN_ROL}</p></div><div className="flex flex-wrap items-center gap-3"><Badge variant={user.isActive ? "success" : "secondary"}>{user.isActive ? USERS_UI_TEXT.ACTIVO : USERS_UI_TEXT.INACTIVO}</Badge><Button variant={user.isActive ? "outline" : "secondary"} size="sm" disabled={!isOnline || Boolean(deletingUserId)} onClick={() => void changeStatus(user)}>{user.isActive ? USERS_UI_TEXT.DESACTIVAR : USERS_UI_TEXT.ACTIVAR}</Button><Button variant="destructive" size="sm" disabled={!isOnline || Boolean(deletingUserId)} onClick={() => setUserPendingDeletion(user)}>{USERS_UI_TEXT.ELIMINAR}</Button></div></li>)}</ul>;
   }
 
   return <div className="flex flex-col gap-5">
@@ -109,5 +136,17 @@ export function UserAdministration({ userId }: { userId: string }) {
     <Card><CardHeader className="gap-3 sm:flex-row sm:items-center sm:justify-between"><CardTitle>{USERS_UI_TEXT.EQUIPO}</CardTitle><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={USERS_UI_TEXT.BUSCAR_POR_NOMBRE_O_EMAIL} aria-label={USERS_UI_TEXT.BUSCAR_USUARIOS} className="sm:max-w-xs" /></CardHeader><CardContent>
       {usersContent}
     </CardContent></Card>
+    <Dialog open={Boolean(userPendingDeletion)} onOpenChange={(open) => { if (!open && !deletingUserId) setUserPendingDeletion(null); }}>
+      <DialogContent showCloseButton={!deletingUserId}>
+        <DialogHeader>
+          <DialogTitle>{USERS_UI_TEXT.CONFIRMAR_ELIMINACION_DE_CUENTA}</DialogTitle>
+          <DialogDescription>{userPendingDeletion && USERS_UI_TEXT.CONFIRMAR_BAJA_LOGICA(userPendingDeletion.name)}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" disabled={Boolean(deletingUserId)} onClick={() => setUserPendingDeletion(null)}>{APPLICATION_UI_TEXT.CANCELAR}</Button>
+          <Button variant="destructive" disabled={!isOnline || Boolean(deletingUserId)} onClick={() => void deleteUser()}>{deletingUserId ? USERS_UI_TEXT.ELIMINANDO_CUENTA : USERS_UI_TEXT.ELIMINAR}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>;
 }

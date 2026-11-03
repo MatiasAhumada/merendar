@@ -14,6 +14,10 @@ model User {
   passwordHash                    String?
   role                            UserRole?
   isActive                        Boolean                   @default(true)
+  deletedAt                       DateTime?
+  deletedById                     String?
+  deletedBy                       User?                     @relation("UserDeleter", fields: [deletedById], references: [id], onDelete: Restrict)
+  deletedUsers                    User[]                    @relation("UserDeleter")
   sessions                        AuthSession[]
   createdFamilies                 Family[]
   deactivatedFamilies             Family[]                  @relation("FamilyDeactivator")

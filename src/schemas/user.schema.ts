@@ -21,3 +21,5 @@ export const createUserRequestSchema = z.object({
 
 export const updateUserStatusRequestSchema = z.object({ isActive: z.boolean() }).strict();
 
+export const userIdParamsSchema = z.object({ id: z.string().trim().min(1) }).strict();
+

@@ -17,6 +17,7 @@ export const accessPolicyRepository = {
     const [policies, users, changes] = await Promise.all([
       prisma.roleCapabilityPolicy.findMany({ select: { role: true, capability: true, enabled: true } }),
       prisma.user.findMany({
+        where: { deletedAt: null },
         select: { id: true, name: true, email: true, role: true, isActive: true },
         orderBy: [{ role: "asc" }, { name: "asc" }],
       }),
