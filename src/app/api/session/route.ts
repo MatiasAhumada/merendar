@@ -1,17 +1,11 @@
-import { z } from "zod";
+import { PRIVATE_RESPONSE_HEADERS } from "@/constants/http.constant";
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH, AUTH_MESSAGES } from "@/constants/auth.constant";
+import { loginRequestSchema } from "@/schemas/auth.schema";
 import { authService } from "@/server/services/auth.service";
 import { getEffectiveCapabilities } from "@/server/services/access-policy.service";
 
-const loginSchema = z
-  .object({
-    identifier: z.string().trim().min(1).max(AUTH.IDENTIFIER_MAX_LENGTH),
-    password: z.string().min(1).max(AUTH.PASSWORD_MAX_LENGTH),
-  })
-  .strict();
-
-const privateHeaders = { "Cache-Control": "private, no-store, max-age=0" };
+const privateHeaders = PRIVATE_RESPONSE_HEADERS;
 
 function jsonResponse(body: unknown, status: number) {
   return NextResponse.json(body, { status, headers: privateHeaders });
@@ -68,7 +62,7 @@ export async function POST(request: NextRequest) {
       return jsonResponse({ error: { message: AUTH_MESSAGES.INVALID_CREDENTIALS } }, 400);
     }
 
-    const parsedPayload = loginSchema.safeParse(payload);
+    const parsedPayload = loginRequestSchema.safeParse(payload);
 
     if (!parsedPayload.success) {
       return jsonResponse({ error: { message: AUTH_MESSAGES.INVALID_CREDENTIALS } }, 400);

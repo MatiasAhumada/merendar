@@ -1,3 +1,6 @@
+
+
+import { FAMILY_ERROR_MESSAGES } from "@/constants/family.constant";
 import { prisma } from "@/lib/prisma";
 import { FamilyOperationAction, Prisma } from "@prisma/client";
 import type { CreateFamilyInput, FindFamiliesOptions, UpdateFamilyInput } from "@/types/family";
@@ -98,9 +101,17 @@ export async function deactivateFamilyInTransaction(
     where: { familyMemberId: { in: affectedMemberIds } },
     select: { id: true },
   });
+  let familyDelivery = null;
+  if (target.kind === "family") {
+    familyDelivery = await transaction.familyDelivery.findFirst({ where: { familyId: family.id }, select: { id: true } });
+  }
+  let distributionParticipant = null;
+  if (target.kind === "member") {
+    distributionParticipant = await transaction.distributionParticipant.findFirst({ where: { familyMemberId: { in: affectedMemberIds } }, select: { id: true } });
+  }
   const hasSheetReference = await hasBeneficiarySheetReference(transaction, affectedPersonIds);
 
-  if (distributionRecord || hasSheetReference) {
+  if (distributionRecord || familyDelivery || distributionParticipant || hasSheetReference) {
     return { type: "has-records" };
   }
 
@@ -253,7 +264,7 @@ export const familyRepository = {
       const referenceMember = people[input.referenceMemberIndex];
 
       if (!referenceMember) {
-        throw new Error("El integrante referente no existe en la solicitud");
+        throw new Error(FAMILY_ERROR_MESSAGES.EL_INTEGRANTE_REFERENTE_NO_EXISTE_EN_LA_SOLICITUD);
       }
 
       const family = await transaction.family.create({
@@ -395,7 +406,7 @@ export const familyRepository = {
         }
       } else {
         if (!existingPersonId) {
-          throw new Error("No encontramos la persona integrante asociada");
+          throw new Error(FAMILY_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_PERSONA_INTEGRANTE_ASOCIADA);
         }
 
         await transaction.person.update({

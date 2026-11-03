@@ -46,7 +46,7 @@ export const dashboardRepository = {
           select: { updatedAt: true },
         }),
       ]);
-      approvedQuotaCount = quotaSummary._sum.approvedQuantity ?? 0;
+      approvedQuotaCount = quotaSummary._sum.approvedQuantity?.toNumber() ?? 0;
       latestQuota = mostRecentlyUpdatedQuota;
     }
 

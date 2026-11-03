@@ -1,6 +1,6 @@
-import httpStatus from "http-status";
 import { NextRequest, NextResponse } from "next/server";
-import { CONFIG } from "@/constants/config.constant";
+import { APPLICATION_CONFIG } from "@/config/application.config";
+import httpStatus from "http-status";
 
 interface ApiErrorOptions {
   status?: number;
@@ -40,6 +40,14 @@ export class ApiError extends Error {
   }
 }
 
+export function normalizeApiError(error: unknown, status: number, message: string, isOperational = false) {
+  if (error instanceof ApiError) {
+    return error;
+  }
+
+  return new ApiError({ status, message, isOperational });
+}
+
 type ResponseError = {
   message: string;
   status: number;
@@ -75,7 +83,7 @@ export default function apiErrorHandler({
 
   if (error?.internalCode) errorResponse.internalCode = error.internalCode;
   if (error?.details) errorResponse.details = error.details;
-  if (error?.stack && CONFIG.NODE_ENV === "development") {
+  if (error?.stack && APPLICATION_CONFIG.NODE_ENV === "development") {
     errorResponse.stack = error.stack;
   }
 

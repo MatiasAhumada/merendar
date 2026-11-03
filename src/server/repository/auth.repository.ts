@@ -43,7 +43,7 @@ export const authRepository = {
         tokenHash,
         revokedAt: null,
         expiresAt: { gt: now },
-        user: { isActive: true, role: { not: null } },
+        user: { isActive: true, deletedAt: null, role: { not: null } },
       },
       select: {
         id: true,

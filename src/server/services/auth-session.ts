@@ -1,9 +1,9 @@
-import "server-only";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AUTH } from "@/constants/auth.constant";
-import { ROUTES } from "@/constants/routes";
+import { ROUTES } from "@/constants/routes.constant";
 import { authService } from "@/server/services/auth.service";
+import "server-only";
 
 export async function getCurrentSession() {
   const cookieStore = await cookies();

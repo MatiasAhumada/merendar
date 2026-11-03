@@ -12,7 +12,7 @@ import {
   SynchronizationConflictError,
   SynchronizationDependencyError,
   SynchronizationKeyConflictError,
-} from "@/server/repository/synchronization.repository";
+} from "@/server/errors/synchronization.error";
 import { synchronizationService } from "@/server/services/synchronization.service";
 
 test("offline synchronization receipts are atomic, idempotent and bound to the originating account", async () => {

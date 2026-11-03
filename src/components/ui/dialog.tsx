@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "radix-ui"
+import { COMMON_UI_TEXT } from "@/constants/common-ui.constant"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -76,7 +77,7 @@ function DialogContent({
               size="icon-sm"
             >
               <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-              <span className="sr-only">Cerrar</span>
+              <span className="sr-only">{COMMON_UI_TEXT.CERRAR}</span>
             </Button>
           </DialogPrimitive.Close>
         )}
@@ -115,7 +116,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close asChild>
-          <Button variant="outline">Cerrar</Button>
+          <Button variant="outline">{COMMON_UI_TEXT.CERRAR}</Button>
         </DialogPrimitive.Close>
       )}
     </div>

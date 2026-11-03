@@ -1,5 +1,7 @@
 "use client";
 
+import { APPLICATION_UI_TEXT } from "@/constants/application-ui.constant";
+import { MERCHANDISE_UI_TEXT } from "@/constants/merchandise.constant";
 import { MerchandiseWorkspace } from "@/components/merchandise/MerchandiseWorkspace";
 import { SessionRoute } from "@/components/shared/SessionRoute";
 import { useAppSession } from "@/components/shared/AppSessionContext";
@@ -18,7 +20,7 @@ export default function MerchandisePage() {
   if (!canReadMerchandise && !canReadRenditions) {
     return (
       <SessionRoute>
-        <Alert variant="destructive"><AlertTitle>Acceso no habilitado</AlertTitle><AlertDescription>Mercadería y rendiciones no están habilitadas para tu rol.</AlertDescription></Alert>
+        <Alert variant="destructive"><AlertTitle>{APPLICATION_UI_TEXT.ACCESO_NO_HABILITADO}</AlertTitle><AlertDescription>{MERCHANDISE_UI_TEXT.MERCADERIA_Y_RENDICIONES_NO_ESTAN_HABILITADAS_PARA_TU_ROL}</AlertDescription></Alert>
       </SessionRoute>
     );
   }

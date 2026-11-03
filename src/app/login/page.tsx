@@ -2,12 +2,13 @@ import { type Metadata } from "next";
 import { redirect } from "next/navigation";
 import { LoginScreen } from "@/components/auth/LoginScreen";
 import { getCurrentSession } from "@/server/services/auth-session";
-import { ROUTES } from "@/constants/routes";
+import { ROUTES } from "@/constants/routes.constant";
 import { BRAND } from "@/constants/brand.constant";
+import { AUTH_UI_TEXT } from "@/constants/auth.constant";
 
 export const metadata: Metadata = {
-  title: "Ingresar",
-  description: `Acceso al panel de gestión de ${BRAND.shortName}.`,
+  title: AUTH_UI_TEXT.INGRESAR,
+  description: AUTH_UI_TEXT.LOGIN_PAGE_DESCRIPTION(BRAND.shortName),
 };
 
 export default async function LoginPage() {

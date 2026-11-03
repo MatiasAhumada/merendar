@@ -9,14 +9,15 @@ import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interf
 import { GET as getPrivateDocument } from "@/app/api/merchandise/documents/[id]/route";
 import { POST as postSynchronization } from "@/app/api/synchronizations/route";
 import { prisma } from "@/lib/prisma";
-import { SynchronizationConflictError } from "@/server/repository/synchronization.repository";
+import { SynchronizationConflictError } from "@/server/errors/synchronization.error";
 import { merchandiseSynchronizationHandler } from "@/server/services/merchandise-synchronization.service";
 import { synchronizationService } from "@/server/services/synchronization.service";
 import type { JsonValue } from "@/types/json-value";
-import { merchandisePayloadSchema } from "@/validations/merchandise.validation";
+import { merchandisePayloadSchema } from "@/schemas/merchandise.schema";
+import { getMerchandiseDocument } from "@/server/services/merchandise.service";
 
-test("merchandise document policy accepts valid PDFs up to 512 KiB and rejects images or larger files", () => {
-  const validPdf = Buffer.alloc(512 * 1024, 32);
+test("merchandise document policy accepts valid PDFs up to 2 MiB and rejects images or larger files", () => {
+  const validPdf = Buffer.alloc(2 * 1024 * 1024, 32);
   validPdf.write("%PDF-1.7", 0, "ascii");
   validPdf.write("%%EOF", validPdf.length - 5, "ascii");
   const basePayload = {
@@ -94,7 +95,13 @@ test("merchandise periods, requests, quotas, remittances and private documents p
   const requestId = randomUUID();
   const quotaId = randomUUID();
   const remittanceId = randomUUID();
+  const supplyPeriodId = randomUUID();
+  const supplyRequestId = randomUUID();
+  const supplyQuotaId = randomUUID();
+  const supplyRemittanceId = randomUUID();
+  const secondSupplyRemittanceId = randomUUID();
   let apiPeriodId = "";
+  let uploadedRequestId = "";
   let unauthorizedUserId = "";
   const pdfContent = Buffer.from("%PDF-1.7 test document\n%%EOF").toString("base64");
   const periodOperation = createOperation(user.id, periodId, {
@@ -151,9 +158,97 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     assert.equal(firstResponse.replayed, false);
     assert.equal(replayResponse.replayed, true);
     assert.equal(savedPeriod?.requests[0]?.status, "APROBADA");
-    assert.equal(savedPeriod?.requests[0]?.quota?.approvedQuantity, 40);
-    assert.equal(savedPeriod?.requests[0]?.remittances[0]?.receivedQuantity, 30);
-    assert.equal(Buffer.from(savedPeriod?.requests[0]?.remittances[0]?.documents[0]?.content ?? new Uint8Array()).toString(), "%PDF-1.7 test document\n%%EOF");
+    assert.equal(savedPeriod?.requests[0]?.quota?.approvedQuantity.toNumber(), 40);
+    assert.equal(savedPeriod?.requests[0]?.remittances[0]?.receivedQuantity.toNumber(), 30);
+    const remittanceDocumentId = savedPeriod?.requests[0]?.remittances[0]?.documents[0]?.id;
+    assert.ok(remittanceDocumentId);
+    const remittanceDocument = await getMerchandiseDocument(remittanceDocumentId);
+    assert.ok(remittanceDocument);
+    assert.equal(Buffer.from(remittanceDocument.content).toString(), "%PDF-1.7 test document\n%%EOF");
+
+    const supplyPeriodOperation = createOperation(user.id, supplyPeriodId, {
+      kind: "period",
+      id: supplyPeriodId,
+      label: `Test supply cycle ${suffix}`,
+      agency: "Development Social Ministry",
+      destination: "MERENDERO",
+      startsAt: "2026-10-01",
+      endsAt: "2026-10-31",
+    });
+    const supplyRequestOperation = createOperation(user.id, supplyRequestId, {
+      kind: "request",
+      id: supplyRequestId,
+      periodId: supplyPeriodId,
+      requestNumber: `SUP-${suffix}`,
+      requestedAt: "2026-10-02",
+      requestedQuantity: 1.25,
+      item: { productName: "Aceite", presentation: "Botella de 900 ml", unit: "litro", requestedQuantity: 1.25 },
+    }, [supplyPeriodOperation.operationId]);
+    const supplyQuotaOperation = createOperation(user.id, supplyQuotaId, {
+      kind: "quota",
+      id: supplyQuotaId,
+      requestId: supplyRequestId,
+      approvedQuantity: 1.25,
+      approvedAt: "2026-10-03",
+      externalOrderNumber: `EXT-${suffix}`,
+      authorizedRecipient: "Synthetic QA Recipient",
+      authorizationValidUntil: "2026-10-05",
+    }, [supplyRequestOperation.operationId]);
+    const supplyReceiptOperation = createOperation(user.id, supplyRemittanceId, {
+      kind: "remittance",
+      id: supplyRemittanceId,
+      requestId: supplyRequestId,
+      quotaId: supplyQuotaId,
+      remittanceNumber: `SUP-REM-1-${suffix}`,
+      receivedAt: "2026-10-04",
+      receivedQuantity: 0.75,
+      responsibleName: "Test Receiver",
+    }, [supplyRequestOperation.operationId, supplyQuotaOperation.operationId]);
+    const secondSupplyReceiptOperation = createOperation(user.id, secondSupplyRemittanceId, {
+      kind: "remittance",
+      id: secondSupplyRemittanceId,
+      requestId: supplyRequestId,
+      quotaId: supplyQuotaId,
+      remittanceNumber: `SUP-REM-2-${suffix}`,
+      receivedAt: "2026-10-05",
+      receivedQuantity: 0.5,
+      responsibleName: "Test Receiver",
+    }, [supplyRequestOperation.operationId, supplyQuotaOperation.operationId, supplyReceiptOperation.operationId]);
+    await synchronizationService.apply(supplyPeriodOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    await synchronizationService.apply(supplyRequestOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    await synchronizationService.apply(supplyQuotaOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    const supplyQuotaReplay = await synchronizationService.apply(supplyQuotaOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    await synchronizationService.apply(supplyReceiptOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    await synchronizationService.apply(secondSupplyReceiptOperation, "REMITTANCES", merchandiseSynchronizationHandler);
+    const savedSupplyRequest = await prisma.merchandiseRequest.findUniqueOrThrow({
+      where: { id: supplyRequestId },
+      include: { items: true, quota: { include: { items: true } }, remittances: { include: { items: true } } },
+    });
+    assert.equal(savedSupplyRequest.items[0]?.productName, "Aceite");
+    assert.equal(savedSupplyRequest.items[0]?.presentation, "Botella de 900 ml");
+    assert.equal(savedSupplyRequest.items[0]?.unit, "litro");
+    assert.equal(savedSupplyRequest.items[0]?.requestedQuantity.toNumber(), 1.25);
+    assert.equal(savedSupplyRequest.quota?.items[0]?.authorizedQuantity.toNumber(), 1.25);
+    assert.equal(savedSupplyRequest.quota?.externalOrderNumber, `EXT-${suffix}`);
+    assert.equal(savedSupplyRequest.quota?.authorizedRecipient, "Synthetic QA Recipient");
+    assert.equal(savedSupplyRequest.quota?.authorizationValidUntil?.toISOString().slice(0, 10), "2026-10-05");
+    assert.equal(supplyQuotaReplay.replayed, true);
+    assert.deepEqual(savedSupplyRequest.remittances.map((remittance) => remittance.items[0]?.receivedQuantity.toNumber()).sort(), [0.5, 0.75]);
+    assert.equal(savedSupplyRequest.remittances.reduce((total, remittance) => total + remittance.receivedQuantity.toNumber(), 0), 1.25);
+
+    const invalidFamilyRequestId = randomUUID();
+    const invalidFamilyRequest = createOperation(user.id, invalidFamilyRequestId, {
+      kind: "request",
+      id: invalidFamilyRequestId,
+      periodId,
+      requestNumber: `FRACTIONAL-${suffix}`,
+      requestedAt: "2026-10-02",
+      requestedQuantity: 1.5,
+    }, [periodOperation.operationId]);
+    await assert.rejects(
+      synchronizationService.apply(invalidFamilyRequest, "REMITTANCES", merchandiseSynchronizationHandler),
+      SynchronizationConflictError,
+    );
 
     const overQuotaId = randomUUID();
     const overQuotaOperation = createOperation(user.id, overQuotaId, {
@@ -183,7 +278,7 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     }, [], "update", originalRemittance.version);
     const correctionResponse = await synchronizationService.apply(correctionOperation, "REMITTANCES", merchandiseSynchronizationHandler);
     const correctedRemittance = await prisma.merchandiseRemittance.findUniqueOrThrow({ where: { id: remittanceId }, include: { documents: true } });
-    assert.equal(correctedRemittance.receivedQuantity, 35);
+    assert.equal(correctedRemittance.receivedQuantity.toNumber(), 35);
     assert.equal(correctedRemittance.documents.length, 1);
 
     const staleCorrection = createOperation(user.id, remittanceId, {
@@ -225,6 +320,133 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     });
     const apiPeriodResponse = await postSynchronization(createRequest(apiPeriodOperation, token));
     assert.equal(apiPeriodResponse.status, 200);
+
+    const uploadedRemittanceId = randomUUID();
+    const attachmentId = randomUUID();
+    const uploadedPdf = Buffer.alloc(924_622, 32);
+    uploadedPdf.write("%PDF-1.7", 0, "ascii");
+    uploadedPdf.write("%%EOF", uploadedPdf.length - 5, "ascii");
+    const attachmentChecksum = createHash("sha256").update(uploadedPdf).digest("hex");
+    const uploadedOperation = createOperation(user.id, uploadedRemittanceId, {
+      kind: "remittance",
+      id: uploadedRemittanceId,
+      requestId,
+      quotaId,
+      remittanceNumber: `REM-UPLOAD-${suffix}`,
+      receivedAt: "2026-10-06",
+      receivedQuantity: 1,
+      responsibleName: "Synthetic Browser QA",
+      document: {
+        originalName: "S5-synthetic.pdf",
+        contentType: "application/pdf",
+        contentBase64: "",
+        attachmentId,
+        byteSize: uploadedPdf.byteLength,
+        checksum: attachmentChecksum,
+      },
+    }, [requestOperation.operationId, quotaOperation.operationId]);
+    async function submitMultipartOperation() {
+      const formData = new FormData();
+      formData.append("operation", JSON.stringify(uploadedOperation));
+      formData.append(`attachment:${attachmentId}`, new Blob([uploadedPdf], { type: "application/pdf" }), "S5-synthetic.pdf");
+      return await postSynchronization(new NextRequest("http://localhost:3000/api/synchronizations", {
+        method: "POST",
+        headers: {
+          origin: "http://localhost:3000",
+          host: "localhost:3000",
+          cookie: `${AUTH.SESSION_COOKIE}=${token}`,
+        },
+        body: formData,
+      }));
+    }
+    const uploadedResponse = await submitMultipartOperation();
+    assert.equal(uploadedResponse.status, 200);
+    const uploadedReplayResponse = await submitMultipartOperation();
+    assert.equal(uploadedReplayResponse.status, 200);
+    const uploadedDocument = await prisma.merchandiseDocument.findFirstOrThrow({ where: { remittanceId: uploadedRemittanceId } });
+    assert.equal(uploadedDocument.storageKey !== null, true);
+    const uploadedContent = await getMerchandiseDocument(uploadedDocument.id);
+    assert.ok(uploadedContent);
+    assert.equal(uploadedContent.content.byteLength, 924_622);
+    assert.equal(createHash("sha256").update(uploadedContent.content).digest("hex"), attachmentChecksum);
+    assert.equal(await prisma.merchandiseRemittance.count({ where: { id: uploadedRemittanceId } }), 1);
+
+    uploadedRequestId = randomUUID();
+    const uploadedRequestAttachmentId = randomUUID();
+    const uploadedRequestOperation = createOperation(user.id, uploadedRequestId, {
+      kind: "request",
+      id: uploadedRequestId,
+      periodId: apiPeriodId,
+      requestNumber: `REQ-UPLOAD-${suffix}`,
+      requestedAt: "2026-10-06",
+      requestedQuantity: 1,
+      document: {
+        originalName: "S5-request-synthetic.pdf",
+        contentType: "application/pdf",
+        contentBase64: "",
+        attachmentId: uploadedRequestAttachmentId,
+        byteSize: uploadedPdf.byteLength,
+        checksum: attachmentChecksum,
+      },
+    }, [apiPeriodOperation.operationId]);
+    async function submitMultipartRequestOperation() {
+      const formData = new FormData();
+      formData.append("operation", JSON.stringify(uploadedRequestOperation));
+      formData.append(`attachment:${uploadedRequestAttachmentId}`, new Blob([uploadedPdf], { type: "application/pdf" }), "S5-request-synthetic.pdf");
+      return await postSynchronization(new NextRequest("http://localhost:3000/api/synchronizations", {
+        method: "POST",
+        headers: {
+          origin: "http://localhost:3000",
+          host: "localhost:3000",
+          cookie: `${AUTH.SESSION_COOKIE}=${token}`,
+        },
+        body: formData,
+      }));
+    }
+    const uploadedRequestResponse = await submitMultipartRequestOperation();
+    assert.equal(uploadedRequestResponse.status, 200);
+    assert.equal((await submitMultipartRequestOperation()).status, 200);
+    const uploadedRequestDocument = await prisma.merchandiseDocument.findFirstOrThrow({ where: { requestId: uploadedRequestId } });
+    assert.equal(uploadedRequestDocument.storageKey !== null, true);
+    const uploadedRequestContent = await getMerchandiseDocument(uploadedRequestDocument.id);
+    assert.ok(uploadedRequestContent);
+    assert.equal(uploadedRequestContent.content.byteLength, uploadedPdf.byteLength);
+    assert.equal(createHash("sha256").update(uploadedRequestContent.content).digest("hex"), attachmentChecksum);
+    assert.equal(await prisma.merchandiseRequest.count({ where: { id: uploadedRequestId } }), 1);
+
+    const corruptedRequestId = randomUUID();
+    const corruptedAttachmentId = randomUUID();
+    const corruptedRequestOperation = createOperation(user.id, corruptedRequestId, {
+      kind: "request",
+      id: corruptedRequestId,
+      periodId: apiPeriodId,
+      requestNumber: `REQ-CORRUPTED-${suffix}`,
+      requestedAt: "2026-10-06",
+      requestedQuantity: 1,
+      document: {
+        originalName: "S5-corrupted-synthetic.pdf",
+        contentType: "application/pdf",
+        contentBase64: "",
+        attachmentId: corruptedAttachmentId,
+        byteSize: uploadedPdf.byteLength,
+        checksum: "0".repeat(64),
+      },
+    }, [apiPeriodOperation.operationId]);
+    const corruptedFormData = new FormData();
+    corruptedFormData.append("operation", JSON.stringify(corruptedRequestOperation));
+    corruptedFormData.append(`attachment:${corruptedAttachmentId}`, new Blob([uploadedPdf], { type: "application/pdf" }), "S5-corrupted-synthetic.pdf");
+    const corruptedResponse = await postSynchronization(new NextRequest("http://localhost:3000/api/synchronizations", {
+      method: "POST",
+      headers: {
+        origin: "http://localhost:3000",
+        host: "localhost:3000",
+        cookie: `${AUTH.SESSION_COOKIE}=${token}`,
+      },
+      body: corruptedFormData,
+    }));
+    assert.equal(corruptedResponse.status, 400);
+    assert.equal(await prisma.merchandiseRequest.count({ where: { id: corruptedRequestId } }), 0);
+
     const savedDocument = await prisma.merchandiseDocument.findFirst({ where: { remittanceId }, select: { id: true } });
     assert.ok(savedDocument);
     const downloadResponse = await getPrivateDocument(
@@ -268,9 +490,19 @@ test("merchandise periods, requests, quotas, remittances and private documents p
       await prisma.user.deleteMany({ where: { id: unauthorizedUserId } });
     }
     await prisma.merchandiseDocument.deleteMany({ where: { OR: [{ requestId }, { remittanceId }, { uploadedById: user.id }] } });
+    await prisma.merchandiseReceiptItem.deleteMany({ where: { remittanceId: { in: [supplyRemittanceId, secondSupplyRemittanceId] } } });
+    await prisma.merchandiseRemittance.deleteMany({ where: { id: { in: [supplyRemittanceId, secondSupplyRemittanceId] } } });
+    await prisma.merchandiseQuotaItem.deleteMany({ where: { quotaId: supplyQuotaId } });
+    await prisma.merchandiseQuota.deleteMany({ where: { id: supplyQuotaId } });
+    await prisma.merchandiseRequestItem.deleteMany({ where: { requestId: supplyRequestId } });
+    await prisma.merchandiseRequest.deleteMany({ where: { id: supplyRequestId } });
+    await prisma.merchandisePeriod.deleteMany({ where: { id: supplyPeriodId } });
     await prisma.merchandiseRemittance.deleteMany({ where: { requestId } });
     await prisma.merchandiseQuota.deleteMany({ where: { requestId } });
     await prisma.merchandiseRequest.deleteMany({ where: { id: requestId } });
+    if (uploadedRequestId) {
+      await prisma.merchandiseRequest.deleteMany({ where: { id: uploadedRequestId } });
+    }
     await prisma.merchandisePeriod.deleteMany({ where: { id: periodId } });
     await prisma.merchandisePeriod.deleteMany({ where: { id: apiPeriodId } });
     await prisma.user.delete({ where: { id: user.id } });

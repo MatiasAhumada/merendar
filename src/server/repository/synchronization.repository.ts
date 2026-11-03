@@ -1,48 +1,18 @@
+
+
+import { OFFLINE_OPERATION_MESSAGES, SYNC_SERVER_MESSAGES } from "@/constants/offline.constant";
 import { Prisma, type SyncResource } from "@prisma/client";
-import { z } from "zod";
+import { currentRecordSchema, serializationConflictSchema } from "@/schemas/synchronization.schema";
 import { prisma } from "@/lib/prisma";
 import type { SubmittedSyncOperation, SynchronizationHandler } from "@/interfaces/synchronization.interface";
-import type { JsonValue } from "@/types/json-value";
-
-const adapterSerializationConflictSchema = z.object({
-  cause: z.object({ originalCode: z.literal("40001") }).passthrough(),
-}).passthrough();
+import { SynchronizationConflictError, SynchronizationDependencyError, SynchronizationKeyConflictError } from "@/server/errors/synchronization.error";
 
 function isRetryableTransactionError(error: unknown) {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    return error.code === "P2002" || error.code === "P2034";
+    return error.code === SYNC_SERVER_MESSAGES.P2002 || error.code === SYNC_SERVER_MESSAGES.P2034;
   }
 
-  return adapterSerializationConflictSchema.safeParse(error).success;
-}
-
-export class SynchronizationConflictError extends Error {
-  readonly currentVersion: number;
-  readonly current: JsonValue;
-
-  constructor(message: string, currentVersion: number, current: JsonValue) {
-    super(message);
-    this.name = "SynchronizationConflictError";
-    this.currentVersion = currentVersion;
-    this.current = current;
-  }
-}
-
-export class SynchronizationKeyConflictError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SynchronizationKeyConflictError";
-  }
-}
-
-export class SynchronizationDependencyError extends Error {
-  readonly operationId: string;
-
-  constructor(operationId: string) {
-    super("El cambio espera a que se sincronice primero un registro relacionado.");
-    this.name = "SynchronizationDependencyError";
-    this.operationId = operationId;
-  }
+  return serializationConflictSchema.safeParse(error).success;
 }
 
 function savedResponse(
@@ -65,7 +35,7 @@ async function findReceipt(operationId: string, userId: string, requestHash: str
   }
 
   if (receipt.userId !== userId || receipt.requestHash !== requestHash) {
-    throw new SynchronizationKeyConflictError("La clave de operación ya se usó con otra cuenta o con otros datos.");
+    throw new SynchronizationKeyConflictError(SYNC_SERVER_MESSAGES.LA_CLAVE_DE_OPERACION_YA_SE_USO_CON_OTRA_CUENTA_O_CON_OTROS_DATOS);
   }
 
   return savedResponse(receipt, true);
@@ -84,6 +54,11 @@ export const synchronizationRepository = {
       return previousResponse;
     }
 
+    let preparedOperation = operation;
+    if (handler.prepare) {
+      preparedOperation = await handler.prepare(operation);
+    }
+
     for (let attemptCount = 0; attemptCount < 3; attemptCount += 1) {
       try {
         return await prisma.$transaction(async (transaction) => {
@@ -93,7 +68,7 @@ export const synchronizationRepository = {
 
           if (concurrentReceipt) {
             if (concurrentReceipt.userId !== operation.userId || concurrentReceipt.requestHash !== requestHash) {
-              throw new SynchronizationKeyConflictError("La clave de operación ya se usó con otra cuenta o con otros datos.");
+              throw new SynchronizationKeyConflictError(SYNC_SERVER_MESSAGES.LA_CLAVE_DE_OPERACION_YA_SE_USO_CON_OTRA_CUENTA_O_CON_OTROS_DATOS);
             }
 
             return savedResponse(concurrentReceipt, true);
@@ -107,13 +82,13 @@ export const synchronizationRepository = {
             }
           }
 
-          const applied = await handler.apply(transaction, operation);
+          const applied = await handler.apply(transaction, preparedOperation);
 
           if (applied.type === "conflict") {
-            let message = "El registro cambió en otro dispositivo.";
-            const currentRecord = z.record(z.string(), z.json()).safeParse(applied.current);
+            let message: string = SYNC_SERVER_MESSAGES.EL_REGISTRO_CAMBIO_EN_OTRO_DISPOSITIVO;
+            const currentRecord = currentRecordSchema.safeParse(applied.current);
             if (currentRecord.success && currentRecord.data.kind === "already-recorded") {
-              message = "Este beneficiario ya tiene un registro confirmado en el período. Revisá los registros antes de volver a intentar.";
+              message = OFFLINE_OPERATION_MESSAGES.ESTE_BENEFICIARIO_YA_TIENE_UN_REGISTRO_CONFIRMADO_EN_EL_PERIODO_REVISA_LOS;
             }
             throw new SynchronizationConflictError(message, applied.resourceVersion, applied.current);
           }
@@ -150,6 +125,6 @@ export const synchronizationRepository = {
       }
     }
 
-    throw new Error("No se pudo confirmar la sincronización después de varios intentos.");
+    throw new Error(SYNC_SERVER_MESSAGES.NO_SE_PUDO_CONFIRMAR_LA_SINCRONIZACION_DESPUES_DE_VARIOS_INTENTOS);
   },
 };

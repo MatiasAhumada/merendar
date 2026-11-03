@@ -1,5 +1,7 @@
-import { z } from "zod";
+import { beneficiaryCountSchema } from "@/schemas/synchronization.schema";
 import { prisma } from "@/lib/prisma";
+import { merchandiseRequestDocumentSnapshotSchema } from "@/schemas/merchandise-request-document.schema";
+import { renditionEmissionReportSourceSchema } from "@/schemas/rendition.schema";
 
 const documentSummarySelect = {
   id: true,
@@ -9,7 +11,6 @@ const documentSummarySelect = {
   createdAt: true,
 } as const;
 
-const beneficiaryCountSchema = z.object({ beneficiaries: z.array(z.unknown()) });
 
 function beneficiaryCount(snapshot: unknown) {
   const parsedSnapshot = beneficiaryCountSchema.safeParse(snapshot);
@@ -17,6 +18,17 @@ function beneficiaryCount(snapshot: unknown) {
 }
 
 export const merchandiseRepository = {
+  async findDocument(id: string) {
+    const existingDocument = await prisma.merchandiseDocument.findUnique({
+      where: { id },
+      select: { originalName: true, contentType: true, storageBucket: true, storageKey: true },
+    });
+    if (existingDocument) {
+      return existingDocument;
+    }
+    return prisma.merchandiseRequestDocument.findUnique({ where: { id }, select: { originalName: true, contentType: true, storageBucket: true, storageKey: true } });
+  },
+
   async findAll() {
     const periods = await prisma.merchandisePeriod.findMany({
       include: {
@@ -31,16 +43,27 @@ export const merchandiseRepository = {
               select: { id: true, documentType: true, version: true, supersedesId: true, originalName: true, byteSize: true, createdAt: true },
               orderBy: [{ documentType: "asc" }, { version: "asc" }],
             },
+            emissions: { select: { id: true, version: true, createdAt: true, snapshot: true }, orderBy: { version: "desc" } },
+            submissions: {
+              include: { recordedBy: { select: { id: true, name: true } } },
+              orderBy: { submittedAt: "desc" },
+            },
           },
           orderBy: { createdAt: "desc" },
         },
         requests: {
           include: {
             createdBy: { select: { id: true, name: true } },
-            quota: { include: { approvedBy: { select: { id: true, name: true } } } },
+            quota: { include: { approvedBy: { select: { id: true, name: true } }, items: true } },
+            items: true,
+            issuedDocuments: {
+              select: { id: true, kind: true, version: true, templateVersion: true, snapshot: true, originalName: true, contentType: true, createdAt: true },
+              orderBy: [{ kind: "asc" }, { version: "desc" }],
+            },
             remittances: {
               include: {
                 createdBy: { select: { id: true, name: true } },
+                items: true,
                 documents: { select: documentSummarySelect, orderBy: { createdAt: "asc" } },
               },
               orderBy: { receivedAt: "desc" },
@@ -63,6 +86,20 @@ export const merchandiseRepository = {
       })),
       renditions: period.renditions.map((rendition) => ({
         ...rendition,
+        emissions: rendition.emissions.map((emission) => {
+          const snapshot = renditionEmissionReportSourceSchema.safeParse(emission.snapshot);
+          let reportSummary = null;
+          if (snapshot.success) {
+            reportSummary = {
+              deliveredModules: snapshot.data.deliveredModules,
+              registeredModuleQuantity: snapshot.data.registeredModuleQuantity,
+              familyCount: snapshot.data.familyCount,
+              participantCount: snapshot.data.participants.length,
+              event: snapshot.data.event,
+            };
+          }
+          return { id: emission.id, version: emission.version, createdAt: emission.createdAt, reportSummary };
+        }),
         beneficiarySheet: {
           id: rendition.beneficiarySheet.id,
           version: rendition.beneficiarySheet.version,
@@ -70,6 +107,33 @@ export const merchandiseRepository = {
           beneficiaryCount: beneficiaryCount(rendition.beneficiarySheet.snapshot),
         },
       })),
+      requests: period.requests.map((request) => {
+        let item = null;
+        if (request.items[0]) {
+          item = { ...request.items[0], requestedQuantity: request.items[0].requestedQuantity.toNumber() };
+        }
+        let quota = null;
+        if (request.quota) {
+          quota = {
+            ...request.quota,
+            approvedQuantity: request.quota.approvedQuantity.toNumber(),
+            authorizationValidUntil: request.quota.authorizationValidUntil,
+            items: request.quota.items.map((quotaItem) => ({ ...quotaItem, authorizedQuantity: quotaItem.authorizedQuantity.toNumber() })),
+          };
+        }
+        return {
+          ...request,
+          issuedDocuments: request.issuedDocuments.map((document) => ({ ...document, snapshot: merchandiseRequestDocumentSnapshotSchema.parse(document.snapshot) })),
+          requestedQuantity: request.requestedQuantity.toNumber(),
+          item,
+          quota,
+          remittances: request.remittances.map((remittance) => ({
+            ...remittance,
+            receivedQuantity: remittance.receivedQuantity.toNumber(),
+            items: remittance.items.map((receiptItem) => ({ ...receiptItem, receivedQuantity: receiptItem.receivedQuantity.toNumber() })),
+          })),
+        };
+      }),
     }));
   },
 };

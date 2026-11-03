@@ -1,9 +1,13 @@
+
+
+import { BENEFICIARY_SHEET_COLUMN_HEADERS, BENEFICIARY_SHEET_PDF, DELIVERY_ERROR_MESSAGES, DELIVERY_UI_TEXT } from "@/constants/delivery.constant";
 import { readFile } from "node:fs/promises";
+import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
+import { beneficiarySheetSnapshotSchema } from "@/schemas/record.schema";
 import path from "node:path";
 import fontkit from "@pdf-lib/fontkit";
-import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
-import { z } from "zod";
-import { BENEFICIARY_SHEET_COLUMN_HEADERS, type BeneficiarySheetSnapshot } from "@/validations/record.validation";
+
+import type { BeneficiarySheetSnapshot } from "@/interfaces/beneficiary-sheet.interface";
 
 type PrintableRow = {
   beneficiary: BeneficiarySheetSnapshot["beneficiaries"][number];
@@ -23,27 +27,7 @@ type ApprovedPrintableRow = {
   height: number;
 };
 
-const snapshotSchema = z.object({
-  period: z.object({ label: z.string(), agency: z.string(), startsAt: z.string(), endsAt: z.string() }),
-  version: z.number().int().positive(),
-  createdAt: z.string(),
-  templateVersion: z.literal(2).optional(),
-  beneficiaries: z.array(z.object({
-    personId: z.string(),
-    name: z.string(),
-    dni: z.string(),
-    familyName: z.string(),
-    address: z.string(),
-    neighborhood: z.string().optional(),
-  })),
-});
-
-const tableBounds = [52, 73, 205, 263, 362, 414, 466, 543] as const;
-const title = "ENTREGA DE MODULOS DE MERCADERIA A FAMILIAS EN SITUACION DE RIESGO SOCIAL";
-const tableHeaderHeight = 27;
-const minimumRowHeight = 15.5;
-const rowLineHeight = 8;
-const pageBottom = 48;
+const { TABLE_BOUNDS: tableBounds, TITLE: title, TABLE_HEADER_HEIGHT: tableHeaderHeight, MINIMUM_ROW_HEIGHT: minimumRowHeight, ROW_LINE_HEIGHT: rowLineHeight, PAGE_BOTTOM: pageBottom } = BENEFICIARY_SHEET_PDF;
 
 function wrapText(text: string, maxCharacters: number) {
   const words = text.split(/\s+/);
@@ -51,7 +35,11 @@ function wrapText(text: string, maxCharacters: number) {
   let line = "";
 
   for (const word of words) {
-    const nextLine = line ? `${line} ${word}` : word;
+    let nextLine = word;
+
+    if (line) {
+      nextLine = `${line} ${word}`;
+    }
 
     if (nextLine.length > maxCharacters && line) {
       lines.push(line);
@@ -92,7 +80,11 @@ function wrapToWidth(text: string, font: PDFFont, fontSize: number, maxWidth: nu
     parts.push(remainingWord);
 
     for (const part of parts) {
-      const nextLine = line ? `${line} ${part}` : part;
+      let nextLine = part;
+
+      if (line) {
+        nextLine = `${line} ${part}`;
+      }
 
       if (font.widthOfTextAtSize(nextLine, fontSize) > maxWidth && line) {
         lines.push(line);
@@ -123,7 +115,11 @@ function drawApprovedColumnHeaders(page: PDFPage, boldFont: PDFFont, y: number) 
   labels.forEach((label, index) => {
     const left = tableBounds[index] ?? 0;
     const right = tableBounds[index + 1] ?? left;
-    const fontSize = index === 1 ? 7.1 : 6.7;
+    let fontSize = 6.7;
+
+    if (index === 1) {
+      fontSize = 7.1;
+    }
 
     if (index === 5) {
       const labelWidth = boldFont.widthOfTextAtSize("FECHA DE", fontSize);
@@ -165,7 +161,12 @@ async function createApprovedBeneficiarySheetPdf(snapshot: BeneficiarySheetSnaps
   const logo = await pdf.embedPng(await readFile(path.join(process.cwd(), "public/brand/ministerio-desarrollo-social-tucuman.png")));
   const pageWidth = 595.28;
   const pageHeight = 841.89;
-  const headerTop = pageHeight - 104;
+  const eventLines: string[] = [];
+  if (snapshot.event) {
+    eventLines.push(...wrapToWidth(`Jornada ${snapshot.event.scheduledAt} · ${snapshot.event.location}`, regularFont, 6.2, pageWidth - 104));
+    eventLines.push(...wrapToWidth(`Responsables: ${snapshot.event.responsibleNames}`, regularFont, 6.2, pageWidth - 104));
+  }
+  const headerTop = pageHeight - 104 - eventLines.length * 8;
   const textSize = 6.5;
   const rows: ApprovedPrintableRow[] = snapshot.beneficiaries.map((beneficiary, index) => {
     const nameLines = wrapToWidth(beneficiary.name, regularFont, textSize, tableBounds[2] - tableBounds[1] - 6);
@@ -192,6 +193,7 @@ async function createApprovedBeneficiarySheetPdf(snapshot: BeneficiarySheetSnaps
   for (const pageRows of printablePages) {
     const page = pdf.addPage([pageWidth, pageHeight]);
     drawApprovedHeader(page, logo, boldFont, pageWidth, pageHeight);
+    eventLines.forEach((line, lineIndex) => page.drawText(line, { x: 52, y: pageHeight - 108 - lineIndex * 8, size: 6.2, font: regularFont, color: rgb(0, 0, 0) }));
     drawApprovedColumnHeaders(page, boldFont, headerTop);
     const rowHeights = pageRows.map((row) => row.height);
     let usedRowsHeight = rowHeights.reduce((total, height) => total + height, 0);
@@ -262,7 +264,7 @@ async function createLegacyBeneficiarySheetPdf(snapshot: BeneficiarySheetSnapsho
     const institutionLogoY = pageHeight - margin - institutionLogoSize.height;
     page.drawImage(institutionLogo, { x: margin, y: institutionLogoY, width: institutionLogoSize.width, height: institutionLogoSize.height });
     let y = institutionLogoY - 18;
-    page.drawText("MERENDAR · PLANILLA DE BENEFICIARIOS", { x: margin, y, size: 13, font: boldFont, color: accent });
+    page.drawText(DELIVERY_UI_TEXT.MERENDAR_PLANILLA_DE_BENEFICIARIOS, { x: margin, y, size: 13, font: boldFont, color: accent });
     y -= 20;
     page.drawText(`${label} · ${agency} · ${snapshot.period.startsAt} al ${snapshot.period.endsAt}`, { x: margin, y, size: 9, font: regularFont, color: ink });
     y -= 16;
@@ -270,8 +272,14 @@ async function createLegacyBeneficiarySheetPdf(snapshot: BeneficiarySheetSnapsho
     y -= 16;
     page.drawLine({ start: { x: margin, y }, end: { x: pageWidth - margin, y }, thickness: 0.8, color: accent });
     y -= 20;
-    const columns = [margin, 54, 196, 275, 384];
-    const headers = ["N°", "Beneficiario / DNI", "Familia", "Domicilio", "Firma manuscrita"];
+    const columns = BENEFICIARY_SHEET_PDF.APPROVED_COLUMN_BOUNDS.map((boundary) => {
+      if (boundary === "margin") {
+        return margin;
+      }
+
+      return boundary;
+    });
+    const headers = BENEFICIARY_SHEET_PDF.APPROVED_COLUMNS;
 
     headers.forEach((header, index) => page.drawText(header, { x: columns[index] ?? margin, y, size: 7, font: boldFont, color: ink }));
     y -= 12;
@@ -291,7 +299,7 @@ async function createLegacyBeneficiarySheetPdf(snapshot: BeneficiarySheetSnapsho
       y -= height;
     }
 
-    page.drawText("Firma en papel. Este documento es una planilla propia de Merendar, no un formulario oficial ministerial.", {
+    page.drawText(DELIVERY_UI_TEXT.FIRMA_EN_PAPEL_ESTE_DOCUMENTO_ES_UNA_PLANILLA_PROPIA_DE_MERENDAR_NO_UN_FOR, {
       x: margin,
       y: 24,
       size: 7,
@@ -305,10 +313,10 @@ async function createLegacyBeneficiarySheetPdf(snapshot: BeneficiarySheetSnapsho
 }
 
 export async function createBeneficiarySheetPdf(rawSnapshot: unknown) {
-  const parsedSnapshot = snapshotSchema.safeParse(rawSnapshot);
+  const parsedSnapshot = beneficiarySheetSnapshotSchema.safeParse(rawSnapshot);
 
   if (!parsedSnapshot.success) {
-    throw new Error("La planilla guardada no tiene un formato válido");
+    throw new Error(DELIVERY_ERROR_MESSAGES.LA_PLANILLA_GUARDADA_NO_TIENE_UN_FORMATO_VALIDO);
   }
 
   const snapshot: BeneficiarySheetSnapshot = parsedSnapshot.data;

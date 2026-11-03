@@ -3,6 +3,7 @@
 import * as React from "react"
 import { cn } from "@/lib/utils"
 import { Dialog as SheetPrimitive } from "radix-ui"
+import { COMMON_UI_TEXT } from "@/constants/common-ui.constant"
 
 import { Button } from "@/components/ui/button"
 import { HugeiconsIcon } from "@hugeicons/react"
@@ -77,7 +78,7 @@ function SheetContent({
               size="icon-sm"
             >
               <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-              <span className="sr-only">Cerrar</span>
+              <span className="sr-only">{COMMON_UI_TEXT.CERRAR}</span>
             </Button>
           </SheetPrimitive.Close>
         )}

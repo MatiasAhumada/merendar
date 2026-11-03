@@ -1,15 +1,17 @@
+
+
+import { APPLICATION_ERROR_MESSAGES, ERROR_MESSAGES } from "@/constants/error-messages.constant";
 import { AxiosError } from "axios";
+import { apiErrorResponseSchema, errorMessageSchema } from "@/schemas/common.schema";
 import {
   toastSuccess,
   toastError,
   toastWarning,
   toastInfo,
 } from "@/utils/toast.util";
-import { ERROR_MESSAGES } from "@/constants/error-messages.constant";
-import { z } from "zod";
+
 import type { ToastOptions } from "@/types/toast";
 
-const errorMessageSchema = z.object({ message: z.string() });
 
 interface HandlerOptions {
   logToConsole?: boolean;
@@ -22,7 +24,13 @@ interface HandlerOptions {
 function normalizeError(error: unknown): Error {
   if (error instanceof AxiosError) {
     if (!error.response) {
-      return new Error("Error de conexión");
+      return new Error(APPLICATION_ERROR_MESSAGES.ERROR_DE_CONEXION);
+    }
+
+    const responseError = apiErrorResponseSchema.safeParse(error.response.data);
+
+    if (responseError.success) {
+      return new Error(responseError.data.error.message);
     }
 
     return new Error(error.message);
@@ -36,6 +44,11 @@ function normalizeError(error: unknown): Error {
   }
 
   return new Error(ERROR_MESSAGES.UNKNOWN_ERROR);
+}
+
+export function getClientErrorMessage(error: unknown, defaultMessage: string): string {
+  const normalizedError = normalizeError(error);
+  return normalizedError.message || defaultMessage;
 }
 
 export function clientErrorHandler(

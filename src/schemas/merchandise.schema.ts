@@ -1,0 +1,314 @@
+import { z } from "zod";
+import { HTTP_CONTENT_TYPES } from "@/constants/http.constant";
+import { RENDITION_LIMITS } from "@/constants/rendition.constant";
+import { MERCHANDISE_LIMITS, MERCHANDISE_VALIDATION_MESSAGES } from "@/constants/merchandise.constant";
+import { merchandiseRequestDocumentSnapshotSchema } from "@/schemas/merchandise-request-document.schema";
+import { merchandiseRequestDocumentPayloadSchema } from "@/schemas/merchandise-request-document.schema";
+
+const documentMetadataSchema = z.object({
+  originalName: z.string().trim().min(1).max(MERCHANDISE_LIMITS.DOCUMENT_NAME_MAX_LENGTH).refine((name) => name.toLowerCase().endsWith(".pdf"), MERCHANDISE_VALIDATION_MESSAGES.PDF_REQUIRED),
+  contentType: z.literal(HTTP_CONTENT_TYPES.PDF),
+}).strict();
+
+export const merchandiseDocumentSchema = documentMetadataSchema.extend({
+  contentBase64: z.string().max(2_800_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+  attachmentId: z.uuid().optional(),
+  byteSize: z.number().int().positive().optional(),
+  checksum: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+}).strict().superRefine((document, context) => {
+  if (document.attachmentId && document.byteSize) {
+    if (document.byteSize > RENDITION_LIMITS.MAX_DOCUMENT_BYTES || !document.checksum) {
+      context.addIssue({ code: "custom", message: MERCHANDISE_VALIDATION_MESSAGES.PDF_SIZE_LIMIT, path: ["byteSize"] });
+    }
+    return;
+  }
+  let paddingLength = 0;
+
+  if (document.contentBase64.endsWith("==")) {
+    paddingLength = 2;
+  } else if (document.contentBase64.endsWith("=")) {
+    paddingLength = 1;
+  }
+  const contentByteSize = Math.floor(document.contentBase64.length * 3 / 4) - paddingLength;
+
+  if (contentByteSize > RENDITION_LIMITS.MAX_DOCUMENT_BYTES) {
+    context.addIssue({ code: "custom", message: MERCHANDISE_VALIDATION_MESSAGES.PDF_SIZE_LIMIT, path: ["contentBase64"] });
+  }
+});
+
+const periodPayloadSchema = z.object({
+  kind: z.literal("period"),
+  id: z.string().trim().min(1).max(80),
+  label: z.string().trim().min(MERCHANDISE_LIMITS.PERIOD_LABEL_MIN_LENGTH, MERCHANDISE_VALIDATION_MESSAGES.PERIOD_REQUIRED).max(MERCHANDISE_LIMITS.PERIOD_LABEL_MAX_LENGTH),
+  agency: z.string().trim().min(MERCHANDISE_LIMITS.AGENCY_MIN_LENGTH, MERCHANDISE_VALIDATION_MESSAGES.AGENCY_REQUIRED).max(MERCHANDISE_LIMITS.AGENCY_MAX_LENGTH),
+  destination: z.enum(["FAMILIES", "MERENDERO"]).optional(),
+  startsAt: z.iso.date(),
+  endsAt: z.iso.date(),
+}).strict().refine((period) => period.startsAt <= period.endsAt, {
+  message: MERCHANDISE_VALIDATION_MESSAGES.PERIOD_END_BEFORE_START,
+  path: ["endsAt"],
+});
+
+const requestPayloadSchema = z.object({
+  kind: z.literal("request"),
+  id: z.string().trim().min(1).max(80),
+  periodId: z.string().trim().min(1).max(80),
+  requestNumber: z.string().trim().min(1, MERCHANDISE_VALIDATION_MESSAGES.REQUEST_NUMBER_REQUIRED).max(MERCHANDISE_LIMITS.REQUEST_NUMBER_MAX_LENGTH),
+  requestedAt: z.iso.date(),
+  requestedQuantity: z.number().positive().max(100_000),
+  item: z.object({
+    productName: z.string().trim().min(2).max(120),
+    presentation: z.string().trim().min(1).max(120),
+    unit: z.string().trim().min(1).max(40),
+    requestedQuantity: z.number().positive().max(100_000),
+  }).strict().optional(),
+  notes: z.string().trim().max(1000).optional(),
+  document: merchandiseDocumentSchema.optional(),
+}).strict().refine((request) => !request.item || request.item.requestedQuantity === request.requestedQuantity, {
+  message: "La cantidad debe coincidir con el renglón del producto.",
+  path: ["item", "requestedQuantity"],
+});
+
+const quotaPayloadSchema = z.object({
+  kind: z.literal("quota"),
+  id: z.string().trim().min(1).max(80),
+  requestId: z.string().trim().min(1).max(80),
+  approvedQuantity: z.number().positive().max(100_000),
+  approvedAt: z.iso.date(),
+  externalOrderNumber: z.string().trim().max(MERCHANDISE_LIMITS.REMITTANCE_NUMBER_MAX_LENGTH).optional(),
+  authorizedRecipient: z.string().trim().max(MERCHANDISE_LIMITS.RESPONSIBLE_NAME_MAX_LENGTH).optional(),
+  authorizationValidUntil: z.iso.date().optional(),
+  notes: z.string().trim().max(1000).optional(),
+  document: merchandiseDocumentSchema.optional(),
+}).strict();
+
+const remittancePayloadSchema = z.object({
+  kind: z.literal("remittance"),
+  id: z.string().trim().min(1).max(80),
+  requestId: z.string().trim().min(1).max(80),
+  quotaId: z.string().trim().min(1).max(80),
+  remittanceNumber: z.string().trim().min(1, MERCHANDISE_VALIDATION_MESSAGES.REMITTANCE_NUMBER_REQUIRED).max(MERCHANDISE_LIMITS.REMITTANCE_NUMBER_MAX_LENGTH),
+  receivedAt: z.iso.date(),
+  receivedQuantity: z.number().positive().max(100_000),
+  responsibleName: z.string().trim().min(MERCHANDISE_LIMITS.RESPONSIBLE_NAME_MIN_LENGTH, MERCHANDISE_VALIDATION_MESSAGES.RESPONSIBLE_REQUIRED).max(MERCHANDISE_LIMITS.RESPONSIBLE_NAME_MAX_LENGTH),
+  notes: z.string().trim().max(1000).optional(),
+  document: merchandiseDocumentSchema.optional(),
+}).strict();
+
+export const merchandisePayloadSchema = z.discriminatedUnion("kind", [
+  periodPayloadSchema,
+  requestPayloadSchema,
+  quotaPayloadSchema,
+  remittancePayloadSchema,
+  merchandiseRequestDocumentPayloadSchema,
+]);
+
+
+const merchandiseIdentitySchema = z.object({
+  id: z.string().trim().min(1).max(80),
+}).strict();
+
+export const merchandiseUpdatePayloadSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("period"),
+    id: z.string().trim().min(1).max(80),
+    label: z.string().trim().min(MERCHANDISE_LIMITS.PERIOD_LABEL_MIN_LENGTH, MERCHANDISE_VALIDATION_MESSAGES.PERIOD_REQUIRED).max(MERCHANDISE_LIMITS.PERIOD_LABEL_MAX_LENGTH),
+    agency: z.string().trim().min(2, MERCHANDISE_VALIDATION_MESSAGES.AGENCY_REQUIRED).max(MERCHANDISE_LIMITS.AGENCY_MAX_LENGTH),
+    destination: z.enum(["FAMILIES", "MERENDERO"]).optional(),
+    startsAt: z.iso.date(),
+    endsAt: z.iso.date(),
+  }).strict().refine((period) => period.startsAt <= period.endsAt, {
+    message: MERCHANDISE_VALIDATION_MESSAGES.PERIOD_END_BEFORE_START,
+    path: ["endsAt"],
+  }),
+  z.object({
+    kind: z.literal("request"),
+    id: z.string().trim().min(1).max(80),
+    requestNumber: z.string().trim().min(1, MERCHANDISE_VALIDATION_MESSAGES.REQUEST_NUMBER_REQUIRED).max(MERCHANDISE_LIMITS.REQUEST_NUMBER_MAX_LENGTH),
+    requestedAt: z.iso.date(),
+    requestedQuantity: z.number().positive().max(100_000),
+    notes: z.string().trim().max(1000).optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("quota"),
+    id: z.string().trim().min(1).max(80),
+    approvedQuantity: z.number().positive().max(100_000),
+    approvedAt: z.iso.date(),
+    externalOrderNumber: z.string().trim().max(MERCHANDISE_LIMITS.REMITTANCE_NUMBER_MAX_LENGTH).optional(),
+    authorizedRecipient: z.string().trim().max(MERCHANDISE_LIMITS.RESPONSIBLE_NAME_MAX_LENGTH).optional(),
+    authorizationValidUntil: z.iso.date().optional(),
+    notes: z.string().trim().max(1000).optional(),
+  }).strict(),
+  z.object({
+    kind: z.literal("remittance"),
+    id: z.string().trim().min(1).max(80),
+    remittanceNumber: z.string().trim().min(1, MERCHANDISE_VALIDATION_MESSAGES.REMITTANCE_NUMBER_REQUIRED).max(MERCHANDISE_LIMITS.REMITTANCE_NUMBER_MAX_LENGTH),
+    receivedAt: z.iso.date(),
+    receivedQuantity: z.number().positive().max(100_000),
+    responsibleName: z.string().trim().min(MERCHANDISE_LIMITS.RESPONSIBLE_NAME_MIN_LENGTH, MERCHANDISE_VALIDATION_MESSAGES.RESPONSIBLE_REQUIRED).max(MERCHANDISE_LIMITS.RESPONSIBLE_NAME_MAX_LENGTH),
+    notes: z.string().trim().max(1000).optional(),
+  }).strict(),
+]);
+
+export const merchandiseCancellationPayloadSchema = z.object({
+  kind: z.enum(["period", "request", "remittance"]),
+  action: z.literal("cancel"),
+  ...merchandiseIdentitySchema.shape,
+  reason: z.string().trim().min(MERCHANDISE_LIMITS.CANCELLATION_REASON_MIN_LENGTH, MERCHANDISE_VALIDATION_MESSAGES.CANCELLATION_REASON_REQUIRED).max(MERCHANDISE_LIMITS.CANCELLATION_REASON_MAX_LENGTH),
+}).strict();
+
+export const merchandiseOperationPayloadSchema = z.union([
+  merchandisePayloadSchema,
+  merchandiseUpdatePayloadSchema,
+  merchandiseCancellationPayloadSchema,
+]);
+
+export const serializedMerchandiseOperationPayloadSchema = z.preprocess((payload: unknown) => {
+  if (typeof payload !== "string") {
+    return payload;
+  }
+
+  try {
+    const parsedPayload: unknown = JSON.parse(payload);
+    return parsedPayload;
+  } catch {
+    return payload;
+  }
+}, merchandiseOperationPayloadSchema);
+
+export const receiptLimitConflictSchema = z.object({
+  kind: z.literal("receipt_exceeds_quota"),
+  approvedQuantity: z.number().int(),
+  receivedSoFar: z.number().int(),
+  attemptedQuantity: z.number().int(),
+});
+export const duplicateRemittanceConflictSchema = z.object({
+  kind: z.literal("remittance_number_exists"),
+  remittanceNumber: z.string(),
+});
+
+
+export const merchandiseResponseSchema = z.object({
+  periods: z.array(z.object({
+    id: z.string(),
+    version: z.number().int().positive(),
+    label: z.string(),
+    agency: z.string(),
+    destination: z.enum(["FAMILIES", "MERENDERO"]).default("FAMILIES"),
+    status: z.enum(["VIGENTE", "ANULADO"]),
+    reportDetails: z.object({
+      authorized: z.boolean(),
+      events: z.array(z.object({
+        id: z.string(),
+        scheduledAt: z.iso.datetime(),
+        location: z.string(),
+        responsibleNames: z.string(),
+        allocations: z.array(z.object({ familyId: z.string(), familyName: z.string(), remittanceNumber: z.string(), moduleQuantity: z.number().int().nonnegative() }).strict()),
+        familyDeliveries: z.array(z.object({ familyId: z.string(), familyName: z.string(), moduleQuantity: z.number().int().nonnegative(), participants: z.array(z.string()) }).strict()),
+        supplyAllocations: z.array(z.object({ productName: z.string(), presentation: z.string(), unit: z.string(), remittanceNumber: z.string(), quantity: z.number().nonnegative() }).strict()).default([]),
+      }).strict()),
+    }).strict().default({ authorized: false, events: [] }),
+    startsAt: z.iso.datetime(),
+    endsAt: z.iso.datetime(),
+    beneficiarySheets: z.array(z.object({
+      id: z.string(),
+      version: z.number().int(),
+      createdAt: z.iso.datetime(),
+      beneficiaryCount: z.number().int().nonnegative(),
+    })),
+    renditions: z.array(z.object({
+      id: z.string(),
+      periodId: z.string(),
+      beneficiarySheetId: z.string(),
+      reviewStatus: z.enum(["PENDIENTE", "REVISADA", "OBSERVADA"]),
+      reviewNotes: z.string().nullable(),
+      reviewedAt: z.iso.datetime().nullable(),
+      beneficiarySheet: z.object({ id: z.string(), version: z.number().int(), createdAt: z.iso.datetime(), beneficiaryCount: z.number().int().nonnegative() }),
+      documents: z.array(z.object({
+        id: z.string(),
+        documentType: z.enum(["PLANILLA_FIRMADA", "REMITO", "RESPALDO"]),
+        version: z.number().int(),
+        supersedesId: z.string().nullable(),
+        originalName: z.string(),
+        byteSize: z.number().int(),
+        createdAt: z.iso.datetime(),
+      })),
+      emissions: z.array(z.object({ id: z.string(), version: z.number().int().positive(), createdAt: z.iso.datetime(), reportSummary: z.object({ deliveredModules: z.number().int().nonnegative(), registeredModuleQuantity: z.number().int().nonnegative(), familyCount: z.number().int().nonnegative(), participantCount: z.number().int().nonnegative(), event: z.object({ scheduledAt: z.string(), location: z.string() }).nullable() }).strict().nullable() })),
+      submissions: z.array(z.object({
+        id: z.string(),
+        submittedAt: z.iso.datetime(),
+        recipient: z.string(),
+        emissionId: z.string(),
+        externalReference: z.string().nullable(),
+        notes: z.string().nullable(),
+        evidenceDocumentId: z.string().nullable(),
+        recordedBy: z.object({ id: z.string(), name: z.string() }),
+        createdAt: z.iso.datetime(),
+      })),
+      createdAt: z.iso.datetime(),
+      updatedAt: z.iso.datetime(),
+    })),
+    requests: z.array(z.object({
+      id: z.string(),
+      version: z.number().int().positive(),
+      periodId: z.string(),
+      requestNumber: z.string(),
+      requestedAt: z.iso.datetime(),
+      requestedQuantity: z.number(),
+      item: z.object({ id: z.string(), productName: z.string(), presentation: z.string(), unit: z.string(), requestedQuantity: z.number() }).nullable().default(null),
+      status: z.enum(["PENDIENTE", "APROBADA", "RECHAZADA", "CANCELADA"]),
+      notes: z.string().nullable(),
+      createdBy: z.object({ id: z.string(), name: z.string() }),
+      quota: z.object({
+        id: z.string(),
+        version: z.number().int().positive(),
+        requestId: z.string(),
+        approvedQuantity: z.number(),
+        items: z.array(z.object({ id: z.string(), requestItemId: z.string(), authorizedQuantity: z.number() })).default([]),
+        approvedAt: z.iso.datetime(),
+        externalOrderNumber: z.string().nullable().default(null),
+        authorizedRecipient: z.string().nullable().default(null),
+        authorizationValidUntil: z.iso.datetime().nullable().default(null),
+        notes: z.string().nullable(),
+        approvedBy: z.object({ id: z.string(), name: z.string() }),
+        createdAt: z.iso.datetime(),
+        updatedAt: z.iso.datetime(),
+      }).nullable(),
+      remittances: z.array(z.object({
+        id: z.string(),
+        version: z.number().int().positive(),
+        requestId: z.string(),
+        quotaId: z.string(),
+        remittanceNumber: z.string(),
+        receivedAt: z.iso.datetime(),
+        receivedQuantity: z.number(),
+        items: z.array(z.object({ id: z.string(), quotaItemId: z.string(), receivedQuantity: z.number() })).default([]),
+        responsibleName: z.string(),
+        status: z.enum(["VIGENTE", "ANULADO"]),
+        notes: z.string().nullable(),
+        createdBy: z.object({ id: z.string(), name: z.string() }),
+        documents: z.array(z.object({
+          id: z.string(),
+          originalName: z.string(),
+          contentType: z.string(),
+          byteSize: z.number(),
+          createdAt: z.iso.datetime(),
+        })),
+        createdAt: z.iso.datetime(),
+        updatedAt: z.iso.datetime(),
+      })),
+      documents: z.array(z.object({
+        id: z.string(),
+        originalName: z.string(),
+        contentType: z.string(),
+        byteSize: z.number(),
+        createdAt: z.iso.datetime(),
+      })),
+      issuedDocuments: z.array(z.object({ id: z.string(), kind: z.enum(["MODULES", "MERENDERO_SUPPLIES"]), version: z.number().int().positive(), templateVersion: z.number().int().positive(), originalName: z.string(), contentType: z.string(), createdAt: z.iso.datetime(), snapshot: merchandiseRequestDocumentSnapshotSchema }).strict()).default([]),
+      createdAt: z.iso.datetime(),
+      updatedAt: z.iso.datetime(),
+    })),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+  })),
+});

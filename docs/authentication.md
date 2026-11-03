@@ -32,3 +32,7 @@ Una autenticación válida genera un token aleatorio de 256 bits. El navegador r
 ## Roles
 
 El modelo contiene `PRESIDENTE`, `SECRETARIA`, `TESORERIA`, `VOCALIA` y `REVISION_CUENTAS`. Este ticket crea únicamente la cuenta inicial de presidencia; la administración de otras cuentas pertenece a COD-1421.
+
+## Baja lógica de cuentas
+
+La acción Eliminar registra `deletedAt` y `deletedById`, marca la cuenta inactiva y revoca sus sesiones dentro de una transacción. La fila de `User` se conserva para mantener la autoría y las referencias históricas; no se borran movimientos, documentos ni registros de auditoría. Las cuentas dadas de baja no aparecen en la administración ni pueden iniciar sesión o reactivarse. El correo y el nombre de usuario permanecen reservados por las restricciones únicas existentes.

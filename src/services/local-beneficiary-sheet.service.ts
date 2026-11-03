@@ -1,12 +1,10 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
-import { BENEFICIARY_SHEET_COLUMN_HEADERS, type BeneficiarySheetDraft } from "@/validations/record.validation";
 
-const tableBounds = [52, 73, 205, 263, 362, 414, 466, 543] as const;
-const title = "ENTREGA DE MODULOS DE MERCADERIA A FAMILIAS EN SITUACION DE RIESGO SOCIAL";
-const tableHeaderHeight = 27;
-const minimumRowHeight = 15.5;
-const rowLineHeight = 8;
-const pageBottom = 48;
+
+import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
+import { BENEFICIARY_SHEET_COLUMN_HEADERS, BENEFICIARY_SHEET_PDF } from "@/constants/delivery.constant";
+import type { BeneficiarySheetDraft } from "@/types/schema-contracts";
+
+const { TABLE_BOUNDS: tableBounds, TITLE: title, TABLE_HEADER_HEIGHT: tableHeaderHeight, MINIMUM_ROW_HEIGHT: minimumRowHeight, ROW_LINE_HEIGHT: rowLineHeight, PAGE_BOTTOM: pageBottom } = BENEFICIARY_SHEET_PDF;
 
 type PrintableRow = {
   beneficiary: BeneficiarySheetDraft["beneficiaries"][number];
@@ -40,7 +38,11 @@ function wrapText(text: string, font: PDFFont, fontSize: number, maxWidth: numbe
     wordParts.push(remainingWord);
 
     for (const wordPart of wordParts) {
-      const nextLine = line ? `${line} ${wordPart}` : wordPart;
+      let nextLine = wordPart;
+
+      if (line) {
+        nextLine = `${line} ${wordPart}`;
+      }
 
       if (font.widthOfTextAtSize(nextLine, fontSize) > maxWidth && line) {
         lines.push(line);
@@ -66,7 +68,12 @@ export async function createLocalBeneficiarySheetPdf(draft: BeneficiarySheetDraf
   const pageWidth = 595.28;
   const pageHeight = 841.89;
   const textSize = 6.5;
-  const headerTop = pageHeight - 104;
+  const eventLines: string[] = [];
+  if (draft.event) {
+    eventLines.push(...wrapText(`Jornada ${draft.event.scheduledAt} · ${draft.event.location}`, regularFont, 6.2, pageWidth - 104));
+    eventLines.push(...wrapText(`Responsables: ${draft.event.responsibleNames}`, regularFont, 6.2, pageWidth - 104));
+  }
+  const headerTop = pageHeight - 104 - eventLines.length * 8;
   const rows: PrintableRow[] = draft.beneficiaries.map((beneficiary, index) => {
     const nameLines = wrapText(beneficiary.name, regularFont, textSize, tableBounds[2] - tableBounds[1] - 6);
     const addressLines = wrapText(beneficiary.address, regularFont, textSize, tableBounds[4] - tableBounds[3] - 6);
@@ -95,12 +102,17 @@ export async function createLocalBeneficiarySheetPdf(draft: BeneficiarySheetDraf
     page.drawImage(logo, { x: pageWidth - 52 - logoSize.width, y: pageHeight - 48 - logoSize.height, ...logoSize });
     const titleWidth = boldFont.widthOfTextAtSize(title, 8.4);
     page.drawText(title, { x: (pageWidth - titleWidth) / 2, y: pageHeight - 94, size: 8.4, font: boldFont, color: rgb(0, 0, 0) });
+    eventLines.forEach((line, lineIndex) => page.drawText(line, { x: 52, y: pageHeight - 108 - lineIndex * 8, size: 6.2, font: regularFont, color: rgb(0, 0, 0) }));
     const labels = Object.values(BENEFICIARY_SHEET_COLUMN_HEADERS);
 
     labels.forEach((label, index) => {
       const left = tableBounds[index] ?? 0;
       const right = tableBounds[index + 1] ?? left;
-      const fontSize = index === 1 ? 7.1 : 6.7;
+      let fontSize = 6.7;
+
+      if (index === 1) {
+        fontSize = 7.1;
+      }
 
       if (index === 5) {
         const firstLineWidth = boldFont.widthOfTextAtSize("FECHA DE", fontSize);

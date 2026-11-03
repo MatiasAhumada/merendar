@@ -2,16 +2,24 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { test } from "node:test";
+import { PDFDocument } from "pdf-lib";
+import { z } from "zod";
 import { UserRole } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { AUTH } from "@/constants/auth.constant";
 import { GET as getPrivateRenditionDocument } from "@/app/api/renditions/documents/[id]/route";
 import { PATCH as patchRenditionReview } from "@/app/api/renditions/[id]/review/route";
+import { POST as createRenditionEmissionRoute } from "@/app/api/renditions/[id]/emissions/route";
+import { POST as createRenditionSubmissionRoute } from "@/app/api/renditions/[id]/submissions/route";
+import { GET as getRenditionEmissionFile } from "@/app/api/renditions/emissions/[id]/route";
+import { renditionEmissionPayloadSchema } from "@/schemas/rendition.schema";
 import { POST as synchronizeOfflineOperation } from "@/app/api/synchronizations/route";
 import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
 import { prisma } from "@/lib/prisma";
 import { RenditionDocumentError, renditionSynchronizationHandler } from "@/server/services/rendition-synchronization.service";
 import { synchronizationService } from "@/server/services/synchronization.service";
+import { getRenditionDocument as readRenditionDocument } from "@/server/services/rendition.service";
+import { getRenditionEmissionFile as readRenditionEmissionFile } from "@/server/services/rendition.service";
 import type { JsonValue } from "@/types/json-value";
 
 function createOperation(userId: string, resourceId: string, payload: Record<string, JsonValue>): SubmittedSyncOperation {
@@ -52,7 +60,9 @@ test("rendition PDFs persist as private versioned documents and require authoriz
   const sheetId = randomUUID();
   const renditionId = randomUUID();
   const originalDocumentId = randomUUID();
-  const originalPdf = Buffer.from("%PDF-1.7\nOriginal signed sheet\n%%EOF\n");
+  const signedSheetPdf = await PDFDocument.create();
+  signedSheetPdf.addPage();
+  const originalPdf = Buffer.from(await signedSheetPdf.save());
   const uploadOperation = createOperation(user.id, renditionId, {
     kind: "rendition_documents",
     id: renditionId,
@@ -95,7 +105,109 @@ test("rendition PDFs persist as private versioned documents and require authoriz
     assert.equal(savedRendition?.periodId, periodId);
     assert.equal(savedRendition?.beneficiarySheetId, sheetId);
     assert.equal(savedRendition?.documents.length, 1);
-    assert.equal(Buffer.from(savedRendition?.documents[0]?.content ?? new Uint8Array()).toString(), originalPdf.toString());
+    const uploadedRenditionDocument = await readRenditionDocument(savedRendition?.documents[0]?.id ?? "");
+    assert.ok(uploadedRenditionDocument);
+    assert.equal(Buffer.from(uploadedRenditionDocument.content).toString(), originalPdf.toString());
+
+    const emissionInput = renditionEmissionPayloadSchema.parse({
+      renditionId: savedRendition?.id,
+      template: {
+        issueDate: "2026-10-30",
+        locality: "Development locality",
+        recipient: "Development agency",
+        recipientTitle: "Document recipient",
+        associationName: "Synthetic association",
+        associationResolution: "Test resolution",
+        associationAddress: "Synthetic address",
+        associationPhone: "",
+        associationEmail: "",
+        observations: "",
+        signatories: [{ name: "Synthetic signatory", title: "Secretary" }],
+      },
+    });
+    const emissionResponse = await createRenditionEmissionRoute(
+      createRequest(`http://localhost:3000/api/renditions/${savedRendition?.id}/emissions`, "POST", token, emissionInput),
+      { params: Promise.resolve({ id: savedRendition?.id ?? "" }) },
+    );
+    assert.equal(emissionResponse.status, 201);
+    const emissionResponseValue: unknown = await emissionResponse.json();
+    const parsedEmissionResponse = z.object({ emission: z.object({ id: z.string(), version: z.number() }) }).parse(emissionResponseValue);
+    const emissionId = parsedEmissionResponse.emission.id;
+    assert.equal(parsedEmissionResponse.emission.version, 1);
+
+    for (const kind of ["note", "summary", "package"] as const) {
+      const emissionFileResponse = await getRenditionEmissionFile(
+        createRequest(`http://localhost:3000/api/renditions/emissions/${emissionId}?kind=${kind}`, "GET", token),
+        { params: Promise.resolve({ id: emissionId }) },
+      );
+      assert.equal(emissionFileResponse.status, 200);
+      assert.equal(emissionFileResponse.headers.get("cache-control"), "private, no-store, max-age=0");
+      const pdfBytes = new Uint8Array(await emissionFileResponse.arrayBuffer());
+      let expectedPageCount = 1;
+      if (kind === "package") {
+        expectedPageCount = 3;
+      }
+      assert.equal((await PDFDocument.load(pdfBytes)).getPageCount(), expectedPageCount);
+    }
+
+    const offlineEmissionId = randomUUID();
+    const offlineEmissionOperation = createOperation(user.id, offlineEmissionId, {
+      kind: "rendition_emission",
+      id: offlineEmissionId,
+      renditionId: savedRendition?.id ?? "",
+      periodId,
+      beneficiarySheetId: sheetId,
+      sourceDocumentIds: [originalDocumentId],
+      template: emissionInput.template,
+    });
+    const offlineEmissionResponse = await synchronizeOfflineOperation(
+      createRequest("http://localhost:3000/api/synchronizations", "POST", token, offlineEmissionOperation),
+    );
+    const replayedOfflineEmissionResponse = await synchronizeOfflineOperation(
+      createRequest("http://localhost:3000/api/synchronizations", "POST", token, offlineEmissionOperation),
+    );
+    assert.equal(offlineEmissionResponse.status, 200);
+    assert.equal(replayedOfflineEmissionResponse.status, 200);
+    const replayedOfflineEmission: unknown = await replayedOfflineEmissionResponse.json();
+    assert.equal(z.object({ replayed: z.boolean() }).parse(replayedOfflineEmission).replayed, true);
+    assert.equal(await prisma.renditionEmission.count({ where: { id: offlineEmissionId, renditionId: savedRendition?.id, version: 2 } }), 1);
+    const offlineEmissionPdf = await prisma.renditionEmission.findUnique({ where: { id: offlineEmissionId }, select: { snapshot: true } });
+    const offlinePackageFile = await readRenditionEmissionFile(offlineEmissionId, "package");
+    assert.ok(offlinePackageFile);
+    assert.equal((await PDFDocument.load(offlinePackageFile.content)).getPageCount(), 3);
+    assert.equal(z.object({ sheet: z.object({ id: z.string() }) }).parse(offlineEmissionPdf?.snapshot).sheet.id, sheetId);
+
+    const submissionResponse = await createRenditionSubmissionRoute(
+      createRequest(`http://localhost:3000/api/renditions/${savedRendition?.id}/submissions`, "POST", token, {
+        submittedAt: "2026-10-30",
+        recipient: "Development agency registry",
+        externalReference: "TEST-REFERENCE-01",
+      }),
+      { params: Promise.resolve({ id: savedRendition?.id ?? "" }) },
+    );
+    assert.equal(submissionResponse.status, 201);
+    assert.equal(await prisma.renditionSubmission.count({ where: { renditionId: savedRendition?.id, recipient: "Development agency registry", recordedById: user.id } }), 1);
+
+    const queuedSubmission = createOperation(user.id, savedRendition?.id ?? "", {
+      kind: "rendition_submission",
+      id: savedRendition?.id ?? "",
+      renditionId: savedRendition?.id ?? "",
+      emissionId,
+      submittedAt: "2026-10-29",
+      recipient: "Development registry desk",
+      externalReference: "TEST-REFERENCE-02",
+    });
+    const queuedSubmissionResponse = await synchronizeOfflineOperation(
+      createRequest("http://localhost:3000/api/synchronizations", "POST", token, queuedSubmission),
+    );
+    const replayedSubmissionResponse = await synchronizeOfflineOperation(
+      createRequest("http://localhost:3000/api/synchronizations", "POST", token, queuedSubmission),
+    );
+    assert.equal(queuedSubmissionResponse.status, 200);
+    assert.equal(replayedSubmissionResponse.status, 200);
+    const replayedSubmission: unknown = await replayedSubmissionResponse.json();
+    assert.equal(z.object({ replayed: z.boolean() }).parse(replayedSubmission).replayed, true);
+    assert.equal(await prisma.renditionSubmission.count({ where: { renditionId: savedRendition?.id, recipient: "Development registry desk", recordedById: user.id } }), 1);
 
     const replacementPdf = Buffer.from("%PDF-1.7\nCorrected signed sheet\n%%EOF\n");
     replacementDocumentId = randomUUID();
@@ -190,6 +302,8 @@ test("rendition PDFs persist as private versioned documents and require authoriz
     if (unauthorizedUserId) {
       await prisma.user.deleteMany({ where: { id: unauthorizedUserId } });
     }
+    await prisma.renditionSubmission.deleteMany({ where: { renditionId } });
+    await prisma.renditionEmission.deleteMany({ where: { renditionId } });
     await prisma.renditionDocument.deleteMany({ where: { OR: [{ id: originalDocumentId }, { id: replacementDocumentId }, { uploadedById: user.id }] } });
     await prisma.rendition.deleteMany({ where: { OR: [{ beneficiarySheetId: sheetId }, { createdById: user.id }] } });
     await prisma.beneficiarySheet.deleteMany({ where: { id: sheetId } });

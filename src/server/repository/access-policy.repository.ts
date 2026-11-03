@@ -1,3 +1,6 @@
+
+
+import { USER_ERROR_MESSAGES } from "@/constants/user.constant";
 import { prisma } from "@/lib/prisma";
 import type { AccessCapability, UserRole } from "@prisma/client";
 
@@ -14,6 +17,7 @@ export const accessPolicyRepository = {
     const [policies, users, changes] = await Promise.all([
       prisma.roleCapabilityPolicy.findMany({ select: { role: true, capability: true, enabled: true } }),
       prisma.user.findMany({
+        where: { deletedAt: null },
         select: { id: true, name: true, email: true, role: true, isActive: true },
         orderBy: [{ role: "asc" }, { name: "asc" }],
       }),
@@ -37,7 +41,7 @@ export const accessPolicyRepository = {
       const activePresidents = await transaction.user.count({ where: { role: "PRESIDENTE", isActive: true } });
 
       if (!activePresidents) {
-        throw new Error("Debe existir al menos una cuenta activa de Presidencia.");
+        throw new Error(USER_ERROR_MESSAGES.DEBE_EXISTIR_AL_MENOS_UNA_CUENTA_ACTIVA_DE_PRESIDENCIA);
       }
 
       for (const policy of policies) {

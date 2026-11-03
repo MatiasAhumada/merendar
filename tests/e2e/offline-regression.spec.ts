@@ -1,10 +1,12 @@
 import "dotenv/config";
 import { randomBytes, randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { expect, test, type Browser, type Page, type TestInfo } from "@playwright/test";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { familyService } from "@/server/services/family.service";
 import { createBrowserIdentity, removeBrowserIdentity, setBrowserIdentity, type BrowserIdentity } from "./browser-identity";
+import { readDocumentObject } from "@/server/services/document-storage.service";
 
 test("treats the removed /offline URL as an ordinary missing route", async ({ page }) => {
   const response = await page.goto("/offline?route=%2Ffamilias");
@@ -122,7 +124,7 @@ test("prepares private views automatically from a deep route, keeps them availab
 
     const privateCacheCheck = await page.evaluate(async () => {
       const cacheNames = await caches.keys();
-      const publicCacheName = cacheNames.find((cacheName) => cacheName.startsWith("merendar-public-"));
+      const publicCacheName = cacheNames.find((cacheName) => cacheName === "merendar-public-v8");
       if (!publicCacheName) {
         return { cacheNames, privateApiCached: false, privateRouteCached: false, cachedPaths: [] as string[] };
       }
@@ -135,7 +137,7 @@ test("prepares private views automatically from a deep route, keeps them availab
         cachedPaths: cachedRequests.map((request) => new URL(request.url).pathname),
       };
     });
-    expect(privateCacheCheck.cacheNames).toEqual(["merendar-public-v6"]);
+    expect(privateCacheCheck.cacheNames.sort()).toEqual(["merendar-public-v8", "merendar-public-v9"]);
     expect(privateCacheCheck.privateApiCached).toBe(false);
     expect(privateCacheCheck.privateRouteCached).toBe(true);
     expect(privateCacheCheck.cachedPaths.some((path) => path.startsWith("/api/"))).toBe(false);
@@ -502,7 +504,7 @@ test("creates a dependent merchandise chain offline and synchronizes each operat
     await expect(page.getByRole("heading", { name: `Remito N° ${remittanceNumber}` })).toBeVisible();
 
     const queuedOperations = await page.evaluate(async (userId) => {
-      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 2);
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -533,9 +535,9 @@ test("creates a dependent merchandise chain offline and synchronizes each operat
       include: { requests: { include: { quota: true, remittances: true } } },
     });
     expect(syncedPeriod?.requests).toHaveLength(1);
-    expect(syncedPeriod?.requests[0]?.quota?.approvedQuantity).toBe(3);
+    expect(syncedPeriod?.requests[0]?.quota?.approvedQuantity.toNumber()).toBe(3);
     expect(syncedPeriod?.requests[0]?.remittances).toHaveLength(1);
-    expect(syncedPeriod?.requests[0]?.remittances[0]?.receivedQuantity).toBe(3);
+    expect(syncedPeriod?.requests[0]?.remittances[0]?.receivedQuantity.toNumber()).toBe(3);
 
     await context.setOffline(true);
     await context.setOffline(false);
@@ -555,7 +557,7 @@ test("creates a dependent merchandise chain offline and synchronizes each operat
   }
 });
 
-test("uploads a rendition PDF offline and preserves the file through idempotent synchronization", async ({ context, page }) => {
+test("uploads and emits a local rendition PDF offline, then synchronizes both operations idempotently", async ({ context, page }, testInfo) => {
   const president = await createBrowserIdentity(UserRole.PRESIDENTE);
   const suffix = randomUUID();
   const periodLabel = `COD1478 Rendition offline ${suffix}`;
@@ -566,6 +568,7 @@ test("uploads a rendition PDF offline and preserves the file through idempotent 
   let documentId = "";
   let renditionId = "";
   const pageErrors: string[] = [];
+  const synchronizationResponses: string[] = [];
 
   try {
     const period = await prisma.merchandisePeriod.create({
@@ -594,6 +597,11 @@ test("uploads a rendition PDF offline and preserves the file through idempotent 
 
     await setBrowserIdentity(context, president);
     page.on("pageerror", (error) => pageErrors.push(error.message));
+    page.on("response", async (response) => {
+      if (response.url().endsWith("/api/synchronizations")) {
+        synchronizationResponses.push(`${response.status()}: ${await response.text()}`);
+      }
+    });
     await page.goto("/mercaderia#rendiciones");
     await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
     await page.getByRole("combobox", { name: "Módulo o período" }).click();
@@ -616,13 +624,27 @@ test("uploads a rendition PDF offline and preserves the file through idempotent 
     await page.getByRole("button", { name: "Guardar documentos" }).click();
     await expect(page.getByRole("region", { name: "Documentación recibida" }).getByText(`Planilla firmada a mano · ${originalName}`)).toBeVisible();
 
+    await page.locator("#rendition-locality").fill("San Miguel de Tucumán");
+    await page.locator("#rendition-association-name").fill("Asociación sintética COD1478");
+    await page.locator("#rendition-signatory-name").fill("Firmante sintético");
+    await page.locator("#rendition-signatory-title").fill("Secretaría");
+    await page.getByRole("button", { name: "Generar borrador y guardar para sincronizar" }).click();
+    await expect(page.getByText("Expediente local pendiente de sincronización")).toBeVisible();
+    const localDraftDownloadPromise = page.waitForEvent("download");
+    await page.getByRole("link", { name: "Descargar borrador local" }).click();
+    const localDraftDownload = await localDraftDownloadPromise;
+    expect(localDraftDownload.suggestedFilename()).toMatch(/^borrador-rendicion-offline-.+\.pdf$/);
+    const localDraftPath = testInfo.outputPath("offline-rendition-draft.pdf");
+    await localDraftDownload.saveAs(localDraftPath);
+    expect((await readFile(localDraftPath)).toString("ascii", 0, 5)).toBe("%PDF-");
+
     const queuedOperations = await page.evaluate(async (userId) => {
-      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 2);
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
-      const operations = await new Promise<Array<{ operationId: string; resource: string }>>((resolve, reject) => {
+      const operations = await new Promise<Array<{ operationId: string; resource: string; dependencies: string[]; payload: { kind?: string; id?: string } }>>((resolve, reject) => {
         const operationRequest = database.transaction("operations", "readonly").objectStore("operations").getAll();
         operationRequest.onsuccess = () => resolve(operationRequest.result);
         operationRequest.onerror = () => reject(operationRequest.error);
@@ -630,10 +652,15 @@ test("uploads a rendition PDF offline and preserves the file through idempotent 
       database.close();
       return operations;
     }, president.userId);
-    expect(queuedOperations).toHaveLength(1);
+    expect(queuedOperations).toHaveLength(2);
     expect(queuedOperations[0]?.resource).toBe("renditions");
     expect(await prisma.rendition.count({ where: { beneficiarySheetId: sheet.id } })).toBe(0);
-    const operationId = queuedOperations[0]?.operationId;
+    const emissionOperation = queuedOperations.find((operation) => operation.payload.kind === "rendition_emission");
+    const uploadOperation = queuedOperations.find((operation) => operation.payload.kind !== "rendition_emission");
+    expect(emissionOperation?.payload.id).toBeTruthy();
+    expect(emissionOperation?.dependencies).toEqual([uploadOperation?.operationId]);
+    const operationId = uploadOperation?.operationId;
+    const emissionId = emissionOperation?.payload.id;
     expect(operationId).toBeTruthy();
 
     await context.setOffline(false);
@@ -641,7 +668,27 @@ test("uploads a rendition PDF offline and preserves the file through idempotent 
     const persistedDocument = await prisma.renditionDocument.findFirstOrThrow({ where: { originalName } });
     documentId = persistedDocument.id;
     renditionId = persistedDocument.renditionId;
-    expect(persistedDocument.content).toEqual(pdfContent);
+    expect(await readDocumentObject(persistedDocument.storageKey)).toEqual(pdfContent);
+    expect(emissionId).toBeTruthy();
+    try {
+      await expect.poll(async () => prisma.renditionEmission.findUnique({ where: { id: emissionId }, select: { id: true, version: true } }), { timeout: 30_000 }).toEqual({ id: emissionId, version: 1 });
+    } catch {
+      const operationStates = await page.evaluate(async (userId) => {
+        const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 2);
+        const database = await new Promise<IDBDatabase>((resolve, reject) => {
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        const operations = await new Promise<Array<{ operationId: string; status: string; message: string | null; payload: { kind?: string; id?: string } }>>((resolve, reject) => {
+          const operationRequest = database.transaction("operations", "readonly").objectStore("operations").getAll();
+          operationRequest.onsuccess = () => resolve(operationRequest.result);
+          operationRequest.onerror = () => reject(operationRequest.error);
+        });
+        database.close();
+        return operations.map(({ operationId: queuedId, status, message, payload }) => ({ operationId: queuedId, status, message, kind: payload.kind, id: payload.id }));
+      }, president.userId);
+      throw new Error(JSON.stringify({ operationStates, synchronizationResponses }));
+    }
     if (!operationId) {
       throw new Error("La operación offline no generó un identificador.");
     }
@@ -654,122 +701,12 @@ test("uploads a rendition PDF offline and preserves the file through idempotent 
     expect(pageErrors).toEqual([]);
   } finally {
     await context.setOffline(false);
+    await prisma.renditionSubmission.deleteMany({ where: { renditionId } });
+    await prisma.renditionEmission.deleteMany({ where: { renditionId } });
     await prisma.renditionDocument.deleteMany({ where: { OR: [{ id: documentId }, { renditionId }] } });
     await prisma.rendition.deleteMany({ where: { beneficiarySheetId: sheetId } });
     await prisma.beneficiarySheet.deleteMany({ where: { id: sheetId } });
     await prisma.merchandisePeriod.deleteMany({ where: { id: periodId } });
-    await removeBrowserIdentity(president);
-    await prisma.$disconnect();
-  }
-});
-
-test("registers a beneficiary offline, emits a local PDF and synchronizes both operations once", async ({ context, page }) => {
-  const president = await createBrowserIdentity(UserRole.PRESIDENTE);
-  const suffix = randomUUID();
-  const familyName = `COD1478 Registro offline ${suffix}`;
-  const periodLabel = `COD1478 Entrega offline ${suffix}`;
-  const beneficiaryName = `Registro ${suffix.slice(0, 8)}`;
-  const personDni = `${10_000_000 + Number.parseInt(randomBytes(4).toString("hex"), 16) % 90_000_000}`;
-  let periodId = "";
-  let familyId = "";
-  const pageErrors: string[] = [];
-
-  try {
-    const family = await familyService.create({
-      name: familyName,
-      neighborhood: "San Cayetano",
-      address: "Domicilio sintético COD1478",
-      contactPhone: "3815551478",
-      referenceMemberIndex: 0,
-      members: [{ firstName: beneficiaryName, lastName: "Offline", dni: personDni, relationship: "Referente", missingDocuments: [] }],
-    }, president.userId, randomUUID());
-    familyId = family.id;
-    const period = await prisma.merchandisePeriod.create({
-      data: {
-        label: periodLabel,
-        agency: "COD1478 QA browser",
-        startsAt: new Date("2026-10-01T00:00:00.000Z"),
-        endsAt: new Date("2026-10-31T00:00:00.000Z"),
-      },
-    });
-    periodId = period.id;
-
-    await setBrowserIdentity(context, president);
-    page.on("pageerror", (error) => pageErrors.push(error.message));
-    await page.goto("/entrega");
-    await expect(page.getByRole("status").filter({ hasText: /Vistas autorizadas listas/ })).toBeVisible({ timeout: 30_000 });
-    await page.evaluate(async () => navigator.serviceWorker.ready);
-    await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
-
-    await context.setOffline(true);
-    await page.goto("/entrega");
-    await expect(page).toHaveURL(/\/entrega(?:\?.*)?$/);
-    await page.locator("#record-period").click();
-    await page.getByRole("option", { name: new RegExp(periodLabel) }).click();
-    await page.locator("#record-family").click();
-    await page.getByRole("option", { name: new RegExp(familyName) }).click();
-    await page.locator("#record-person").click();
-    await page.getByRole("option", { name: new RegExp(personDni) }).click();
-    await page.locator("#record-type").fill("Módulo offline COD1478");
-    await page.locator("#record-quantity").fill("2");
-    await page.locator("#record-date").fill("2026-10-25");
-    await page.getByRole("button", { name: "Confirmar registro" }).click();
-    await expect(page.getByText(/Registro pendiente/)).toBeVisible();
-
-    await page.getByRole("checkbox", { name: new RegExp(`Incluir a ${beneficiaryName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`) }).check();
-    await page.getByRole("button", { name: /Descargar PDF/ }).click();
-    await expect(page.getByText(/Borrador local .* todavía no tiene versión oficial/)).toBeVisible();
-    const offlineData = await page.evaluate(async (userId) => {
-      const databaseRequest = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
-      const database = await new Promise<IDBDatabase>((resolve, reject) => {
-        databaseRequest.onsuccess = () => resolve(databaseRequest.result);
-        databaseRequest.onerror = () => reject(databaseRequest.error);
-      });
-      const operations = await new Promise<Array<{ operationId: string; resource: string; resourceId: string }>>((resolve, reject) => {
-        const request = database.transaction("operations", "readonly").objectStore("operations").getAll();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      database.close();
-      const preparationRequest = indexedDB.open(`merendar-offline-preparation-${encodeURIComponent(userId)}`, 3);
-      const preparationDatabase = await new Promise<IDBDatabase>((resolve, reject) => {
-        preparationRequest.onsuccess = () => resolve(preparationRequest.result);
-        preparationRequest.onerror = () => reject(preparationRequest.error);
-      });
-      const documents = await new Promise<Array<{ id: string; byteSize: number; documentType?: string }>>((resolve, reject) => {
-        const request = preparationDatabase.transaction("documents", "readonly").objectStore("documents").getAll();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      preparationDatabase.close();
-      return { operations, documents };
-    }, president.userId);
-    expect(offlineData.operations).toHaveLength(2);
-    expect(offlineData.operations.every((operation) => operation.resource === "records")).toBe(true);
-    const localSheet = offlineData.documents.find((document) => document.documentType === "beneficiary-sheet-local");
-    expect(localSheet?.byteSize).toBeGreaterThan(0);
-    expect(localSheet?.id).toMatch(/^local:/);
-
-    await context.setOffline(false);
-    await expect.poll(async () => prisma.synchronizationReceipt.count({ where: { operationId: { in: offlineData.operations.map((operation) => operation.operationId) } } }), { timeout: 30_000 }).toBe(2);
-    expect(await prisma.distributionRecord.count({ where: { periodId, familyMember: { person: { dni: personDni } } } })).toBe(1);
-    const officialSheet = await prisma.beneficiarySheet.findFirst({ where: { periodId } });
-    expect(officialSheet?.snapshot).toMatchObject({ beneficiaries: [{ dni: personDni, familyName }] });
-
-    await context.setOffline(true);
-    await context.setOffline(false);
-    expect(await prisma.distributionRecord.count({ where: { periodId, familyMember: { person: { dni: personDni } } } })).toBe(1);
-    expect(await prisma.beneficiarySheet.count({ where: { periodId } })).toBe(1);
-    expect(pageErrors).toEqual([]);
-  } finally {
-    await context.setOffline(false);
-    await prisma.distributionRecord.deleteMany({ where: { periodId } });
-    await prisma.beneficiarySheet.deleteMany({ where: { periodId } });
-    await prisma.merchandisePeriod.deleteMany({ where: { id: periodId } });
-    if (familyId) {
-      await prisma.family.deleteMany({ where: { id: familyId } });
-      await prisma.person.deleteMany({ where: { dni: personDni, memberships: { none: {} }, referencedBy: { none: {} } } });
-    }
     await removeBrowserIdentity(president);
     await prisma.$disconnect();
   }
@@ -1029,7 +966,7 @@ test("adds a member to a confirmed family after reopening the route offline", as
     await expect(page.getByText("Integrantes (2)", { exact: true })).toBeVisible();
 
     const queuedOperations = await page.evaluate(async (userId) => {
-      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 2);
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -1096,7 +1033,7 @@ test("edits a confirmed family member after reopening the route offline", async 
     await expect(page.getByText(/Persona Actualizado offline/).first()).toBeVisible();
 
     const queuedOperations = await page.evaluate(async (userId) => {
-      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 2);
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -1162,7 +1099,7 @@ test("deactivates a confirmed family offline after reopening the route", async (
     await expect(page.getByRole("button", { name: "Baja pendiente" })).toBeVisible();
 
     const queuedOperations = await page.evaluate(async (userId) => {
-      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 2);
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -1229,7 +1166,7 @@ test("creates a family and adds a member offline, then syncs the dependency chai
     await page.locator("#family-member-dni").fill("14790003");
     await page.getByRole("button", { name: "Guardar integrante" }).click();
     await expect.poll(async () => page.evaluate(async (userId) => {
-      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 2);
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -1243,7 +1180,7 @@ test("creates a family and adds a member offline, then syncs the dependency chai
       return count;
     }, president.userId), { timeout: 10_000 }).toBe(2);
     const operationIds = await page.evaluate(async (userId) => {
-      const databaseRequest = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const databaseRequest = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 2);
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         databaseRequest.onsuccess = () => resolve(databaseRequest.result);
         databaseRequest.onerror = () => reject(databaseRequest.error);

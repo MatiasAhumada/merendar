@@ -13,6 +13,8 @@ cp .env.example .env
 
 Configurá `DATABASE_URL` con una base PostgreSQL de desarrollo y definí al menos uno de `PRESIDENT_BOOTSTRAP_EMAIL` o `PRESIDENT_BOOTSTRAP_USERNAME`, junto con `PRESIDENT_BOOTSTRAP_NAME` y una contraseña no vacía en `.env`. El usuario puede iniciar sesión con su nombre de usuario o su correo. La contraseña no exige mayúsculas, símbolos ni una longitud mínima; admite hasta 128 caracteres. No compartas ese archivo ni uses credenciales de producción.
 
+Los documentos confirmados requieren `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` y `R2_BUCKET_NAME=merendar` en el entorno privado del servidor. `R2_PUBLIC_URL` es opcional y no habilita documentos operativos públicos. `pnpm test:r2-storage` comprueba subida, lectura, checksum, rechazo de lectura anónima y limpieza de un PDF sintético efímero.
+
 Creá y aplicá una migración desde el directorio del proyecto. Usá un nombre descriptivo para cada cambio de esquema:
 
 ```bash
@@ -60,6 +62,8 @@ ALLOW_AUTH_INTEGRATION_TESTS=true ALLOW_FAMILY_INTEGRATION_TESTS=true ALLOW_SYNC
 ```
 
 La estrategia de instalación, caché pública y acceso sin conexión está documentada en [docs/offline.md](docs/offline.md).
+
+El almacenamiento documental, el backfill y el corte de las columnas binarias están documentados en [docs/delivery.md](docs/delivery.md).
 
 El ciclo de baja lógica, sus bloqueos de integridad y el referente familiar están documentados en [docs/family-deactivation.md](docs/family-deactivation.md).
 

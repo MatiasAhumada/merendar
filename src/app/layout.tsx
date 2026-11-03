@@ -1,7 +1,9 @@
-import type { Metadata } from "next";
-import localFont from "next/font/local";
 import { BRAND } from "@/constants/brand.constant";
 import { PwaRegistration } from "@/components/shared/PwaRegistration";
+import { Toaster } from "@/components/ui/sonner";
+import type { Metadata } from "next";
+import localFont from "next/font/local";
+
 import "./globals.css";
 
 const geistSans = localFont({
@@ -12,7 +14,7 @@ const geistSans = localFont({
 });
 
 export const metadata: Metadata = {
-  title: { default: `${BRAND.name} | Gestión comunitaria`, template: `%s | ${BRAND.name}` },
+  title: { default: `${BRAND.name} | ${BRAND.metadataTitle}`, template: `%s | ${BRAND.name}` },
   description: BRAND.description,
   applicationName: BRAND.name,
   openGraph: {
@@ -44,6 +46,7 @@ export default function RootLayout({
       <body className="flex min-h-screen flex-col font-sans">
         <PwaRegistration />
         {children}
+        <Toaster position="top-center" />
       </body>
     </html>
   );
