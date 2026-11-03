@@ -291,12 +291,18 @@ async function createSummaryPdf(snapshot: RenditionEmissionSnapshot) {
 
 async function createPackagePdf(notePdf: Uint8Array, summaryPdf: Uint8Array, source: RenditionEmissionSource) {
   const packageDocument = await PDFDocument.create();
+  function documentBytes(content: Uint8Array | null) {
+    if (!content) {
+      throw new Error("Un documento fuente de rendición no tiene contenido cargado desde R2.");
+    }
+    return new Uint8Array(content);
+  }
   const merchandiseAttachments = source.period.requests.flatMap((request) => [
-    ...request.documents.filter((document) => document.contentType === HTTP_CONTENT_TYPES.PDF).map((document) => ({ name: document.originalName, content: new Uint8Array(document.content) })),
-    ...request.issuedDocuments.filter((document) => document.contentType === HTTP_CONTENT_TYPES.PDF).map((document) => ({ name: document.originalName, content: new Uint8Array(document.content) })),
-    ...request.remittances.flatMap((remittance) => remittance.documents.filter((document) => document.contentType === HTTP_CONTENT_TYPES.PDF).map((document) => ({ name: document.originalName, content: new Uint8Array(document.content) }))),
+    ...request.documents.filter((document) => document.contentType === HTTP_CONTENT_TYPES.PDF).map((document) => ({ name: document.originalName, content: documentBytes(document.content) })),
+    ...request.issuedDocuments.filter((document) => document.contentType === HTTP_CONTENT_TYPES.PDF).map((document) => ({ name: document.originalName, content: documentBytes(document.content) })),
+    ...request.remittances.flatMap((remittance) => remittance.documents.filter((document) => document.contentType === HTTP_CONTENT_TYPES.PDF).map((document) => ({ name: document.originalName, content: documentBytes(document.content) }))),
   ]);
-  const appendedDocuments = source.documents.map((document) => ({ name: document.originalName, content: new Uint8Array(document.content) }));
+  const appendedDocuments = source.documents.map((document) => ({ name: document.originalName, content: documentBytes(document.content) }));
   const unavailableDocuments: string[] = [];
 
   for (const sourceBytes of [notePdf, summaryPdf]) {

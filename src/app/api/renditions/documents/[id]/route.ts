@@ -24,7 +24,7 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/rend
       disposition = "inline";
     }
 
-    return new NextResponse(document.content, {
+    return new NextResponse(Buffer.from(document.content), {
       headers: {
         ...privateHeaders,
         "Content-Type": document.contentType,

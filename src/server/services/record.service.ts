@@ -19,6 +19,8 @@ import {
   lockFamilyRows,
 } from "@/server/repository/record.repository";
 import { ApiError } from "@/utils/handlers/apiError.handler";
+import { prisma } from "@/lib/prisma";
+import { documentStorageProvider, storeDocumentObject } from "@/server/services/document-storage.service";
 
 export async function createIssuedBeneficiarySheetPdf(id: string) {
   const sheet = await findBeneficiarySheet(id);
@@ -27,7 +29,18 @@ export async function createIssuedBeneficiarySheetPdf(id: string) {
     throw new ApiError({ status: 404, message: DELIVERY_ERROR_MESSAGES.NO_ENCONTRAMOS_ESA_PLANILLA });
   }
 
-  const pdf = await createBeneficiarySheetPdf(sheet.snapshot);
+  let objectKey = sheet.storageKey;
+  if (!objectKey) {
+    const generatedPdf = await createBeneficiarySheetPdf(sheet.snapshot);
+    const storedObject = await storeDocumentObject({ category: "beneficiary-sheet", id: sheet.id, content: generatedPdf, contentType: "application/pdf" });
+    await prisma.beneficiarySheet.updateMany({
+      where: { id: sheet.id, storageKey: null },
+      data: { storageBucket: storedObject.bucket, storageKey: storedObject.objectKey, checksum: storedObject.checksum, byteSize: storedObject.byteSize, storageStatus: "CONFIRMED" },
+    });
+    const currentSheet = await prisma.beneficiarySheet.findUnique({ where: { id: sheet.id }, select: { storageKey: true } });
+    objectKey = currentSheet?.storageKey ?? storedObject.objectKey;
+  }
+  const pdf = await documentStorageProvider.get(objectKey);
   const fileName = sheet.period.label.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
 
   return { pdf, fileName, version: sheet.version };

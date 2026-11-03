@@ -21,12 +21,12 @@ export const merchandiseRepository = {
   async findDocument(id: string) {
     const existingDocument = await prisma.merchandiseDocument.findUnique({
       where: { id },
-      select: { originalName: true, contentType: true, content: true },
+      select: { originalName: true, contentType: true, storageBucket: true, storageKey: true },
     });
     if (existingDocument) {
       return existingDocument;
     }
-    return prisma.merchandiseRequestDocument.findUnique({ where: { id }, select: { originalName: true, contentType: true, content: true } });
+    return prisma.merchandiseRequestDocument.findUnique({ where: { id }, select: { originalName: true, contentType: true, storageBucket: true, storageKey: true } });
   },
 
   async findAll() {

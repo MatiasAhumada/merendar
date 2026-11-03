@@ -18,7 +18,7 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/merc
       return NextResponse.json({ error: { message: MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_COMPROBANTE_SOLICITADO } }, { status: 404, headers: privateHeaders });
     }
 
-    return new NextResponse(document.content, {
+    return new NextResponse(Buffer.from(document.content), {
       headers: {
         ...privateHeaders,
         "Content-Type": document.contentType,

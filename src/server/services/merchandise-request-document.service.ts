@@ -3,6 +3,7 @@ import { merchandiseRequestDocumentPayloadSchema } from "@/schemas/merchandise-r
 import { createMerchandiseRequestPdf } from "@/services/merchandise-request-document-pdf.service";
 import { prisma } from "@/lib/prisma";
 import { ApiError } from "@/utils/handlers/apiError.handler";
+import { storeDocumentObject } from "@/server/services/document-storage.service";
 
 export async function issueMerchandiseRequestDocument(payload: unknown, issuerId: string) {
   const parsedPayload = merchandiseRequestDocumentPayloadSchema.safeParse(payload);
@@ -58,6 +59,7 @@ export async function issueMerchandiseRequestDocument(payload: unknown, issuerId
     fileSuffix = "modulos";
   }
   const originalName = `borrador-solicitud-${fileSuffix}-${request.requestNumber}-v${version}.pdf`;
+  const storedObject = await storeDocumentObject({ category: "request-document", id: data.id, content, contentType: HTTP_CONTENT_TYPES.PDF });
   const document = await prisma.merchandiseRequestDocument.create({
     data: {
       id: data.id,
@@ -77,7 +79,10 @@ export async function issueMerchandiseRequestDocument(payload: unknown, issuerId
       },
       originalName,
       contentType: HTTP_CONTENT_TYPES.PDF,
-      content,
+      byteSize: content.byteLength,
+      storageBucket: storedObject.bucket,
+      storageKey: storedObject.objectKey,
+      checksum: storedObject.checksum,
       issuedById: issuerId,
     },
     select: { id: true, version: true, kind: true, originalName: true, createdAt: true },

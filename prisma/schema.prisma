@@ -317,9 +317,14 @@ model MerchandiseRequestDocument {
   templateVersion Int
   snapshot     Json
   originalName String
-  contentType  String                           @default("application/pdf")
-  content      Bytes
-  request      MerchandiseRequest               @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  contentType     String                           @default("application/pdf")
+  storageBucket   String
+  storageKey      String
+  checksum        String
+  byteSize        Int
+  storageProvider DocumentStorageProvider           @default(CLOUDFLARE_R2)
+  storageStatus   DocumentStorageStatus             @default(CONFIRMED)
+  request         MerchandiseRequest               @relation(fields: [requestId], references: [id], onDelete: Restrict)
   issuedById   String
   issuedBy     User                             @relation("MerchandiseRequestDocumentIssuer", fields: [issuedById], references: [id], onDelete: Restrict)
   createdAt    DateTime                         @default(now())
@@ -543,9 +548,13 @@ model MerchandiseDocument {
   originalName String
   contentType  String
   byteSize     Int
-  content      Bytes
-  requestId    String?
-  request      MerchandiseRequest?    @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  storageBucket   String
+  storageKey      String
+  checksum        String
+  storageProvider DocumentStorageProvider @default(CLOUDFLARE_R2)
+  storageStatus   DocumentStorageStatus   @default(CONFIRMED)
+  requestId       String?
+  request         MerchandiseRequest?    @relation(fields: [requestId], references: [id], onDelete: Restrict)
   remittanceId String?
   remittance   MerchandiseRemittance? @relation(fields: [remittanceId], references: [id], onDelete: Restrict)
   uploadedById String
@@ -585,6 +594,12 @@ model BeneficiarySheet {
   distributionEventId String?
   version             Int
   snapshot            Json
+  storageBucket       String?
+  storageKey          String?
+  checksum            String?
+  byteSize            Int?
+  storageProvider     DocumentStorageProvider @default(CLOUDFLARE_R2)
+  storageStatus       DocumentStorageStatus   @default(PENDING)
   period              MerchandisePeriod  @relation(fields: [periodId], references: [id], onDelete: Restrict)
   distributionEvent   DistributionEvent? @relation(fields: [distributionEventId], references: [id], onDelete: Restrict)
   createdById         String
@@ -607,6 +622,15 @@ enum RenditionDocumentType {
   PLANILLA_FIRMADA
   REMITO
   RESPALDO
+}
+
+enum DocumentStorageProvider {
+  CLOUDFLARE_R2
+}
+
+enum DocumentStorageStatus {
+  PENDING
+  CONFIRMED
 }
 
 model Rendition {
@@ -645,8 +669,12 @@ model RenditionDocument {
   originalName String
   contentType  String
   byteSize     Int
-  content      Bytes
-  rendition    Rendition             @relation(fields: [renditionId], references: [id], onDelete: Restrict)
+  storageBucket   String
+  storageKey      String
+  checksum        String
+  storageProvider DocumentStorageProvider @default(CLOUDFLARE_R2)
+  storageStatus   DocumentStorageStatus   @default(CONFIRMED)
+  rendition       Rendition             @relation(fields: [renditionId], references: [id], onDelete: Restrict)
   supersedes   RenditionDocument?    @relation("RenditionDocumentVersions", fields: [supersedesId], references: [id], onDelete: Restrict)
   supersededBy RenditionDocument[]   @relation("RenditionDocumentVersions")
   submissions  RenditionSubmission[] @relation("RenditionSubmissionEvidence")
@@ -663,11 +691,19 @@ model RenditionEmission {
   id          String    @id @default(cuid())
   renditionId String
   version     Int
-  snapshot    Json
-  notePdf     Bytes
-  summaryPdf  Bytes
-  packagePdf  Bytes
-  createdById String
+  snapshot            Json
+  noteStorageBucket   String
+  noteStorageKey      String
+  noteChecksum        String
+  summaryStorageBucket String
+  summaryStorageKey   String
+  summaryChecksum     String
+  packageStorageBucket String
+  packageStorageKey   String
+  packageChecksum     String
+  storageProvider     DocumentStorageProvider @default(CLOUDFLARE_R2)
+  storageStatus       DocumentStorageStatus   @default(CONFIRMED)
+  createdById         String
   rendition   Rendition @relation(fields: [renditionId], references: [id], onDelete: Restrict)
   createdBy   User      @relation("RenditionEmissionCreator", fields: [createdById], references: [id], onDelete: Restrict)
   submissions RenditionSubmission[]

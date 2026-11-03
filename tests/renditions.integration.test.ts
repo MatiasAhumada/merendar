@@ -18,6 +18,8 @@ import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interf
 import { prisma } from "@/lib/prisma";
 import { RenditionDocumentError, renditionSynchronizationHandler } from "@/server/services/rendition-synchronization.service";
 import { synchronizationService } from "@/server/services/synchronization.service";
+import { getRenditionDocument as readRenditionDocument } from "@/server/services/rendition.service";
+import { getRenditionEmissionFile as readRenditionEmissionFile } from "@/server/services/rendition.service";
 import type { JsonValue } from "@/types/json-value";
 
 function createOperation(userId: string, resourceId: string, payload: Record<string, JsonValue>): SubmittedSyncOperation {
@@ -103,7 +105,9 @@ test("rendition PDFs persist as private versioned documents and require authoriz
     assert.equal(savedRendition?.periodId, periodId);
     assert.equal(savedRendition?.beneficiarySheetId, sheetId);
     assert.equal(savedRendition?.documents.length, 1);
-    assert.equal(Buffer.from(savedRendition?.documents[0]?.content ?? new Uint8Array()).toString(), originalPdf.toString());
+    const uploadedRenditionDocument = await readRenditionDocument(savedRendition?.documents[0]?.id ?? "");
+    assert.ok(uploadedRenditionDocument);
+    assert.equal(Buffer.from(uploadedRenditionDocument.content).toString(), originalPdf.toString());
 
     const emissionInput = renditionEmissionPayloadSchema.parse({
       renditionId: savedRendition?.id,
@@ -167,8 +171,10 @@ test("rendition PDFs persist as private versioned documents and require authoriz
     const replayedOfflineEmission: unknown = await replayedOfflineEmissionResponse.json();
     assert.equal(z.object({ replayed: z.boolean() }).parse(replayedOfflineEmission).replayed, true);
     assert.equal(await prisma.renditionEmission.count({ where: { id: offlineEmissionId, renditionId: savedRendition?.id, version: 2 } }), 1);
-    const offlineEmissionPdf = await prisma.renditionEmission.findUnique({ where: { id: offlineEmissionId }, select: { packagePdf: true, snapshot: true } });
-    assert.equal((await PDFDocument.load(offlineEmissionPdf?.packagePdf ?? new Uint8Array())).getPageCount(), 3);
+    const offlineEmissionPdf = await prisma.renditionEmission.findUnique({ where: { id: offlineEmissionId }, select: { snapshot: true } });
+    const offlinePackageFile = await readRenditionEmissionFile(offlineEmissionId, "package");
+    assert.ok(offlinePackageFile);
+    assert.equal((await PDFDocument.load(offlinePackageFile.content)).getPageCount(), 3);
     assert.equal(z.object({ sheet: z.object({ id: z.string() }) }).parse(offlineEmissionPdf?.snapshot).sheet.id, sheetId);
 
     const submissionResponse = await createRenditionSubmissionRoute(

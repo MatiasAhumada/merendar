@@ -54,6 +54,11 @@ export const synchronizationRepository = {
       return previousResponse;
     }
 
+    let preparedOperation = operation;
+    if (handler.prepare) {
+      preparedOperation = await handler.prepare(operation);
+    }
+
     for (let attemptCount = 0; attemptCount < 3; attemptCount += 1) {
       try {
         return await prisma.$transaction(async (transaction) => {
@@ -77,7 +82,7 @@ export const synchronizationRepository = {
             }
           }
 
-          const applied = await handler.apply(transaction, operation);
+          const applied = await handler.apply(transaction, preparedOperation);
 
           if (applied.type === "conflict") {
             let message: string = SYNC_SERVER_MESSAGES.EL_REGISTRO_CAMBIO_EN_OTRO_DISPOSITIVO;

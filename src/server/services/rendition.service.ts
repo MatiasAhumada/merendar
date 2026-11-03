@@ -4,11 +4,21 @@ import { ApiError } from "@/utils/handlers/apiError.handler";
 import { RENDITION_LIMITS } from "@/constants/rendition.constant";
 import { findLatestRenditionEmissionId, findRenditionEmissionFile, findRenditionEmissionSource, recordRenditionSubmission, RenditionSubmissionDocumentLimitError, saveRenditionEmission } from "@/server/repository/rendition-emission.repository";
 import { createRenditionEmissionPdfs } from "@/server/services/rendition-emission-pdf.service";
+import { readDocumentObject } from "@/server/services/document-storage.service";
+import { hydrateRenditionEmissionSource } from "@/server/services/rendition-emission-storage.service";
 import type { z } from "zod";
 import type { renditionEmissionTemplateSchema, renditionSubmissionPayloadSchema } from "@/schemas/rendition.schema";
 
 export async function getRenditionDocument(id: string) {
-  return findRenditionDocument(id);
+  const document = await findRenditionDocument(id);
+  if (!document) {
+    return null;
+  }
+  if (!document.storageKey) {
+    throw new ApiError({ status: 503, message: "El documento todavía no está disponible en Cloudflare R2." });
+  }
+  const content = await readDocumentObject(document.storageKey, document.storageBucket);
+  return { ...document, content };
 }
 
 export async function reviewRenditionDocument(input: {
@@ -41,7 +51,7 @@ export async function createRenditionEmission(input: {
     throw new ApiError({ status: 404, message: RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_RENDICION_SELECCIONADA });
   }
 
-  const documents = await createRenditionEmissionPdfs(source, input.template);
+  const documents = await createRenditionEmissionPdfs(await hydrateRenditionEmissionSource(source), input.template);
   return saveRenditionEmission({ ...documents, renditionId: input.renditionId, userId: input.userId });
 }
 

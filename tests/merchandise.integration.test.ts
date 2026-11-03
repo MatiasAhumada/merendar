@@ -14,6 +14,7 @@ import { merchandiseSynchronizationHandler } from "@/server/services/merchandise
 import { synchronizationService } from "@/server/services/synchronization.service";
 import type { JsonValue } from "@/types/json-value";
 import { merchandisePayloadSchema } from "@/schemas/merchandise.schema";
+import { getMerchandiseDocument } from "@/server/services/merchandise.service";
 
 test("merchandise document policy accepts valid PDFs up to 2 MiB and rejects images or larger files", () => {
   const validPdf = Buffer.alloc(2 * 1024 * 1024, 32);
@@ -159,7 +160,11 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     assert.equal(savedPeriod?.requests[0]?.status, "APROBADA");
     assert.equal(savedPeriod?.requests[0]?.quota?.approvedQuantity.toNumber(), 40);
     assert.equal(savedPeriod?.requests[0]?.remittances[0]?.receivedQuantity.toNumber(), 30);
-    assert.equal(Buffer.from(savedPeriod?.requests[0]?.remittances[0]?.documents[0]?.content ?? new Uint8Array()).toString(), "%PDF-1.7 test document\n%%EOF");
+    const remittanceDocumentId = savedPeriod?.requests[0]?.remittances[0]?.documents[0]?.id;
+    assert.ok(remittanceDocumentId);
+    const remittanceDocument = await getMerchandiseDocument(remittanceDocumentId);
+    assert.ok(remittanceDocument);
+    assert.equal(Buffer.from(remittanceDocument.content).toString(), "%PDF-1.7 test document\n%%EOF");
 
     const supplyPeriodOperation = createOperation(user.id, supplyPeriodId, {
       kind: "period",
@@ -359,8 +364,11 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     const uploadedReplayResponse = await submitMultipartOperation();
     assert.equal(uploadedReplayResponse.status, 200);
     const uploadedDocument = await prisma.merchandiseDocument.findFirstOrThrow({ where: { remittanceId: uploadedRemittanceId } });
-    assert.equal(uploadedDocument.content.byteLength, 924_622);
-    assert.equal(createHash("sha256").update(uploadedDocument.content).digest("hex"), attachmentChecksum);
+    assert.equal(uploadedDocument.storageKey !== null, true);
+    const uploadedContent = await getMerchandiseDocument(uploadedDocument.id);
+    assert.ok(uploadedContent);
+    assert.equal(uploadedContent.content.byteLength, 924_622);
+    assert.equal(createHash("sha256").update(uploadedContent.content).digest("hex"), attachmentChecksum);
     assert.equal(await prisma.merchandiseRemittance.count({ where: { id: uploadedRemittanceId } }), 1);
 
     uploadedRequestId = randomUUID();
@@ -399,8 +407,11 @@ test("merchandise periods, requests, quotas, remittances and private documents p
     assert.equal(uploadedRequestResponse.status, 200);
     assert.equal((await submitMultipartRequestOperation()).status, 200);
     const uploadedRequestDocument = await prisma.merchandiseDocument.findFirstOrThrow({ where: { requestId: uploadedRequestId } });
-    assert.equal(uploadedRequestDocument.content.byteLength, uploadedPdf.byteLength);
-    assert.equal(createHash("sha256").update(uploadedRequestDocument.content).digest("hex"), attachmentChecksum);
+    assert.equal(uploadedRequestDocument.storageKey !== null, true);
+    const uploadedRequestContent = await getMerchandiseDocument(uploadedRequestDocument.id);
+    assert.ok(uploadedRequestContent);
+    assert.equal(uploadedRequestContent.content.byteLength, uploadedPdf.byteLength);
+    assert.equal(createHash("sha256").update(uploadedRequestContent.content).digest("hex"), attachmentChecksum);
     assert.equal(await prisma.merchandiseRequest.count({ where: { id: uploadedRequestId } }), 1);
 
     const corruptedRequestId = randomUUID();

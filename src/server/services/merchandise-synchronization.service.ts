@@ -8,6 +8,8 @@ import type { MerchandiseQuotaItem, Prisma } from "@prisma/client";
 import type { SynchronizationHandler, SubmittedSyncOperation, SyncHandlerResult } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
 import { createMerchandiseRequestPdf } from "@/services/merchandise-request-document-pdf.service";
+import { storeDocumentObject } from "@/server/services/document-storage.service";
+import { prisma } from "@/lib/prisma";
 
 import {
   serializedMerchandiseOperationPayloadSchema,
@@ -83,6 +85,7 @@ function decodeDocument(document: DocumentInput | undefined, attachments: Readon
 
 async function storeRequestDocument(
   transaction: Prisma.TransactionClient,
+  operation: SubmittedSyncOperation,
   payload: Extract<MerchandisePayload, { kind: "request" | "quota" }>,
   userId: string,
   requestId: string,
@@ -94,13 +97,16 @@ async function storeRequestDocument(
     return null;
   }
 
-  return transaction.merchandiseDocument.create({
-    data: { ...document, requestId, uploadedById: userId },
-  });
+  const storedObject = operation.preparedStorageObjects?.get(operation.operationId);
+  if (!storedObject) {
+    throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_ARCHIVO_NO_PARECE_UN_PDF_VALIDO_EL_FORMULARIO_SIGUE_ABIERTO_PARA_CO);
+  }
+  return transaction.merchandiseDocument.create({ data: { originalName: document.originalName, contentType: document.contentType, byteSize: document.byteSize, storageBucket: storedObject.bucket, storageKey: storedObject.objectKey, checksum: storedObject.checksum, requestId, uploadedById: userId } });
 }
 
 async function storeRemittanceDocument(
   transaction: Prisma.TransactionClient,
+  operation: SubmittedSyncOperation,
   payload: Extract<MerchandisePayload, { kind: "remittance" }>,
   userId: string,
   remittanceId: string,
@@ -112,9 +118,11 @@ async function storeRemittanceDocument(
     return null;
   }
 
-  return transaction.merchandiseDocument.create({
-    data: { ...document, remittanceId, uploadedById: userId },
-  });
+  const storedObject = operation.preparedStorageObjects?.get(operation.operationId);
+  if (!storedObject) {
+    throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_ARCHIVO_NO_PARECE_UN_PDF_VALIDO_EL_FORMULARIO_SIGUE_ABIERTO_PARA_CO);
+  }
+  return transaction.merchandiseDocument.create({ data: { originalName: document.originalName, contentType: document.contentType, byteSize: document.byteSize, storageBucket: storedObject.bucket, storageKey: storedObject.objectKey, checksum: storedObject.checksum, remittanceId, uploadedById: userId } });
 }
 
 function conflict(resourceVersion: number, current: JsonObject): SyncHandlerResult {
@@ -190,7 +198,7 @@ async function applyRequest(transaction: Prisma.TransactionClient, operation: Su
       },
     });
   }
-  await storeRequestDocument(transaction, payload, operation.userId, request.id, operation.attachments ?? new Map());
+  await storeRequestDocument(transaction, operation, payload, operation.userId, request.id, operation.attachments ?? new Map());
 
   return { type: "synchronized", resourceVersion: 1, result: { resourceId: request.id, kind: "request" } } as const;
 }
@@ -244,7 +252,7 @@ async function applyQuota(transaction: Prisma.TransactionClient, operation: Subm
     });
   }
   await transaction.merchandiseRequest.update({ where: { id: request.id }, data: { status: "APROBADA" } });
-  await storeRequestDocument(transaction, payload, operation.userId, request.id, operation.attachments ?? new Map());
+  await storeRequestDocument(transaction, operation, payload, operation.userId, request.id, operation.attachments ?? new Map());
 
   return { type: "synchronized", resourceVersion: 1, result: { resourceId: quota.id, kind: "quota" } } as const;
 }
@@ -306,7 +314,7 @@ async function applyRemittance(transaction: Prisma.TransactionClient, operation:
       data: { remittanceId: remittance.id, quotaItemId: quotaItem.id, receivedQuantity: payload.receivedQuantity },
     });
   }
-  await storeRemittanceDocument(transaction, payload, operation.userId, remittance.id, operation.attachments ?? new Map());
+  await storeRemittanceDocument(transaction, operation, payload, operation.userId, remittance.id, operation.attachments ?? new Map());
 
   return { type: "synchronized", resourceVersion: 1, result: { resourceId: remittance.id, kind: "remittance" } } as const;
 }
@@ -553,27 +561,15 @@ async function applyPayload(transaction: Prisma.TransactionClient, operation: Su
     if (previous) {
       version = previous.version + 1;
     }
-    const content = await createMerchandiseRequestPdf({
-      kind: payload.documentKind,
-      template: payload.template,
-      request: {
-        requestNumber: request.requestNumber,
-        requestedAt: request.requestedAt,
-        requestedQuantity: request.requestedQuantity.toNumber(),
-        period: { label: request.period.label, agency: request.period.agency },
-        items: request.items.map((item) => ({ ...item, requestedQuantity: item.requestedQuantity.toNumber() })),
-      },
-    });
-    let fileSuffix = "insumos-merendero";
-    if (payload.documentKind === "MODULES") {
-      fileSuffix = "modulos";
+    const preparedDocument = operation.preparedMerchandiseRequestDocument;
+    if (!preparedDocument || preparedDocument.version !== version || preparedDocument.requestVersion !== request.version) {
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.LA_SOLICITUD_CAMBIO_DESDE_LA_PREPARACION_OFFLINE);
     }
-    const originalName = `borrador-solicitud-${fileSuffix}-${request.requestNumber}-v${version}.pdf`;
     await transaction.merchandiseRequestDocument.create({ data: {
       id: payload.id,
       requestId: request.id,
       kind: payload.documentKind,
-      version,
+      version: preparedDocument.version,
       templateVersion: 1,
       snapshot: {
         template: payload.template,
@@ -585,9 +581,12 @@ async function applyPayload(transaction: Prisma.TransactionClient, operation: Su
           items: request.items.map((item) => ({ productName: item.productName, presentation: item.presentation, unit: item.unit, requestedQuantity: item.requestedQuantity.toNumber() })),
         },
       },
-      originalName,
+      originalName: preparedDocument.originalName,
       contentType: HTTP_CONTENT_TYPES.PDF,
-      content,
+      byteSize: preparedDocument.storedObject.byteSize,
+      storageBucket: preparedDocument.storedObject.bucket,
+      storageKey: preparedDocument.storedObject.objectKey,
+      checksum: preparedDocument.storedObject.checksum,
       issuedById: operation.userId,
     } });
     const presidentName = payload.template.signatories[0]?.name;
@@ -598,7 +597,7 @@ async function applyPayload(transaction: Prisma.TransactionClient, operation: Su
         update: { presidentName, updatedById: operation.userId },
       });
     }
-    return { type: "synchronized", resourceVersion: version, result: { resourceId: payload.id, kind: "request-document" } } as const;
+    return { type: "synchronized", resourceVersion: preparedDocument.version, result: { resourceId: payload.id, kind: "request-document" } } as const;
   }
 
   if (payload.kind === "period") {
@@ -617,6 +616,61 @@ async function applyPayload(transaction: Prisma.TransactionClient, operation: Su
 }
 
 export const merchandiseSynchronizationHandler: SynchronizationHandler = {
+  async prepare(operation) {
+    if (operation.operation !== "create") {
+      return operation;
+    }
+
+    const parsedPayload = merchandisePayloadSchema.safeParse(operation.payload);
+    if (!parsedPayload.success) {
+      return operation;
+    }
+
+    const payload = parsedPayload.data;
+    if (payload.kind === "request-document") {
+      const request = await prisma.merchandiseRequest.findUnique({ where: { id: payload.requestId }, include: { period: true, items: true } });
+      const destinationMatches = request && ((request.period.destination === "FAMILIES" && payload.documentKind === "MODULES") || (request.period.destination === "MERENDERO" && payload.documentKind === "MERENDERO_SUPPLIES"));
+      if (!request || request.status === "CANCELADA" || request.status === "RECHAZADA" || !destinationMatches || await prisma.merchandiseRequestDocument.findUnique({ where: { id: payload.id }, select: { id: true } })) {
+        return operation;
+      }
+      const previous = await prisma.merchandiseRequestDocument.findFirst({ where: { requestId: request.id, kind: payload.documentKind }, orderBy: { version: "desc" }, select: { version: true } });
+      const version = (previous?.version ?? 0) + 1;
+      const content = await createMerchandiseRequestPdf({
+        kind: payload.documentKind,
+        template: payload.template,
+        request: {
+          requestNumber: request.requestNumber,
+          requestedAt: request.requestedAt,
+          requestedQuantity: request.requestedQuantity.toNumber(),
+          period: { label: request.period.label, agency: request.period.agency },
+          items: request.items.map((item) => ({ ...item, requestedQuantity: item.requestedQuantity.toNumber() })),
+        },
+      });
+      let fileSuffix = "insumos-merendero";
+      if (payload.documentKind === "MODULES") {
+        fileSuffix = "modulos";
+      }
+      const originalName = `borrador-solicitud-${fileSuffix}-${request.requestNumber}-v${version}.pdf`;
+      const storedObject = await storeDocumentObject({ category: "request-document", id: payload.id, content, contentType: HTTP_CONTENT_TYPES.PDF });
+      return { ...operation, preparedMerchandiseRequestDocument: { version, requestVersion: request.version, originalName, storedObject } };
+    }
+
+    if (!("document" in payload) || !payload.document) {
+      return operation;
+    }
+    const document = decodeDocument(payload.document, operation.attachments ?? new Map());
+    if (!document) {
+      return operation;
+    }
+    let parentId = payload.id;
+    if (payload.kind === "quota") {
+      parentId = payload.requestId;
+    }
+    const storedObject = await storeDocumentObject({ category: "merchandise", id: parentId, content: document.content, contentType: document.contentType });
+    const preparedStorageObjects = new Map(operation.preparedStorageObjects ?? []);
+    preparedStorageObjects.set(operation.operationId, storedObject);
+    return { ...operation, preparedStorageObjects };
+  },
   async apply(transaction, operation) {
     const parsedPayload = serializedMerchandiseOperationPayloadSchema.safeParse(operation.payload);
 

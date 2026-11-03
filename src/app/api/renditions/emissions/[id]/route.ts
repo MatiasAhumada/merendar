@@ -20,7 +20,7 @@ export async function GET(request: NextRequest, context: RouteContext<"/api/rend
       return NextResponse.json({ error: { message: RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_DOCUMENTO_SOLICITADO } }, { status: 404, headers: PRIVATE_DOCUMENT_RESPONSE_HEADERS });
     }
 
-    return new NextResponse(file.content, {
+    return new NextResponse(Buffer.from(file.content), {
       headers: {
         ...PRIVATE_DOCUMENT_RESPONSE_HEADERS,
         "Content-Type": file.contentType,

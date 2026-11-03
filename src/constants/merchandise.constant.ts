@@ -266,6 +266,7 @@ export const MERCHANDISE_ERROR_MESSAGES = {
   NO_TENES_PERMISO_PARA_REVISAR_RENDICIONES: "No tenés permiso para revisar rendiciones",
   EL_CONTENIDO_NO_ES_UN_PDF_VALIDO_REVISA_QUE_SEA_UN_ARCHIVO_PDF_EXPORTADO_C: "El contenido no es un PDF válido. Revisá que sea un archivo PDF exportado correctamente.",
   LA_CORRECCION_NO_TIENE_UNA_VERSION_BASE_VALIDA: "La corrección no tiene una versión base válida.",
+  LA_SOLICITUD_CAMBIO_DESDE_LA_PREPARACION_OFFLINE: "La solicitud cambió desde la preparación offline. Volvé a sincronizar para preparar una versión actualizada.",
   NO_ENCONTRAMOS_EL_PERIODO_QUE_QUERES_CORREGIR: "No encontramos el período que querés corregir.",
   NO_SE_PUEDE_CORREGIR_UN_PERIODO_ANULADO: "No se puede corregir un período anulado.",
   YA_EXISTE_UN_PERIODO_CON_ESE_NOMBRE_Y_ORGANISMO: "Ya existe un período con ese nombre y organismo.",

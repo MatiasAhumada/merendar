@@ -4,6 +4,7 @@ import { authService } from "@/server/services/auth.service";
 import { requireMerchandiseReadAccess } from "@/server/services/merchandise-access";
 import { getEffectiveCapabilities } from "@/server/services/access-policy.service";
 import { ApiError } from "@/utils/handlers/apiError.handler";
+import { readDocumentObject } from "@/server/services/document-storage.service";
 import { findDistributionEvents } from "@/server/repository/record.repository";
 
 export async function getVisibleMerchandisePeriods(token: string | undefined) {
@@ -65,5 +66,13 @@ export async function getVisibleMerchandisePeriods(token: string | undefined) {
 }
 
 export async function getMerchandiseDocument(id: string) {
-  return merchandiseRepository.findDocument(id);
+  const document = await merchandiseRepository.findDocument(id);
+  if (!document) {
+    return null;
+  }
+  if (!document.storageKey) {
+    throw new ApiError({ status: 503, message: "El documento todavía no está disponible en Cloudflare R2." });
+  }
+  const content = await readDocumentObject(document.storageKey, document.storageBucket);
+  return { ...document, content };
 }

@@ -61,7 +61,7 @@ test("registra un módulo por familia y emite la planilla de la jornada", async 
     await page.getByRole("button", { name: "Emitir planilla de esta jornada" }).click();
     await expect(page.getByText("Planilla local guardada con la referencia de esta jornada. Sigue pendiente de validación del servidor.")).toBeVisible();
     const queuedRecords = await page.evaluate(async (userId) => {
-      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 1);
+      const request = indexedDB.open(`merendar-offline-${encodeURIComponent(userId)}`, 2);
       const database = await new Promise<IDBDatabase>((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -84,6 +84,16 @@ test("registra un módulo por familia y emite la planilla de la jornada", async 
     const sheet = await prisma.beneficiarySheet.findFirst({ where: { distributionEventId: eventId }, select: { id: true, snapshot: true } });
     expect(sheet).toBeTruthy();
     expect(sheet?.snapshot).toMatchObject({ event: { id: eventId }, beneficiaries: [{ familyDeliveryId: expect.any(String), paperSignatureChecked: true, physicalDniChecked: true }] });
+
+    const sheetResponse = await context.request.get(`/api/records/sheets/${sheet?.id}`);
+    expect(sheetResponse.ok()).toBe(true);
+    expect(sheetResponse.headers()["content-type"]).toContain("application/pdf");
+    expect(sheetResponse.headers()["cache-control"]).toContain("no-store");
+    expect((await sheetResponse.body()).subarray(0, 5).toString("ascii")).toBe("%PDF-");
+
+    const storedSheet = await prisma.beneficiarySheet.findUniqueOrThrow({ where: { id: sheet?.id }, select: { storageProvider: true, storageStatus: true, storageBucket: true, storageKey: true, checksum: true } });
+    expect(storedSheet).toMatchObject({ storageProvider: "CLOUDFLARE_R2", storageStatus: "CONFIRMED" });
+    expect(storedSheet.storageKey).toContain(storedSheet.checksum);
   } finally {
     await context.setOffline(false);
     await prisma.renditionDocument.deleteMany({ where: { rendition: { beneficiarySheet: { distributionEventId: eventId } } } });

@@ -1,7 +1,25 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
+import { randomUUID } from "node:crypto";
+import { readDocumentObject, storeDocumentObject } from "@/server/services/document-storage.service";
+import type { StoredDocumentReference } from "@/interfaces/document-storage.interface";
 
-export type RenditionEmissionSource = Prisma.RenditionGetPayload<{
+export interface StoredRenditionEmissionFiles {
+  note: StoredDocumentReference;
+  summary: StoredDocumentReference;
+  packageFile: StoredDocumentReference;
+}
+
+export async function storeRenditionEmissionFiles(id: string, input: { notePdf: Uint8Array; summaryPdf: Uint8Array; packagePdf: Uint8Array }): Promise<StoredRenditionEmissionFiles> {
+  const [note, summary, packageFile] = await Promise.all([
+    storeDocumentObject({ category: "rendition-emission", id: `${id}-note`, content: input.notePdf, contentType: "application/pdf" }),
+    storeDocumentObject({ category: "rendition-emission", id: `${id}-summary`, content: input.summaryPdf, contentType: "application/pdf" }),
+    storeDocumentObject({ category: "rendition-emission", id: `${id}-package`, content: input.packagePdf, contentType: "application/pdf" }),
+  ]);
+  return { note, summary, packageFile };
+}
+
+export type RenditionEmissionSourceRecord = Prisma.RenditionGetPayload<{
   include: {
     period: {
       include: {
@@ -49,6 +67,21 @@ export type RenditionEmissionSource = Prisma.RenditionGetPayload<{
   };
 }>;
 
+type PdfDocument<T> = Omit<T, "content"> & { content: Uint8Array<ArrayBuffer> };
+type EmissionRequest = RenditionEmissionSourceRecord["period"]["requests"][number];
+type EmissionRemittance = EmissionRequest["remittances"][number];
+
+export type RenditionEmissionSource = Omit<RenditionEmissionSourceRecord, "documents" | "period"> & {
+  documents: Array<PdfDocument<RenditionEmissionSourceRecord["documents"][number]>>;
+  period: Omit<RenditionEmissionSourceRecord["period"], "requests"> & {
+    requests: Array<Omit<EmissionRequest, "documents" | "issuedDocuments" | "remittances"> & {
+      documents: Array<PdfDocument<EmissionRequest["documents"][number]>>;
+      issuedDocuments: Array<PdfDocument<EmissionRequest["issuedDocuments"][number]>>;
+      remittances: Array<Omit<EmissionRemittance, "documents"> & { documents: Array<PdfDocument<EmissionRemittance["documents"][number]>> }>;
+    }>;
+  };
+};
+
 export class RenditionSubmissionDocumentLimitError extends Error {
   constructor() {
     super("La rendición alcanzó el máximo de 20 documentos.");
@@ -56,7 +89,7 @@ export class RenditionSubmissionDocumentLimitError extends Error {
   }
 }
 
-export async function findRenditionEmissionSource(renditionId: string, transaction?: Prisma.TransactionClient) {
+export async function findRenditionEmissionSource(renditionId: string, transaction?: Prisma.TransactionClient): Promise<RenditionEmissionSourceRecord | null> {
   const repository = transaction ?? prisma;
   return repository.rendition.findUnique({
     where: { id: renditionId },
@@ -116,6 +149,7 @@ export async function saveRenditionEmissionInTransaction(transaction: Prisma.Tra
   notePdf: Uint8Array;
   summaryPdf: Uint8Array;
   packagePdf: Uint8Array;
+  storedFiles: StoredRenditionEmissionFiles;
 }) {
   const latestEmission = await transaction.renditionEmission.findFirst({
     where: { renditionId: input.renditionId },
@@ -124,17 +158,26 @@ export async function saveRenditionEmissionInTransaction(transaction: Prisma.Tra
   });
   const version = (latestEmission?.version ?? 0) + 1;
 
+  const id = input.id ?? randomUUID();
+  const { note: noteObject, summary: summaryObject, packageFile: packageObject } = input.storedFiles;
   const emissionData = {
+    id,
     renditionId: input.renditionId,
     version,
     snapshot: input.snapshot,
-    notePdf: Buffer.from(input.notePdf),
-    summaryPdf: Buffer.from(input.summaryPdf),
-    packagePdf: Buffer.from(input.packagePdf),
+    noteStorageBucket: noteObject.bucket,
+    noteStorageKey: noteObject.objectKey,
+    noteChecksum: noteObject.checksum,
+    summaryStorageBucket: summaryObject.bucket,
+    summaryStorageKey: summaryObject.objectKey,
+    summaryChecksum: summaryObject.checksum,
+    packageStorageBucket: packageObject.bucket,
+    packageStorageKey: packageObject.objectKey,
+    packageChecksum: packageObject.checksum,
     createdById: input.userId,
   };
   if (input.id) {
-    return transaction.renditionEmission.create({ data: { ...emissionData, id: input.id }, select: { id: true, version: true, createdAt: true } });
+    return transaction.renditionEmission.create({ data: emissionData, select: { id: true, version: true, createdAt: true } });
   }
 
   return transaction.renditionEmission.create({
@@ -152,13 +195,15 @@ export async function saveRenditionEmission(input: {
   summaryPdf: Uint8Array;
   packagePdf: Uint8Array;
 }) {
-  return prisma.$transaction((transaction) => saveRenditionEmissionInTransaction(transaction, input));
+  const id = input.id ?? randomUUID();
+  const storedFiles = await storeRenditionEmissionFiles(id, input);
+  return prisma.$transaction((transaction) => saveRenditionEmissionInTransaction(transaction, { ...input, id, storedFiles }));
 }
 
 export async function findRenditionEmissionFile(id: string, kind: "note" | "summary" | "package") {
   const emission = await prisma.renditionEmission.findUnique({
     where: { id },
-    select: { id: true, version: true, notePdf: true, summaryPdf: true, packagePdf: true },
+    select: { id: true, version: true, noteStorageBucket: true, noteStorageKey: true, summaryStorageBucket: true, summaryStorageKey: true, packageStorageBucket: true, packageStorageKey: true },
   });
 
   if (!emission) {
@@ -166,16 +211,20 @@ export async function findRenditionEmissionFile(id: string, kind: "note" | "summ
   }
 
   let originalName = `expediente-rendicion-v${emission.version}.pdf`;
-  let content = emission.packagePdf;
+  let storageKey = emission.packageStorageKey;
+  let storageBucket = emission.packageStorageBucket;
 
   if (kind === "note") {
     originalName = `nota-rendicion-v${emission.version}.pdf`;
-    content = emission.notePdf;
+    storageKey = emission.noteStorageKey;
+    storageBucket = emission.noteStorageBucket;
   } else if (kind === "summary") {
     originalName = `resumen-rendicion-v${emission.version}.pdf`;
-    content = emission.summaryPdf;
+    storageKey = emission.summaryStorageKey;
+    storageBucket = emission.summaryStorageBucket;
   }
 
+  const content = await readDocumentObject(storageKey, storageBucket);
   return { originalName, contentType: "application/pdf", content };
 }
 
@@ -198,10 +247,17 @@ export async function recordRenditionSubmission(input: {
   notes?: string;
   evidenceDocument?: { id: string; originalName: string; content: Uint8Array };
 }) {
+  let evidenceObject = null;
+  if (input.evidenceDocument) {
+    evidenceObject = await storeDocumentObject({ category: "rendition", id: input.evidenceDocument.id, content: input.evidenceDocument.content, contentType: "application/pdf" });
+  }
   return prisma.$transaction(async (transaction) => {
     let evidenceDocumentId: string | null = null;
 
     if (input.evidenceDocument) {
+      if (!evidenceObject) {
+        throw new Error("No se confirmó el respaldo de presentación en Cloudflare R2.");
+      }
       const existingDocuments = await transaction.renditionDocument.findMany({ where: { renditionId: input.renditionId }, select: { documentType: true, version: true } });
       if (existingDocuments.length >= 20) {
         throw new RenditionSubmissionDocumentLimitError();
@@ -217,7 +273,9 @@ export async function recordRenditionSubmission(input: {
           originalName: input.evidenceDocument.originalName,
           contentType: "application/pdf",
           byteSize: input.evidenceDocument.content.byteLength,
-          content: Buffer.from(input.evidenceDocument.content),
+          storageBucket: evidenceObject.bucket,
+          storageKey: evidenceObject.objectKey,
+          checksum: evidenceObject.checksum,
           uploadedById: input.userId,
         },
         select: { id: true },

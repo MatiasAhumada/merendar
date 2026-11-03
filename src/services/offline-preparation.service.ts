@@ -2,7 +2,7 @@ import type { z } from "zod";
 
 
 import { HTTP_CONTENT_TYPES, HTTP_REQUEST, HTTP_RESPONSE_TYPES, HTTP_CACHE_CONTROL, HTTP_HEADERS, NO_STORE_REQUEST_HEADERS } from "@/constants/http.constant";
-import { OFFLINE_PREPARATION, OFFLINE_PREPARATION_MESSAGES, type OfflinePreparedRoute } from "@/constants/offline.constant";
+import { OFFLINE_PREPARATION, OFFLINE_PREPARATION_MESSAGES, OFFLINE_SERVICE_WORKER, type OfflinePreparedRoute } from "@/constants/offline.constant";
 import { API_ROUTES, ROUTES } from "@/constants/routes.constant";
 import { dashboardSummaryResponseSchema } from "@/schemas/dashboard.schema";
 import { beneficiarySheetCollectionSchema, documentTypeSchema, jsonRecordSchema, jsonValueSchema, legacyOfflinePreparationSchema, nonEmptyStringSchema, offlineAccountSchema, offlinePreparationSchema, offlinePreparedDocumentSchema, offlinePreparedDocumentsSchema, previousOfflinePreparationSchema } from "@/schemas/offline.schema";
@@ -191,6 +191,7 @@ export async function clearActiveOfflineAccount(userId: string) {
 
 async function cachePublicOfflineShellAssets() {
   const cache = await caches.open(OFFLINE_PREPARATION.PUBLIC_CACHE_NAME);
+  const activeServiceWorkerCache = await caches.open(OFFLINE_SERVICE_WORKER.CACHE_NAME);
   const assetsToCache = new Set<string>();
 
   for (const route of OFFLINE_PREPARATION.ROUTES) {
@@ -208,12 +209,14 @@ async function cachePublicOfflineShellAssets() {
     }
 
     const shellHtml = await response.text();
-    await cache.put(route, new Response(shellHtml, {
+    const cachedShell = new Response(shellHtml, {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         [HTTP_HEADERS.CACHE_CONTROL]: HTTP_CACHE_CONTROL.PUBLIC_REVALIDATE,
       },
-    }));
+    });
+    await cache.put(route, cachedShell.clone());
+    await activeServiceWorkerCache.put(route, cachedShell);
 
     const routeAssets = [...shellHtml.matchAll(/(?:src|href)=["']([^"']+)["']/g)]
       .map((match) => match[1])

@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { issueMerchandiseRequestDocument } from "@/server/services/merchandise-request-document.service";
+import { getMerchandiseDocument } from "@/server/services/merchandise.service";
 import type { SubmittedSyncOperation } from "@/interfaces/synchronization.interface";
 import { merchandiseSynchronizationHandler } from "@/server/services/merchandise-synchronization.service";
 import { synchronizationService } from "@/server/services/synchronization.service";
@@ -36,7 +37,9 @@ test("request document emissions retain their source snapshot and are idempotent
     const snapshot = saved.snapshot as { template: { associationName: string }; request: { requestNumber: string; period: { label: string }; items: Array<{ productName: string; requestedQuantity: number }> } };
     assert.equal(first.version, 1);
     assert.equal(replay.version, 1);
-    assert.match(Buffer.from(saved.content).toString("ascii", 0, 8), /^%PDF-/);
+    const downloaded = await getMerchandiseDocument(saved.id);
+    assert.ok(downloaded);
+    assert.match(Buffer.from(downloaded.content).toString("ascii", 0, 8), /^%PDF-/);
     assert.equal(snapshot.template.associationName, "Asociación QA editable");
     assert.equal(snapshot.request.requestNumber, request.requestNumber);
     assert.equal(snapshot.request.period.label, period.label);

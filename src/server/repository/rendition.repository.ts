@@ -5,7 +5,7 @@ export type RenditionReviewStatus = "REVISADA" | "OBSERVADA";
 export async function findRenditionDocument(id: string) {
   return prisma.renditionDocument.findUnique({
     where: { id },
-    select: { originalName: true, contentType: true, content: true },
+    select: { originalName: true, contentType: true, storageBucket: true, storageKey: true },
   });
 }
 
