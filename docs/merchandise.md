@@ -2,6 +2,8 @@
 
 El módulo `/mercaderia` persiste los ciclos de solicitudes de módulos alimentarios, cupos aprobados, remitos de recepción y rendiciones vinculadas a versiones emitidas de planillas de beneficiarios. La revisión de una rendición es manual; no deriva stock ni métricas de distribución ni declara una presentación oficial.
 
+La interfaz organiza el trabajo en pestañas accesibles para `#periodos`, `#cupos`, `#remitos` y `#conciliacion`; cuando la cuenta puede leer rendiciones agrega `#rendiciones`. La pestaña activa se refleja en el hash sin recargar la ruta y admite enlaces directos, atrás/adelante y teclado. La navegación no altera la cola offline: las operaciones pendientes permanecen visibles y se sincronizan al recuperar conexión.
+
 ## Relaciones y reglas
 
 - Un `MerchandisePeriod` agrupa solicitudes de un ciclo y organismo. La combinación de nombre y organismo es única.

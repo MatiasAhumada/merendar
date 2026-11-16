@@ -16,6 +16,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { enqueueOfflineOperation, listOfflineOperations, resolveOfflineConflict, synchronizeOfflineQueue, updateOfflineOperationPayload } from "@/services/offline-queue.service";
 import { RenditionWorkspace } from "@/components/merchandise/RenditionWorkspace";
@@ -25,7 +26,7 @@ import { createMerchandiseReconciliationPdf } from "@/services/merchandise-recon
 import { duplicateRemittanceConflictSchema, merchandiseCancellationPayloadSchema, merchandiseOperationPayloadSchema, merchandisePayloadSchema, merchandiseUpdatePayloadSchema, receiptLimitConflictSchema } from "@/schemas/merchandise.schema";
 import type { MerchandiseCancellationPayload, MerchandiseOperationPayload, MerchandisePayload, MerchandiseUpdatePayload } from "@/types/schema-contracts";
 import { jsonValueSchema } from "@/schemas/offline.schema";
-import { RENDITION_LIMITS } from "@/constants/rendition.constant";
+import { RENDITION_LIMITS, RENDITION_UI_TEXT } from "@/constants/rendition.constant";
 import { getMerchandiseCollection } from "@/services/client/merchandise-data.service";
 import { getMerchandiseRequestDocumentProfile, saveMerchandiseRequestDocumentProfile } from "@/services/client/merchandise-request-document-profile.service";
 import { MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS } from "@/constants/merchandise.constant";
@@ -85,6 +86,16 @@ interface MerchandiseWorkspaceProps {
 interface PendingRecord {
   operation: OfflineOperation;
   payload: MerchandiseOperationPayload;
+}
+
+type MerchandiseSectionId = "periodos" | "cupos" | "remitos" | "conciliacion" | "rendiciones";
+
+function defaultMerchandiseSection(canReadMerchandise: boolean): MerchandiseSectionId {
+  if (canReadMerchandise) {
+    return "periodos";
+  }
+
+  return "conciliacion";
 }
 
 function formatDate(date: string) {
@@ -639,6 +650,22 @@ function SaveSheet({
 export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchandise, canWriteMerchandise, canReadRenditions, canWriteRenditions, canReviewRenditions, initialPeriods = [], preparedDocuments = [] }: MerchandiseWorkspaceProps) {
   const isOnline = useNetworkStatus();
   const offlineMode = !isOnline;
+  const availableSections = useMemo(() => {
+    const sections: MerchandiseSectionId[] = [];
+
+    if (canReadMerchandise) {
+      sections.push("periodos", "cupos", "remitos");
+    }
+    if (canReadMerchandise || canReadRenditions) {
+      sections.push("conciliacion");
+    }
+    if (canReadRenditions) {
+      sections.push("rendiciones");
+    }
+
+    return sections;
+  }, [canReadMerchandise, canReadRenditions]);
+  const [activeSection, setActiveSection] = useState<MerchandiseSectionId>(defaultMerchandiseSection(canReadMerchandise));
   const [periods, setPeriods] = useState<MerchandisePeriodRecord[]>(initialPeriods);
   const [reportCapturedAt, setReportCapturedAt] = useState<string | null>(null);
   const [operations, setOperations] = useState<OfflineOperation[]>([]);
@@ -648,6 +675,44 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
   const [isSyncing, setIsSyncing] = useState(false);
   const [presidentName, setPresidentName] = useState<string>(MERCHANDISE_REQUEST_DOCUMENT_DEFAULTS.PRESIDENT_NAME);
   const synchronizingRef = useRef(false);
+
+  useEffect(() => {
+    function synchronizeSectionFromHash() {
+      const requestedSection = availableSections.find((section) => section === window.location.hash.slice(1));
+      const nextSection = requestedSection ?? availableSections[0];
+
+      if (!nextSection) {
+        return;
+      }
+
+      setActiveSection(nextSection);
+      if (window.location.hash && window.location.hash !== `#${nextSection}`) {
+        window.history.replaceState(window.history.state, "", `#${nextSection}`);
+      }
+    }
+
+    synchronizeSectionFromHash();
+    window.addEventListener("popstate", synchronizeSectionFromHash);
+    window.addEventListener("hashchange", synchronizeSectionFromHash);
+
+    return () => {
+      window.removeEventListener("popstate", synchronizeSectionFromHash);
+      window.removeEventListener("hashchange", synchronizeSectionFromHash);
+    };
+  }, [availableSections]);
+
+  function selectSection(value: string) {
+    const section = availableSections.find((availableSection) => availableSection === value);
+
+    if (!section) {
+      return;
+    }
+
+    setActiveSection(section);
+    if (window.location.hash !== `#${section}`) {
+      window.history.pushState(window.history.state, "", `#${section}`);
+    }
+  }
 
   const loadMerchandise = useCallback(async (forceRefresh = false) => {
     if (offlineMode && !forceRefresh) {
@@ -987,16 +1052,19 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
         </Alert>
       ) : null}
 
-      {canReadMerchandise || canReadRenditions ? <nav aria-label={MERCHANDISE_UI_TEXT.SECCIONES_DE_MERCADERIA} className={`grid gap-1 rounded-2xl bg-secondary p-1 ${canReadMerchandise ? "grid-cols-4" : "grid-cols-1"}`}>
-        {canReadMerchandise ? <>
-          <Button asChild variant="soft" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#periodos"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.PERIODOS}</a></Button>
-          <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#cupos"><HugeiconsIcon icon={PackageIcon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.CUPOS}</a></Button>
-          <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#remitos"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.REMITOS}</a></Button>
-        </> : null}
-        <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#conciliacion">Conciliación</a></Button>
-      </nav> : null}
+      {availableSections.length ? <Tabs value={activeSection} onValueChange={selectSection} className="w-full gap-4">
+        <TabsList aria-label={MERCHANDISE_UI_TEXT.SECCIONES_DE_MERCADERIA} className="grid w-full grid-cols-2 gap-1 rounded-2xl p-1 group-data-horizontal/tabs:h-auto sm:grid-cols-5">
+          {canReadMerchandise ? <>
+            <TabsTrigger value="periodos" className="h-auto min-h-10 min-w-0 whitespace-normal px-2 text-xs sm:text-sm"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.PERIODOS}</TabsTrigger>
+            <TabsTrigger value="cupos" className="h-auto min-h-10 min-w-0 whitespace-normal px-2 text-xs sm:text-sm"><HugeiconsIcon icon={PackageIcon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.CUPOS}</TabsTrigger>
+            <TabsTrigger value="remitos" className="h-auto min-h-10 min-w-0 whitespace-normal px-2 text-xs sm:text-sm"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.REMITOS}</TabsTrigger>
+          </> : null}
+          {canReadMerchandise || canReadRenditions ? <TabsTrigger value="conciliacion" className="h-auto min-h-10 min-w-0 whitespace-normal px-2 text-xs sm:text-sm">{MERCHANDISE_UI_TEXT.CONCILIACION}</TabsTrigger> : null}
+          {canReadRenditions ? <TabsTrigger value="rendiciones" className="h-auto min-h-10 min-w-0 whitespace-normal px-2 text-xs sm:text-sm">{RENDITION_UI_TEXT.RENDICIONES}</TabsTrigger> : null}
+        </TabsList>
 
       {canReadMerchandise ? <>
+      <TabsContent value="periodos" forceMount className="outline-none data-[state=inactive]:hidden">
       <section id="periodos" aria-labelledby="periods-title" className="scroll-mt-28 space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-2"><div><h2 id="periods-title" className="font-display text-xl font-semibold">{MERCHANDISE_UI_TEXT.PERIODOS_Y_SOLICITUDES}</h2><p className="text-sm text-muted-foreground">{MERCHANDISE_UI_TEXT.CADA_PEDIDO_CONSERVA_SU_ORGANISMO_FECHA_Y_CANTIDAD_SOLICITADA}</p></div><Badge variant="secondary">{periodCountLabel}</Badge></div>
         {loading ? <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">{MERCHANDISE_UI_TEXT.CARGANDO_SOLICITUDES_Y_REMITOS}</CardContent></Card> : null}
@@ -1035,19 +1103,25 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
           })}
         </div>
       </section>
+      </TabsContent>
 
+      <TabsContent value="cupos" forceMount className="outline-none data-[state=inactive]:hidden">
       <section id="cupos" aria-labelledby="quotas-title" className="scroll-mt-28 space-y-3">
         <div><h2 id="quotas-title" className="font-display text-xl font-semibold">{MERCHANDISE_UI_TEXT.CUPOS}</h2><p className="text-sm text-muted-foreground">{MERCHANDISE_UI_TEXT.CADA_CUPO_SE_REGISTRA_CONTRA_SU_SOLICITUD_LOS_NUMEROS_DE_EJEMPLO_YA_NO_S}</p></div>
         <Card variant="muted"><CardContent className="flex items-start gap-3 py-4"><HugeiconsIcon icon={PackageIcon} strokeWidth={1.8} className="mt-0.5 size-5 shrink-0 text-primary" /><p className="text-sm text-muted-foreground">{MERCHANDISE_UI_TEXT.LOS_CUPOS_PENDIENTES_SE_IDENTIFICAN_DENTRO_DE_CADA_SOLICITUD_LA_SUMA_DE}</p></CardContent></Card>
       </section>
+      </TabsContent>
 
+      <TabsContent value="remitos" forceMount className="outline-none data-[state=inactive]:hidden">
       <section id="remitos" aria-labelledby="remittances-title" className="scroll-mt-28 space-y-3">
         <div><h2 id="remittances-title" className="font-display text-xl font-semibold">{MERCHANDISE_UI_TEXT.REMITOS_Y_RECEPCION}</h2><p className="text-sm text-muted-foreground">{MERCHANDISE_UI_TEXT.LOS_COMPROBANTES_SE_DESCARGAN_MEDIANTE_UNA_RUTA_PRIVADA_QUE_VUELVE_A_VER}</p></div>
         {!visiblePeriods.some((period) => period.requests.some((request) => request.remittances.length)) ? <Card variant="muted"><CardContent className="flex items-center gap-3 py-5"><HugeiconsIcon icon={TruckIcon} strokeWidth={1.8} className="size-6 text-primary" /><p className="text-sm text-muted-foreground">{MERCHANDISE_UI_TEXT.LOS_REMITOS_RECIBIDOS_APARECERAN_VINCULADOS_A_SU_SOLICITUD_Y_CUPO_APROBA}</p></CardContent></Card> : null}
-      </section></> : null}
+      </section>
+      </TabsContent></> : null}
 
-      {canReadMerchandise || canReadRenditions ? <div id="conciliacion" className="scroll-mt-28"><CycleReconciliationReport periods={visiblePeriods} offlineMode={offlineMode} capturedAt={reportCapturedAt} pendingOperations={canReadMerchandise ? pendingOperations : []} /></div> : null}
-      {canReadRenditions ? <RenditionWorkspace periods={visiblePeriods} userId={userId} sessionExpiresAt={sessionExpiresAt} onRefresh={refreshServerData} canWrite={canWriteRenditions} canReview={canReviewRenditions} canCreatePeriods={canReadMerchandise && canWriteMerchandise} periodStatus={periodStatus} offlineMode={offlineMode} preparedDocuments={preparedDocuments} /> : null}
+      {canReadMerchandise || canReadRenditions ? <TabsContent value="conciliacion" forceMount className="outline-none data-[state=inactive]:hidden"><div id="conciliacion" className="scroll-mt-28"><CycleReconciliationReport periods={visiblePeriods} offlineMode={offlineMode} capturedAt={reportCapturedAt} pendingOperations={canReadMerchandise ? pendingOperations : []} /></div></TabsContent> : null}
+      {canReadRenditions ? <TabsContent value="rendiciones" forceMount className="outline-none data-[state=inactive]:hidden"><RenditionWorkspace periods={visiblePeriods} userId={userId} sessionExpiresAt={sessionExpiresAt} onRefresh={refreshServerData} canWrite={canWriteRenditions} canReview={canReviewRenditions} canCreatePeriods={canReadMerchandise && canWriteMerchandise} periodStatus={periodStatus} offlineMode={offlineMode} preparedDocuments={preparedDocuments} /></TabsContent> : null}
+      </Tabs> : null}
     </div>
   );
 }

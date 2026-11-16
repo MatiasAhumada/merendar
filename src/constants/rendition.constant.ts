@@ -26,6 +26,7 @@ export const RENDITION_VALIDATION_MESSAGES = {
 } as const;
 
 export const RENDITION_UI_TEXT = {
+  RENDICIONES: "Rendiciones",
   RENDICION_DOCUMENTAL: "Rendición documental",
   EMITIR_NOTA_Y_EXPEDIENTE: "Emitir nota y expediente",
   FIRMANTE: "Firmante",

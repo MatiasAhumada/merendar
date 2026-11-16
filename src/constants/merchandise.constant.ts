@@ -72,6 +72,8 @@ export const MERCHANDISE_UI_TEXT = {
   PERIODOS: "Períodos",
   CUPOS: "Cupos",
   REMITOS: "Remitos",
+  CONCILIACION: "Conciliación",
+  RENDICIONES: "Rendiciones",
   PERIODOS_Y_SOLICITUDES: "Períodos y solicitudes",
   CADA_PEDIDO_CONSERVA_SU_ORGANISMO_FECHA_Y_CANTIDAD_SOLICITADA: "Cada pedido conserva su organismo, fecha y cantidad solicitada.",
   CARGANDO_SOLICITUDES_Y_REMITOS: "Cargando solicitudes y remitos…",
