@@ -989,7 +989,7 @@ export function MerchandiseWorkspace({ userId, sessionExpiresAt, canReadMerchand
 
       {canReadMerchandise || canReadRenditions ? <nav aria-label={MERCHANDISE_UI_TEXT.SECCIONES_DE_MERCADERIA} className={`grid gap-1 rounded-2xl bg-secondary p-1 ${canReadMerchandise ? "grid-cols-4" : "grid-cols-1"}`}>
         {canReadMerchandise ? <>
-          <Button asChild variant="inverse" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#periodos"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.PERIODOS}</a></Button>
+          <Button asChild variant="soft" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#periodos"><HugeiconsIcon icon={Calendar03Icon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.PERIODOS}</a></Button>
           <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#cupos"><HugeiconsIcon icon={PackageIcon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.CUPOS}</a></Button>
           <Button asChild variant="ghost" size="sm" className="min-w-0 px-1 text-xs sm:text-sm"><a href="#remitos"><HugeiconsIcon icon={ReceiptTextIcon} strokeWidth={1.8} className="hidden sm:block" />{MERCHANDISE_UI_TEXT.REMITOS}</a></Button>
         </> : null}

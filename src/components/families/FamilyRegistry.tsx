@@ -1131,7 +1131,7 @@ export function FamilyRegistry({ initialFamilies, userId, sessionExpiresAt, canW
                     <div><p className="font-semibold uppercase tracking-wide text-muted-foreground">{FAMILY_UI_TEXT.PERSONA_REFERENTE_2}</p><p className="mt-1 font-medium">{referencePerson ? `${referencePerson.firstName} ${referencePerson.lastName}` : FAMILY_UI_TEXT.SIN_INFORMAR}</p></div>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    {family.contactPhone ? <Button variant="soft" size="sm" asChild><a href={`tel:${family.contactPhone.replace(/[^\d+]/g, "")}`}><HugeiconsIcon icon={Call02Icon} strokeWidth={1.8} data-icon="inline-start" />{family.contactPhone}</a></Button> : <span className="text-xs text-muted-foreground">{FAMILY_UI_TEXT.SIN_TELEFONO_DE_CONTACTO}</span>}
+                    {family.contactPhone ? <Button variant="outline" size="sm" asChild><a href={`tel:${family.contactPhone.replace(/[^\d+]/g, "")}`}><HugeiconsIcon icon={Call02Icon} strokeWidth={1.8} data-icon="inline-start" />{family.contactPhone}</a></Button> : <span className="text-xs text-muted-foreground">{FAMILY_UI_TEXT.SIN_TELEFONO_DE_CONTACTO}</span>}
                     {operationToEdit ? <Button variant="outline" size="sm" onClick={openOfflineDraftEditor}>{FAMILY_UI_TEXT.CORREGIR_BORRADOR}</Button> : null}
                     <Button size="sm" onClick={() => setSelectedFamily(family)}>{FAMILY_UI_TEXT.VER_FICHA_FAMILIAR}<HugeiconsIcon icon={ArrowRight01Icon} strokeWidth={1.8} data-icon="inline-end" /></Button>
                   </div>

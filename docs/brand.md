@@ -25,6 +25,8 @@ Los wordmarks e isotipos tienen canal alfa. Los iconos de instalación usan un f
 
 El sol amarillo y la casa naranja sostienen a tres personas de colores distintos que comparten un corazón rojo; unas manos color durazno las acompañan. La paleta de interfaz usa naranja `#C9630B`, dorado `#F4A900`, rojo, azul, fucsia y verde, con fondos crema cálidos y marrón para texto y superficies oscuras. La interfaz usa la fuente Geist local. Mantener contraste de texto y foco mediante los tokens Tailwind/shadcn definidos en `src/app/globals.css`.
 
+Los botones comparten sus dimensiones y estados en `src/components/ui/button.tsx`: `default` identifica acciones principales, `outline` las de apoyo, `destructive` las bajas y anulaciones, y `ghost` las acciones terciarias. La variante destructiva usa los tokens `--destructive` y `--destructive-foreground` en ambas paletas. Las pestañas reutilizan el foco visible y la selección accesible de la primitive en `src/components/ui/tabs.tsx`.
+
 Usar el wordmark completo en superficies de marca y el isotipo cuando el espacio sea reducido. Mantener espacio libre alrededor del logo; no estirarlo ni reconstruirlo con filtros CSS.
 
 ## Integración PWA para COD-1423
