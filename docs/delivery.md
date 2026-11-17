@@ -10,6 +10,10 @@ La planilla se genera con un conjunto seleccionado del padrón, sin requerir una
 
 Las firmas son manuscritas en el papel. La app no captura, valida ni guarda trazos biométricos. COD-1429 puede asociar la evidencia escaneada a la referencia de la planilla emitida.
 
+## Preparación de jornadas
+
+En `/entrega`, el borrador de una jornada permite agregar y quitar asignaciones de familias o productos antes de guardarlo. Quitar una fila modifica únicamente el estado local del formulario: los totales y la disponibilidad se recalculan, y el payload enviado al sincronizar contiene solo las filas restantes. No se permite guardar una preparación vacía; las acciones de quitar quedan deshabilitadas mientras se guarda. La prueba de regresión E2E está en `tests/e2e/distribution-preparation-removal.spec.ts`.
+
 ## Rendición documental
 
 Cada planilla emitida puede tener una rendición asociada por su versión inmutable. Los PDF de planillas firmadas, remitos y respaldos se guardan como objetos privados en Cloudflare R2. `RenditionDocument` conserva en PostgreSQL proveedor, bucket, clave, estado, nombre, MIME, tamaño, checksum, versión, relaciones y autoría. La carga admite hasta cinco archivos PDF por envío, 2 MiB por archivo, 8 MiB por envío y veinte documentos por rendición; estos límites están centralizados en `src/constants/rendition.constant.ts`. La API verifica extensión, MIME declarado, firma `%PDF-` y marcador final `%%EOF` antes de persistir la referencia. IndexedDB mantiene las cargas pendientes y la copia preparada para trabajo offline.
