@@ -71,22 +71,26 @@ export interface MerchandisePeriodRecord {
   agency: string;
   destination: MerchandiseDestination;
   status: "VIGENTE" | "ANULADO";
+  cancelledAt: string | null;
+  cancelledBy: { id: string; name: string } | null;
+  cancellationReason: string | null;
   reportDetails: {
     authorized: boolean;
     events: Array<{
       id: string;
+      status: "ABIERTA" | "CERRADA";
       scheduledAt: string;
       location: string;
       responsibleNames: string;
       allocations: Array<{ familyId: string; familyName: string; remittanceNumber: string; moduleQuantity: number }>;
-      familyDeliveries: Array<{ familyId: string; familyName: string; moduleQuantity: number; participants: string[] }>;
+      familyDeliveries: Array<{ familyId: string; familyName: string; moduleQuantity: number; participants: Array<{ name: string; paperSignatureChecked: boolean; physicalDniChecked: boolean }> }>;
       supplyAllocations: Array<{ productName: string; presentation: string; unit: string; remittanceNumber: string; quantity: number }>;
     }>;
   };
   startsAt: string;
   endsAt: string;
   requests: MerchandiseRequestRecord[];
-  beneficiarySheets: Array<{ id: string; version: number; createdAt: string; beneficiaryCount: number }>;
+  beneficiarySheets: Array<{ id: string; distributionEventId?: string | null; version: number; createdAt: string; beneficiaryCount: number }>;
   renditions: RenditionRecord[];
   createdAt: string;
   updatedAt: string;

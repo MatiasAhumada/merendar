@@ -16,7 +16,7 @@ import { HTTP_CONTENT_TYPES, HTTP_RESPONSE_TYPES, NO_STORE_REQUEST_HEADERS } fro
 import { API_ROUTES } from "@/constants/routes.constant";
 import { beneficiarySheetDraftSchema, beneficiarySheetResponseSchema, familyDeliveryPayloadSchema } from "@/schemas/record.schema";
 import { jsonValueSchema } from "@/schemas/offline.schema";
-import { enqueueOfflineOperation, listOfflineOperations, synchronizeOfflineQueue } from "@/services/offline-queue.service";
+import { enqueueOfflineOperation, listOfflineOperations, retryOfflineConflictOperation, synchronizeOfflineQueue } from "@/services/offline-queue.service";
 import { createLocalBeneficiarySheetPdf } from "@/services/local-beneficiary-sheet.service";
 import { removeOfflinePreparedDocument, saveOfflinePreparedDocument, type OfflinePreparedDocument } from "@/services/offline-preparation.service";
 import { getClientErrorMessage } from "@/utils/handlers/clientHandler";
@@ -64,6 +64,8 @@ export function FamilyDeliveryPanel({ data, periodId, userId, sessionExpiresAt, 
   const [error, setError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isIssuingSheet, setIsIssuingSheet] = useState(false);
+  const [retryingOperationId, setRetryingOperationId] = useState("");
+  const [updatingParticipantId, setUpdatingParticipantId] = useState("");
 
   const selectedEvent = events.find((event) => event.id === eventId);
   const selectedFamily = data.families.find((family) => family.id === familyId);
@@ -81,9 +83,12 @@ export function FamilyDeliveryPanel({ data, periodId, userId, sessionExpiresAt, 
 
     return [{
       id: parsedDelivery.data.id,
+      operationId: operation.operationId,
       familyId: family.id,
       moduleQuantity: 1,
       familyName: family.name,
+      operationStatus: operation.status,
+      operationMessage: operation.message,
       participants: parsedDelivery.data.participants.flatMap((participant) => {
         const member = family.members.find((entry) => entry.id === participant.familyMemberId);
         if (!member) {
@@ -104,24 +109,29 @@ export function FamilyDeliveryPanel({ data, periodId, userId, sessionExpiresAt, 
   const eventDeliveries = [...confirmedDeliveries, ...pendingDeliveries];
   const allocatedFamilyIds = new Set(selectedEvent?.allocations.map((allocation) => allocation.familyId) ?? []);
   const deliveredFamilyIds = new Set(eventDeliveries.map((delivery) => delivery.familyId));
-  const availableFamilies = data.families.filter((family) => allocatedFamilyIds.has(family.id) && !deliveredFamilyIds.has(family.id));
+  const availableFamilies = data.families.filter((family) => selectedEvent?.status === "ABIERTA" && allocatedFamilyIds.has(family.id) && !deliveredFamilyIds.has(family.id));
   const familyMembers = selectedFamily?.members ?? [];
   const period = data.periods.find((entry) => entry.id === periodId);
 
   useEffect(() => {
     let cancelled = false;
-    listOfflineOperations(userId).then((storedOperations) => {
-      if (!cancelled) {
-        setOperations(storedOperations);
-      }
-    }).catch(() => {
-      if (!cancelled) {
-        setError(DELIVERY_ERROR_MESSAGES.NO_SE_PUDIERON_LEER_LOS_CAMBIOS_Y_DOCUMENTOS_GUARDADOS_EN_ESTE_DISPOSITIVO);
-      }
-    });
+    const refreshStoredOperations = () => {
+      void listOfflineOperations(userId).then((storedOperations) => {
+        if (!cancelled) {
+          setOperations(storedOperations);
+        }
+      }).catch(() => {
+        if (!cancelled) {
+          setError(DELIVERY_ERROR_MESSAGES.NO_SE_PUDIERON_LEER_LOS_CAMBIOS_Y_DOCUMENTOS_GUARDADOS_EN_ESTE_DISPOSITIVO);
+        }
+      });
+    };
+    refreshStoredOperations();
+    window.addEventListener("offline-queue-change", refreshStoredOperations);
 
     return () => {
       cancelled = true;
+      window.removeEventListener("offline-queue-change", refreshStoredOperations);
     };
   }, [userId]);
 
@@ -134,6 +144,47 @@ export function FamilyDeliveryPanel({ data, periodId, userId, sessionExpiresAt, 
 
   async function refreshOperations() {
     setOperations(await listOfflineOperations(userId));
+  }
+
+  async function retryClosedEventDelivery(operationId: string) {
+    setRetryingOperationId(operationId);
+    setError("");
+    setNotice("");
+    try {
+      await retryOfflineConflictOperation(userId, operationId);
+      await refreshOperations();
+      await onRefresh();
+      const retriedOperation = (await listOfflineOperations(userId)).find((operation) => operation.operationId === operationId);
+      if (retriedOperation?.status === "synced") {
+        setNotice("El retiro se sincronizó al reabrir la jornada.");
+      } else {
+        setError(retriedOperation?.message ?? "No se confirmó el retiro. Revisá el conflicto antes de volver a intentarlo.");
+      }
+    } catch (retryError) {
+      setError(getClientErrorMessage(retryError, "No se pudo reintentar el retiro en conflicto."));
+      await refreshOperations();
+    } finally {
+      setRetryingOperationId("");
+    }
+  }
+
+  async function updateSavedParticipantChecks(participant: { id: string; paperSignatureChecked: boolean; physicalDniChecked: boolean }, key: "paperSignatureChecked" | "physicalDniChecked", checked: boolean | "indeterminate") {
+    if (checked === "indeterminate" || !isOnline || !canWrite) {
+      return;
+    }
+    const updatedChecks = { paperSignatureChecked: participant.paperSignatureChecked, physicalDniChecked: participant.physicalDniChecked, [key]: checked };
+    setUpdatingParticipantId(participant.id);
+    setError("");
+    setNotice("");
+    try {
+      await clientAxios.patch(API_ROUTES.RECORD_PARTICIPANT(participant.id), updatedChecks);
+      await onRefresh();
+      setNotice("Las comprobaciones del participante se actualizaron.");
+    } catch (updateError) {
+      setError(getClientErrorMessage(updateError, "No se pudieron actualizar las comprobaciones del participante."));
+    } finally {
+      setUpdatingParticipantId("");
+    }
   }
 
   function updateParticipant(familyMemberId: string, checked: boolean | "indeterminate") {
@@ -309,13 +360,14 @@ export function FamilyDeliveryPanel({ data, periodId, userId, sessionExpiresAt, 
             <FieldLabel htmlFor="family-delivery-event">{DELIVERY_UI_TEXT.EVENT}</FieldLabel>
             <Select value={eventId} onValueChange={(value) => { setEventId(value); setFamilyId(""); setParticipants([]); }} disabled={!events.length}>
               <SelectTrigger id="family-delivery-event"><SelectValue placeholder="Seleccionar jornada" /></SelectTrigger>
-              <SelectContent>{events.map((event) => <SelectItem key={event.id} value={event.id}>{event.scheduledAt} · {event.location}</SelectItem>)}</SelectContent>
+              <SelectContent>{events.map((event) => <SelectItem key={event.id} value={event.id}>{event.scheduledAt} · {event.location} · {event.status === "CERRADA" ? "Cerrada" : "Abierta"}</SelectItem>)}</SelectContent>
             </Select>
           </Field>
-          <div className="flex items-end sm:col-span-2"><Badge variant="outline" className="min-h-10 w-fit">{DELIVERY_UI_TEXT.FAMILY_DELIVERED_COUNT(new Set(eventDeliveries.map((delivery) => delivery.familyId)).size, deliveredModules)}</Badge></div>
+          <div className="flex items-end gap-2 sm:col-span-2">{selectedEvent ? <Badge variant={selectedEvent.status === "CERRADA" ? "secondary" : "outline"} className="min-h-10 w-fit">{selectedEvent.status === "CERRADA" ? "Jornada cerrada" : "Jornada abierta"}</Badge> : null}<Badge variant="outline" className="min-h-10 w-fit">{DELIVERY_UI_TEXT.FAMILY_DELIVERED_COUNT(new Set(eventDeliveries.map((delivery) => delivery.familyId)).size, deliveredModules)}</Badge></div>
         </div>
 
-        {canWrite && selectedEvent ? <form className="flex flex-col gap-4 rounded-xl border border-border bg-muted/30 p-4" onSubmit={(event) => void saveFamilyDelivery(event)}>
+        {selectedEvent?.status === "CERRADA" ? <Alert variant="info"><AlertDescription>La jornada está cerrada. Podés consultar los retiros y emitir o descargar sus planillas, pero no registrar nuevos retiros.</AlertDescription></Alert> : null}
+        {canWrite && selectedEvent?.status === "ABIERTA" ? <form className="flex flex-col gap-4 rounded-xl border border-border bg-muted/30 p-4" onSubmit={(event) => void saveFamilyDelivery(event)}>
           <Field>
             <FieldLabel htmlFor="family-delivery-family">{DELIVERY_UI_TEXT.FAMILY}</FieldLabel>
             <Select value={familyId} onValueChange={(value) => { setFamilyId(value); setParticipants([]); }} disabled={!availableFamilies.length || isSaving}>
@@ -342,7 +394,7 @@ export function FamilyDeliveryPanel({ data, periodId, userId, sessionExpiresAt, 
 
         {selectedEvent ? <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium">Retiros de {selectedEvent.scheduledAt}</p><p className="text-xs text-muted-foreground">{selectedEvent.location} · {selectedEvent.responsibleNames}</p></div><Button variant="outline" onClick={() => void issueEventSheet()} disabled={isIssuingSheet || !eventDeliveries.length}><HugeiconsIcon icon={File01Icon} data-icon="inline-start" />{isIssuingSheet ? DELIVERY_UI_TEXT.PREPARANDO_PLANILLA : DELIVERY_UI_TEXT.EVENT_SHEET_SUBMIT}</Button></div>
-          {eventDeliveries.length ? <ul className="divide-y divide-border rounded-lg border border-border">{eventDeliveries.map((delivery) => <li key={delivery.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-medium">{delivery.familyName} · {delivery.moduleQuantity} módulo</p><ul className="mt-1 flex flex-col gap-1 text-sm text-muted-foreground">{delivery.participants.map((participant) => <li key={participant.id}>{participant.name} · DNI {participant.physicalDniChecked ? "cotejado" : "pendiente"} · {participant.paperSignatureChecked ? DELIVERY_UI_TEXT.PAPER_SIGNATURE_RECORDED : DELIVERY_UI_TEXT.PAPER_SIGNATURE_PENDING}</li>)}</ul></div>{pendingDeliveries.some((pending) => pending.id === delivery.id) ? <Badge variant="outline">{DELIVERY_UI_TEXT.PENDIENTE}</Badge> : null}</li>)}</ul> : <p className="rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">Todavía no hay retiros registrados para esta jornada.</p>}
+          {eventDeliveries.length ? <ul className="divide-y divide-border rounded-lg border border-border">{eventDeliveries.map((delivery) => { const pendingDelivery = pendingDeliveries.find((pending) => pending.id === delivery.id); return <li key={delivery.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{delivery.familyName} · {delivery.moduleQuantity} módulo</p><ul className="mt-2 flex flex-col gap-3 text-sm text-muted-foreground">{delivery.participants.map((participant) => <li key={participant.id} className="space-y-2"><p className="font-medium text-foreground">{participant.name}</p>{pendingDelivery ? <p>DNI {participant.physicalDniChecked ? "cotejado" : "pendiente"} · {participant.paperSignatureChecked ? DELIVERY_UI_TEXT.PAPER_SIGNATURE_RECORDED : DELIVERY_UI_TEXT.PAPER_SIGNATURE_PENDING}</p> : <div className="flex flex-col gap-2 sm:flex-row sm:gap-4"><label className="flex min-h-11 items-center gap-2"><Checkbox checked={participant.physicalDniChecked} onCheckedChange={(checked) => void updateSavedParticipantChecks(participant, "physicalDniChecked", checked)} disabled={!canWrite || !isOnline || updatingParticipantId === participant.id} aria-label={`DNI físico cotejado: ${participant.name}`} />DNI físico cotejado</label><label className="flex min-h-11 items-center gap-2"><Checkbox checked={participant.paperSignatureChecked} onCheckedChange={(checked) => void updateSavedParticipantChecks(participant, "paperSignatureChecked", checked)} disabled={!canWrite || !isOnline || updatingParticipantId === participant.id} aria-label={`Firma manuscrita cotejada: ${participant.name}`} />Firma manuscrita cotejada</label></div>}</li>)}</ul>{pendingDelivery?.operationStatus === "conflict" ? <p className="mt-2 text-sm text-destructive" role="status">Conflicto al sincronizar: {pendingDelivery.operationMessage ?? "el servidor rechazó el retiro y no creó un registro"}</p> : null}{canWrite && !isOnline && !pendingDelivery ? <p className="mt-2 text-xs text-muted-foreground">Conectate para actualizar las comprobaciones.</p> : null}</div>{pendingDelivery?.operationStatus === "conflict" && selectedEvent?.status === "ABIERTA" && isOnline && canWrite ? <Button size="sm" variant="outline" onClick={() => void retryClosedEventDelivery(pendingDelivery.operationId)} disabled={retryingOperationId === pendingDelivery.operationId}>{retryingOperationId === pendingDelivery.operationId ? "Reintentando…" : "Reintentar retiro"}</Button> : null}{pendingDelivery ? <Badge variant={pendingDelivery.operationStatus === "conflict" || pendingDelivery.operationStatus === "error" ? "destructive" : "outline"}>{pendingDelivery.operationStatus === "conflict" ? "Revisar conflicto" : DELIVERY_UI_TEXT.PENDIENTE}</Badge> : null}</li>; })}</ul> : <p className="rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">Todavía no hay retiros registrados para esta jornada.</p>}
         </div> : <p className="rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">No hay jornadas de familias preparadas para este período.</p>}
         {!canWrite ? <p className="text-sm text-muted-foreground">Tu rol puede consultar los retiros, pero no registrarlos.</p> : null}
       </CardContent>

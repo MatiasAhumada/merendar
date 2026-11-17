@@ -115,3 +115,95 @@ test("registra un módulo por familia y emite la planilla de la jornada", async 
     await prisma.$disconnect();
   }
 });
+
+test("completa con autorización los cotejos pendientes de cada participante", async ({ context, page }) => {
+  const identity: BrowserIdentity = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const suffix = randomUUID();
+  const familyName = `COD1602 Familia ${suffix.slice(0, 8)}`;
+  const periodLabel = `COD1602 Jornada ${suffix.slice(0, 8)}`;
+  const periodId = randomUUID();
+  const requestId = randomUUID();
+  const quotaId = randomUUID();
+  const remittanceId = randomUUID();
+  const eventId = randomUUID();
+  const deliveryId = randomUUID();
+  const participantId = randomUUID();
+  let familyId = "";
+  let memberId = "";
+
+  try {
+    const family = await familyService.create({
+      name: familyName,
+      neighborhood: "Barrio sintético COD1602",
+      address: "Domicilio sintético COD1602",
+      contactPhone: "3815551602",
+      referenceMemberIndex: 0,
+      members: [{ firstName: "Rita", lastName: "Pendiente", dni: "98765602", relationship: "Referente", missingDocuments: [] }],
+    }, identity.userId, randomUUID());
+    familyId = family.id;
+    const familyMember = await prisma.familyMember.findFirstOrThrow({ where: { familyId }, select: { id: true } });
+    memberId = familyMember.id;
+
+    await prisma.merchandisePeriod.create({ data: { id: periodId, label: periodLabel, agency: "COD1602 QA", startsAt: new Date("2026-11-01T00:00:00.000Z"), endsAt: new Date("2026-11-30T00:00:00.000Z") } });
+    await prisma.merchandiseRequest.create({ data: { id: requestId, periodId, requestNumber: `COD1602-${suffix}`, requestedAt: new Date("2026-11-01T00:00:00.000Z"), requestedQuantity: 1, createdById: identity.userId } });
+    await prisma.merchandiseQuota.create({ data: { id: quotaId, requestId, approvedQuantity: 1, approvedAt: new Date("2026-11-01T00:00:00.000Z"), approvedById: identity.userId } });
+    await prisma.merchandiseRemittance.create({ data: { id: remittanceId, requestId, quotaId, remittanceNumber: `COD1602-R-${suffix}`, receivedAt: new Date("2026-11-02T00:00:00.000Z"), receivedQuantity: 1, responsibleName: "Equipo sintético", createdById: identity.userId } });
+    await prisma.distributionEvent.create({ data: { id: eventId, periodId, scheduledAt: new Date("2026-11-10T00:00:00.000Z"), location: "Salón sintético COD1602", responsibleNames: "Equipo de prueba", createdById: identity.userId } });
+    await prisma.distributionAllocation.create({ data: { eventId, familyId, remittanceId, moduleQuantity: 1, createdById: identity.userId } });
+    await prisma.familyDelivery.create({
+      data: {
+        id: deliveryId,
+        eventId,
+        familyId,
+        recordedById: identity.userId,
+        participants: { create: { id: participantId, familyMemberId: memberId, paperSignatureChecked: false, physicalDniChecked: false, recordedById: identity.userId } },
+      },
+    });
+
+    await setBrowserIdentity(context, identity);
+    await page.route("**/api/records/sheets/**", async (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { message: "No hay planillas para esta prueba visual." } }) }));
+    await page.route("**/api/merchandise/documents/**", async (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { message: "Documento remoto omitido en esta prueba visual." } }) }));
+    await page.route("**/api/merchandise/requests/*/documents", async (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { message: "Documento remoto omitido en esta prueba visual." } }) }));
+    await page.route("**/api/renditions/documents/**", async (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { message: "Documento remoto omitido en esta prueba visual." } }) }));
+    await page.route("**/api/renditions/emissions/**", async (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { message: "Documento remoto omitido en esta prueba visual." } }) }));
+    expect((await context.request.get("http://localhost:3022/api/session")).status()).toBe(200);
+    await page.goto("/entrega");
+    await expect(page.getByRole("heading", { name: "Beneficiarios y planillas" })).toBeVisible({ timeout: 20_000 });
+    await page.locator("#record-period").click();
+    await page.getByRole("option", { name: new RegExp(periodLabel) }).click();
+
+    const physicalDniCheck = page.getByRole("checkbox", { name: "DNI físico cotejado: Rita Pendiente" });
+    const paperSignatureCheck = page.getByRole("checkbox", { name: "Firma manuscrita cotejada: Rita Pendiente" });
+    await expect(physicalDniCheck).not.toBeChecked();
+    await expect(paperSignatureCheck).not.toBeChecked();
+    const physicalDniUpdate = page.waitForResponse((response) => response.url().includes(`/api/records/distribution-participants/${participantId}`) && response.request().method() === "PATCH");
+    await physicalDniCheck.click();
+    expect((await physicalDniUpdate).status()).toBe(200);
+    await expect(physicalDniCheck).toBeChecked();
+    const paperSignatureUpdate = page.waitForResponse((response) => response.url().includes(`/api/records/distribution-participants/${participantId}`) && response.request().method() === "PATCH");
+    await paperSignatureCheck.click();
+    expect((await paperSignatureUpdate).status()).toBe(200);
+    await expect(paperSignatureCheck).toBeChecked();
+    await expect(page.getByText("Las comprobaciones del participante se actualizaron.")).toBeVisible();
+    await expect.poll(() => prisma.distributionParticipant.findUnique({ where: { id: participantId }, select: { paperSignatureChecked: true, physicalDniChecked: true } })).toEqual({ paperSignatureChecked: true, physicalDniChecked: true });
+  } finally {
+    await context.setOffline(false);
+    await prisma.renditionDocument.deleteMany({ where: { rendition: { beneficiarySheet: { distributionEventId: eventId } } } });
+    await prisma.rendition.deleteMany({ where: { distributionEventId: eventId } });
+    await prisma.beneficiarySheet.deleteMany({ where: { distributionEventId: eventId } });
+    await prisma.distributionParticipant.deleteMany({ where: { id: participantId } });
+    await prisma.familyDelivery.deleteMany({ where: { id: deliveryId } });
+    await prisma.distributionAllocation.deleteMany({ where: { eventId } });
+    await prisma.distributionEvent.deleteMany({ where: { id: eventId } });
+    await prisma.merchandiseRemittance.deleteMany({ where: { id: remittanceId } });
+    await prisma.merchandiseQuota.deleteMany({ where: { id: quotaId } });
+    await prisma.merchandiseRequest.deleteMany({ where: { id: requestId } });
+    await prisma.merchandisePeriod.deleteMany({ where: { id: periodId } });
+    if (familyId) {
+      await prisma.family.deleteMany({ where: { id: familyId } });
+      await prisma.person.deleteMany({ where: { memberships: { none: {} }, referencedBy: { none: {} }, firstName: "Rita", lastName: "Pendiente" } });
+    }
+    await removeBrowserIdentity(identity);
+    await prisma.$disconnect();
+  }
+});

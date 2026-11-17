@@ -9,7 +9,9 @@ import { SynchronizationConflictError, SynchronizationDependencyError, Synchroni
 
 function isRetryableTransactionError(error: unknown) {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    return error.code === SYNC_SERVER_MESSAGES.P2002 || error.code === SYNC_SERVER_MESSAGES.P2034;
+    return error.code === SYNC_SERVER_MESSAGES.P2002
+      || error.code === SYNC_SERVER_MESSAGES.P2034
+      || (error.code === SYNC_SERVER_MESSAGES.P2010 && serializationConflictSchema.safeParse(error).success);
   }
 
   return serializationConflictSchema.safeParse(error).success;

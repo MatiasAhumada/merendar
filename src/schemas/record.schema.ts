@@ -30,6 +30,11 @@ export const familyDeliveryPayloadSchema = z.object({
   path: ["participants"],
 });
 
+export const participantVerificationUpdateSchema = z.object({
+  paperSignatureChecked: z.boolean(),
+  physicalDniChecked: z.boolean(),
+}).strict();
+
 export const distributionPreparationPayloadSchema = z.object({
   kind: z.literal("distribution-preparation"),
   id: z.uuid(),
@@ -119,6 +124,7 @@ export const recordsCollectionSchema = z.object({
   records: z.array(z.object({
     id: z.string(),
     periodId: z.string(),
+    familyDeliveryId: z.string().nullable().optional(),
     personId: z.string(),
     receivedAt: z.iso.datetime(),
     moduleType: z.string(),
@@ -136,7 +142,7 @@ export const recordsCollectionSchema = z.object({
     productName: z.string(), presentation: z.string(), unit: z.string(), receivedQuantity: z.number(), assignedQuantity: z.number(), remainingQuantity: z.number(),
   })).default([]),
   distributionEvents: z.array(z.object({
-    id: z.string(), version: z.number().int().positive(), periodId: z.string(), scheduledAt: z.iso.date(), location: z.string(),
+    id: z.string(), version: z.number().int().positive(), status: z.enum(["ABIERTA", "CERRADA"]).default("ABIERTA"), periodId: z.string(), scheduledAt: z.iso.date(), location: z.string(),
     responsibleNames: z.string(), notes: z.string().nullable(), familyDeliveries: z.array(z.object({
       id: z.string(), familyId: z.string(), moduleQuantity: z.number().int().positive(), familyName: z.string(),
       participants: z.array(z.object({ id: z.string(), familyMemberId: z.string(), personId: z.string(), name: z.string(), dni: z.string().nullable(), paperSignatureChecked: z.boolean(), physicalDniChecked: z.boolean() })),

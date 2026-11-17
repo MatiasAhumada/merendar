@@ -12,8 +12,16 @@ export const synchronizationRequestSchema = z.object({
   payload: jsonValueSchema,
 }).strict();
 
-export const serializationConflictSchema = z.object({
-  cause: z.object({ originalCode: z.literal("40001") }).passthrough(),
-});
+export const serializationConflictSchema = z.union([
+  z.object({ cause: z.object({ originalCode: z.literal("40001") }).passthrough() }).passthrough(),
+  z.object({
+    code: z.literal("P2010"),
+    meta: z.object({
+      driverAdapterError: z.object({
+        cause: z.object({ originalCode: z.literal("40001") }).passthrough(),
+      }).passthrough(),
+    }).passthrough(),
+  }).passthrough(),
+]);
 export const currentRecordSchema = z.record(z.string(), jsonValueSchema);
 export const beneficiaryCountSchema = z.object({ beneficiaries: z.array(z.unknown()) });

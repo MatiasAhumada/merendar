@@ -10,6 +10,8 @@ import { DELETE as deactivateFamily, PATCH } from "@/app/api/families/[id]/route
 import { POST as addFamilyMember } from "@/app/api/families/[id]/members/route";
 import { DELETE as deactivateFamilyMember, PATCH as updateFamilyMember } from "@/app/api/families/[id]/members/[memberId]/route";
 import { POST as synchronizeOperation } from "@/app/api/synchronizations/route";
+import { POST as issueSheet } from "@/app/api/records/sheets/route";
+import { GET as getRecords } from "@/app/api/records/route";
 import { familyCollectionSchema, familyResponseSchema } from "@/schemas/family.schema";
 import { familyErrorResponseSchema, familySynchronizationErrorSchema, familySynchronizationResponseSchema } from "./schemas/family-contract.schema";
 
@@ -340,7 +342,9 @@ test("family registry persists records, rejects duplicate identities and enforce
       assert.fail("No se pudo preparar la familia vinculada a una planilla histórica");
     }
 
-    const sheetPersonId = sheetFamilyBody.data.family.members[1]?.id;
+    const sheetLinkedMember = sheetFamilyBody.data.family.members.find((member) => member.id !== sheetFamilyBody.data.family.referencePersonId);
+    assert.ok(sheetLinkedMember);
+    const sheetPersonId = sheetLinkedMember.id;
     assert.ok(sheetPersonId);
     const testPeriod = await prisma.merchandisePeriod.create({
       data: { label: `Family deactivation ${suffix}`, agency: "Test agency", startsAt: new Date("2026-10-01T00:00:00.000Z"), endsAt: new Date("2026-10-31T00:00:00.000Z") },
@@ -354,17 +358,78 @@ test("family registry persists records, rejects duplicate identities and enforce
         snapshot: { beneficiaries: [{ personId: sheetPersonId }] },
       },
     });
-    const sheetLinkedMember = sheetFamilyBody.data.family.members[1];
-    assert.ok(sheetLinkedMember);
     const sheetLinkedMemberDeactivation = await deactivateFamilyMember(createRequest(`http://localhost:3000/api/families/${sheetFamilyBody.data.family.id}/members/${sheetLinkedMember.membershipId}`, "DELETE", presidentToken, {
       operationId: randomUUID(), baseVersion: sheetFamilyBody.data.family.version,
       target: { kind: "member", memberId: sheetLinkedMember.membershipId },
     }), { params: Promise.resolve({ id: sheetFamilyBody.data.family.id, memberId: sheetLinkedMember.membershipId }) });
-    assert.equal(sheetLinkedMemberDeactivation.status, 409);
+    assert.equal(sheetLinkedMemberDeactivation.status, 200, await sheetLinkedMemberDeactivation.clone().text());
+    const deactivatedSheetMember = await prisma.familyMember.findUniqueOrThrow({ where: { id: sheetLinkedMember.membershipId }, select: { deactivatedAt: true, deactivatedById: true, personId: true } });
+    assert.ok(deactivatedSheetMember.deactivatedAt);
+    assert.equal(deactivatedSheetMember.deactivatedById, users[0].id);
+    assert.equal(await prisma.beneficiarySheet.count({ where: { periodId: testPeriod.id } }), 1);
+    assert.equal(await prisma.person.count({ where: { id: deactivatedSheetMember.personId } }), 1);
+    const rejectedOnlineSheet = await issueSheet(createRequest("http://localhost:3000/api/records/sheets", "POST", presidentToken, { periodId: testPeriod.id, personIds: [deactivatedSheetMember.personId] }));
+    assert.equal(rejectedOnlineSheet.status, 400);
+    assert.equal(await prisma.beneficiarySheet.count({ where: { periodId: testPeriod.id } }), 1);
+
+    const deactivatedFamilyVersion = await prisma.family.findUniqueOrThrow({ where: { id: sheetFamilyBody.data.family.id }, select: { version: true } });
     const sheetLinkedFamilyDeactivation = await deactivateFamily(createRequest(`http://localhost:3000/api/families/${sheetFamilyBody.data.family.id}`, "DELETE", presidentToken, {
-      operationId: randomUUID(), baseVersion: sheetFamilyBody.data.family.version, target: { kind: "family" },
+      operationId: randomUUID(), baseVersion: deactivatedFamilyVersion.version, target: { kind: "family" },
     }), { params: Promise.resolve({ id: sheetFamilyBody.data.family.id }) });
-    assert.equal(sheetLinkedFamilyDeactivation.status, 409);
+    assert.equal(sheetLinkedFamilyDeactivation.status, 200);
+    assert.equal(await prisma.beneficiarySheet.count({ where: { periodId: testPeriod.id } }), 1);
+    const familyHistoricalSheet = await prisma.beneficiarySheet.findFirstOrThrow({ where: { periodId: testPeriod.id } });
+    assert.equal(JSON.stringify(familyHistoricalSheet.snapshot).includes(deactivatedSheetMember.personId), true);
+    const historicalWorkbenchResponse = await getRecords(createRequest(`http://localhost:3000/api/records?periodId=${testPeriod.id}`, "GET", presidentToken));
+    const historicalWorkbench = await historicalWorkbenchResponse.json() as { sheets: Array<{ id: string }> };
+    assert.equal(historicalWorkbenchResponse.status, 200);
+    assert.equal(historicalWorkbench.sheets.some((sheet) => sheet.id === familyHistoricalSheet.id), true);
+
+    const queuedSheetId = randomUUID();
+    const queuedSheetResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, {
+      operationId: randomUUID(),
+      userId: users[0].id,
+      resource: "records",
+      resourceId: queuedSheetId,
+      operation: "create",
+      baseVersion: null,
+      dependencies: [],
+      payload: {
+        kind: "beneficiary-sheet",
+        id: queuedSheetId,
+        periodId: testPeriod.id,
+        templateVersion: 2,
+        period: { label: testPeriod.label, agency: testPeriod.agency, startsAt: "2026-10-01", endsAt: "2026-10-31" },
+        beneficiaries: [{ personId: deactivatedSheetMember.personId, name: "Persona de prueba", dni: dnis[8], familyName: "Familia con planilla", address: "Calle de prueba 15", neighborhood: "Villa Nueva" }],
+      },
+    }));
+    assert.equal(queuedSheetResponse.status, 400);
+    assert.equal(await prisma.beneficiarySheet.count({ where: { id: queuedSheetId } }), 0);
+
+    const queuedRecordId = randomUUID();
+    const queuedRecordResponse = await synchronizeOperation(createRequest("http://localhost:3000/api/synchronizations", "POST", presidentToken, {
+      operationId: randomUUID(),
+      userId: users[0].id,
+      resource: "records",
+      resourceId: queuedRecordId,
+      operation: "create",
+      baseVersion: null,
+      dependencies: [],
+      payload: {
+        kind: "distribution-record",
+        id: queuedRecordId,
+        periodId: testPeriod.id,
+        familyId: sheetFamilyBody.data.family.id,
+        personId: deactivatedSheetMember.personId,
+        receivedAt: "2026-11-01",
+        moduleType: "Módulo familiar seco",
+        quantity: 1,
+        physicalDniChecked: true,
+        documentsChecked: false,
+      },
+    }));
+    assert.equal(queuedRecordResponse.status, 400);
+    assert.equal(await prisma.distributionRecord.count({ where: { id: queuedRecordId } }), 0);
 
     const raceFamilyResponse = await POST(createRequest("http://localhost:3000/api/families", "POST", presidentToken, {
       operationId: randomUUID(), name: `Race Family ${suffix}`, neighborhood: "Villa Nueva", address: "Calle concurrente 7",

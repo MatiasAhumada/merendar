@@ -196,15 +196,19 @@ export const merchandiseResponseSchema = z.object({
     agency: z.string(),
     destination: z.enum(["FAMILIES", "MERENDERO"]).default("FAMILIES"),
     status: z.enum(["VIGENTE", "ANULADO"]),
+    cancelledAt: z.iso.datetime().nullable().default(null),
+    cancelledBy: z.object({ id: z.string(), name: z.string() }).nullable().default(null),
+    cancellationReason: z.string().nullable().default(null),
     reportDetails: z.object({
       authorized: z.boolean(),
       events: z.array(z.object({
         id: z.string(),
+        status: z.enum(["ABIERTA", "CERRADA"]).default("ABIERTA"),
         scheduledAt: z.iso.datetime(),
         location: z.string(),
         responsibleNames: z.string(),
         allocations: z.array(z.object({ familyId: z.string(), familyName: z.string(), remittanceNumber: z.string(), moduleQuantity: z.number().int().nonnegative() }).strict()),
-        familyDeliveries: z.array(z.object({ familyId: z.string(), familyName: z.string(), moduleQuantity: z.number().int().nonnegative(), participants: z.array(z.string()) }).strict()),
+        familyDeliveries: z.array(z.object({ familyId: z.string(), familyName: z.string(), moduleQuantity: z.number().int().nonnegative(), participants: z.array(z.object({ name: z.string(), paperSignatureChecked: z.boolean(), physicalDniChecked: z.boolean() }).strict()) }).strict()),
         supplyAllocations: z.array(z.object({ productName: z.string(), presentation: z.string(), unit: z.string(), remittanceNumber: z.string(), quantity: z.number().nonnegative() }).strict()).default([]),
       }).strict()),
     }).strict().default({ authorized: false, events: [] }),
@@ -212,6 +216,7 @@ export const merchandiseResponseSchema = z.object({
     endsAt: z.iso.datetime(),
     beneficiarySheets: z.array(z.object({
       id: z.string(),
+      distributionEventId: z.string().nullable().optional(),
       version: z.number().int(),
       createdAt: z.iso.datetime(),
       beneficiaryCount: z.number().int().nonnegative(),

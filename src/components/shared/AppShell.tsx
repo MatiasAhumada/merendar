@@ -300,8 +300,8 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
 
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-30 border-b border-border bg-card/95 backdrop-blur">
-          <div className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-4 lg:px-8">
-            <div className="flex min-w-0 items-center gap-2">
+          <div className="mx-auto grid min-h-20 w-full max-w-7xl grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-6 lg:flex lg:h-20 lg:justify-between lg:gap-3 lg:px-8 lg:py-0">
+            <div className="col-start-1 row-start-1 flex items-center gap-2 lg:hidden">
               <Sheet key={pathname}>
                 <SheetTrigger asChild>
                   <Button variant="ghost" size="icon" aria-label={APPLICATION_UI_TEXT.ABRIR_MENU} className="lg:hidden">
@@ -333,15 +333,15 @@ export function AppShell({ children, user, sessionExpiresAt, capabilities }: App
                   </nav>
                 </SheetContent>
               </Sheet>
-              <Image src={BRAND.logoPath} alt={APPLICATION_UI_TEXT.TEXT_3} width={40} height={40} className="lg:hidden" priority unoptimized />
-              <div className="min-w-0">
-                <p className="truncate font-display text-base font-semibold leading-tight">
-                  {currentPage?.label ?? BRAND.shortName}
-                </p>
-                <p className="truncate text-xs font-medium text-primary">{BRAND.shortName}</p>
-              </div>
+              <Image src={BRAND.logoPath} alt={APPLICATION_UI_TEXT.TEXT_3} width={40} height={40} priority unoptimized />
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="col-span-2 row-start-2 min-w-0 lg:order-first lg:col-span-1 lg:row-start-auto lg:flex-1">
+              <p className="truncate font-display text-base font-semibold leading-tight">
+                {currentPage?.label ?? BRAND.shortName}
+              </p>
+              <p className="truncate text-xs font-medium text-primary">{BRAND.shortName}</p>
+            </div>
+            <div className="col-start-2 row-start-1 flex shrink-0 items-center gap-2 lg:col-start-auto lg:row-start-auto">
               <ConnectionStatus />
               <Badge variant="secondary" className="hidden sm:inline-flex">{USER_ROLE_LABELS[user.role]}</Badge>
               <Avatar size="lg">

@@ -488,14 +488,14 @@ test("creates a dependent merchandise chain offline and synchronizes each operat
     await page.locator('input[id^="request-date-"]').fill("2026-10-25");
     await page.locator('input[id^="request-quantity-"]').fill("3");
     await page.getByRole("button", { name: "Guardar solicitud" }).click();
-    await expect(page.getByRole("heading", { name: `Solicitud ${requestNumber}` })).toBeVisible();
+    await expect(createdPeriodCard.getByRole("heading", { name: `Solicitud ${requestNumber}` })).toBeVisible();
 
-    await page.getByRole("button", { name: "Registrar cupo" }).click();
+    await createdPeriodCard.getByRole("button", { name: "Registrar cupo" }).click();
     await page.locator('input[id^="quota-quantity-"]').fill("3");
     await page.locator('input[id^="quota-date-"]').fill("2026-10-25");
     await page.getByRole("button", { name: "Guardar cupo" }).click();
 
-    await page.getByRole("button", { name: "Registrar remito" }).click();
+    await createdPeriodCard.getByRole("button", { name: "Registrar remito" }).click();
     await page.locator('input[id^="remittance-number-"]').fill(remittanceNumber);
     await page.locator('input[id^="remittance-date-"]').fill("2026-10-25");
     await page.locator('input[id^="remittance-quantity-"]').fill("3");
@@ -528,7 +528,7 @@ test("creates a dependent merchandise chain offline and synchronizes each operat
     expect(queuedOperations[3]?.dependencies).toEqual(expect.arrayContaining([queuedOperations[1]?.operationId, queuedOperations[2]?.operationId]));
     expect(await prisma.merchandisePeriod.count({ where: { id: periodId } })).toBe(0);
 
-    await context.setOffline(false);
+    await context.setOffline(false).catch(() => undefined);
     await expect.poll(async () => prisma.synchronizationReceipt.count({ where: { operationId: { in: queuedOperations.map((operation) => operation.operationId) } } }), { timeout: 30_000 }).toBe(4);
     const syncedPeriod = await prisma.merchandisePeriod.findUnique({
       where: { id: periodId },
@@ -772,7 +772,7 @@ test("recovers a confirmed family after a failed list refresh without duplicatin
   }
 });
 
-test("confirms family deactivation, preserves sheet history and explains blocked records", async ({ browser, context, page }, testInfo) => {
+test("confirms family deactivation with sheet history and keeps the historical snapshot", async ({ browser, context, page }, testInfo) => {
   const president = await createBrowserIdentity(UserRole.PRESIDENTE);
   const suffix = randomUUID();
   const familyNames = [`COD1484 con planilla ${suffix}`, `COD1484 sin historial ${suffix}`];
@@ -849,16 +849,19 @@ test("confirms family deactivation, preserves sheet history and explains blocked
     await page.getByRole("button", { name: "Ver ficha familiar" }).click();
     await page.getByRole("button", { name: "Dar de baja familia" }).click();
     await expect(page.getByRole("heading", { name: "Dar de baja la familia" })).toBeVisible();
-    await expect(page.getByText(/Si hay entregas o planillas históricas/)).toBeVisible();
+    await expect(page.getByText(/el historial de entregas y planillas para su consulta/)).toBeVisible();
     await testInfo.attach("family-deactivation-confirmation.png", {
       body: await page.screenshot({ fullPage: true }),
       contentType: "image/png",
     });
     await page.getByRole("button", { name: "Confirmar baja" }).click();
-    await expect(page.getByText(/aparece en entregas o planillas históricas/).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: familyWithSheet.name })).toBeVisible();
-    expect((await prisma.family.findUniqueOrThrow({ where: { id: familyWithSheet.id }, select: { deactivatedAt: true } })).deactivatedAt).toBeNull();
-    await page.getByRole("button", { name: "Cerrar ficha" }).click();
+    await expect(page.getByText("No hay resultados", { exact: true })).toBeVisible();
+    const deactivatedFamilyWithSheet = await prisma.family.findUniqueOrThrow({ where: { id: familyWithSheet.id }, select: { deactivatedAt: true, deactivatedById: true } });
+    expect(deactivatedFamilyWithSheet.deactivatedAt).toBeTruthy();
+    expect(deactivatedFamilyWithSheet.deactivatedById).toBe(president.userId);
+    const retainedSheet = await prisma.beneficiarySheet.findFirstOrThrow({ where: { periodId: period.id } });
+    expect(JSON.stringify(retainedSheet.snapshot).includes(personIdWithSheet ?? "missing-person-id")).toBe(true);
+    expect(await prisma.person.count({ where: { id: personIdWithSheet ?? "" } })).toBe(1);
 
     await page.getByRole("searchbox", { name: "Buscar familias" }).fill(secondFamily.name);
     await page.getByRole("button", { name: "Ver ficha familiar" }).click();

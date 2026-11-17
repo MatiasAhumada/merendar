@@ -2,6 +2,12 @@ import { beneficiaryCountSchema } from "@/schemas/synchronization.schema";
 import { prisma } from "@/lib/prisma";
 import { merchandiseRequestDocumentSnapshotSchema } from "@/schemas/merchandise-request-document.schema";
 import { renditionEmissionReportSourceSchema } from "@/schemas/rendition.schema";
+import { Prisma } from "@prisma/client";
+
+export async function lockMerchandisePeriod(transaction: Prisma.TransactionClient, periodId: string) {
+  await transaction.$queryRaw(Prisma.sql`SELECT "id" FROM "MerchandisePeriod" WHERE "id" = ${periodId} FOR UPDATE`);
+  return transaction.merchandisePeriod.findUnique({ where: { id: periodId } });
+}
 
 const documentSummarySelect = {
   id: true,
@@ -32,8 +38,9 @@ export const merchandiseRepository = {
   async findAll() {
     const periods = await prisma.merchandisePeriod.findMany({
       include: {
+        cancelledBy: { select: { id: true, name: true } },
         beneficiarySheets: {
-          select: { id: true, version: true, createdAt: true, snapshot: true },
+          select: { id: true, version: true, distributionEventId: true, createdAt: true, snapshot: true },
           orderBy: { version: "desc" },
         },
         renditions: {
@@ -80,6 +87,7 @@ export const merchandiseRepository = {
       ...period,
       beneficiarySheets: period.beneficiarySheets.map((sheet) => ({
         id: sheet.id,
+        distributionEventId: sheet.distributionEventId,
         version: sheet.version,
         createdAt: sheet.createdAt,
         beneficiaryCount: beneficiaryCount(sheet.snapshot),

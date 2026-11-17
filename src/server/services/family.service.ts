@@ -122,10 +122,6 @@ export const familyService = {
         throw new ApiError({ status: 409, message: FAMILY_ERROR_MESSAGES.NO_SE_PUEDE_DAR_DE_BAJA_AL_REFERENTE_PRIMERO_ELEGI_OTRO_REFERENTE_PARA });
       }
 
-      if (result.type === "has-records") {
-        throw new ApiError({ status: 409, message: FAMILY_ERROR_MESSAGES.NO_SE_PUEDE_DAR_DE_BAJA_PORQUE_LA_FAMILIA_O_EL_INTEGRANTE_APARECE_EN_E });
-      }
-
       if (result.type === "conflict") {
         throw new ApiError({ status: 409, message: FAMILY_ERROR_MESSAGES.LA_FICHA_CAMBIO_EN_OTRO_DISPOSITIVO_ACTUALIZA_ANTES_DE_VOLVER_A_INTENT });
       }

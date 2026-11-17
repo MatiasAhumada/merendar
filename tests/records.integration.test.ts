@@ -12,6 +12,7 @@ import { NextRequest } from "next/server";
 import { localBeneficiarySnapshotSchema, versionedBeneficiarySnapshotSchema } from "./schemas/record-snapshot.schema";
 import { AUTH } from "@/constants/auth.constant";
 import { GET as getRecords } from "@/app/api/records/route";
+import { GET as getRecordHistory } from "@/app/api/records/history/route";
 import { POST as issueSheet } from "@/app/api/records/sheets/route";
 import { GET as downloadSheet } from "@/app/api/records/sheets/[id]/route";
 import { POST as postSynchronization } from "@/app/api/synchronizations/route";
@@ -52,6 +53,16 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
   const token = randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(token).digest("hex");
   const operationId = randomUUID();
+  const historyPeriodId = randomUUID();
+  const historyFamilyId = randomUUID();
+  const historyPersonId = randomUUID();
+  const historyMemberId = randomUUID();
+  const historyEventId = randomUUID();
+  const historyDeliveryId = randomUUID();
+  const historyParticipantId = randomUUID();
+  const historyRecordId = randomUUID();
+  const historySheetId = randomUUID();
+  const historyRenditionId = randomUUID();
   const operation: SubmittedSyncOperation = {
     operationId,
     userId: user.id,
@@ -125,6 +136,50 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     const preparedReadResponse = await getRecords(createRequest("http://localhost:3000/api/records?includePeriodDetails=true", "GET", token));
     const preparedReadResult = await preparedReadResponse.json() as { records: Array<{ id: string }>; sheets: Array<{ id: string }> };
     assert.ok(preparedReadResult.records.some((record) => record.id === recordId));
+
+    await prisma.merchandisePeriod.create({
+      data: { id: historyPeriodId, label: `Historial noviembre ${suffix}`, agency: "Desarrollo Social", startsAt: new Date("2026-11-01T00:00:00.000Z"), endsAt: new Date("2026-11-30T00:00:00.000Z") },
+    });
+    await prisma.person.create({ data: { id: historyPersonId, firstName: "Ana", lastName: "Historial", dni: `9${suffix.slice(0, 7)}` } });
+    await prisma.family.create({
+      data: {
+        id: historyFamilyId, name: `Familia Inactiva ${suffix}`, neighborhood: "Barrio de prueba", address: "Domicilio de prueba",
+        referencePersonId: historyPersonId, createdById: user.id, deactivatedAt: new Date("2026-11-15T00:00:00.000Z"), deactivatedById: user.id,
+        members: { create: { id: historyMemberId, personId: historyPersonId, relationship: "Referente", deactivatedAt: new Date("2026-11-15T00:00:00.000Z"), deactivatedById: user.id } },
+      },
+    });
+    await prisma.distributionEvent.create({
+      data: { id: historyEventId, periodId: historyPeriodId, scheduledAt: new Date("2026-11-18T00:00:00.000Z"), location: "Salón de prueba", responsibleNames: "Equipo de prueba", createdById: user.id },
+    });
+    await prisma.familyDelivery.create({
+      data: { id: historyDeliveryId, eventId: historyEventId, familyId: historyFamilyId, moduleQuantity: 2, recordedById: user.id },
+    });
+    await prisma.distributionParticipant.create({
+      data: { id: historyParticipantId, familyDeliveryId: historyDeliveryId, familyMemberId: historyMemberId, recordedById: user.id },
+    });
+    await prisma.distributionRecord.create({
+      data: { id: historyRecordId, operationId: randomUUID(), periodId: historyPeriodId, familyMemberId: historyMemberId, familyDeliveryId: historyDeliveryId, receivedAt: new Date("2026-11-18T00:00:00.000Z"), moduleType: "Módulo familiar", quantity: 2, createdById: user.id },
+    });
+    await prisma.beneficiarySheet.create({
+      data: { id: historySheetId, periodId: historyPeriodId, version: 1, snapshot: { period: { label: `Historial noviembre ${suffix}` }, version: 1, createdAt: new Date().toISOString(), beneficiaries: [] }, createdById: user.id },
+    });
+    await prisma.rendition.create({ data: { id: historyRenditionId, periodId: historyPeriodId, beneficiarySheetId: historySheetId, createdById: user.id } });
+    const combinedHistoryResponse = await getRecordHistory(createRequest(`http://localhost:3000/api/records/history?query=Ana%20Historial&family=Familia%20Inactiva&from=2026-11-01&to=2026-11-30&page=1&pageSize=20`, "GET", token));
+    const combinedHistory = await combinedHistoryResponse.json() as { records: Array<{ id: string; periodId: string; familyName: string; source: string }>; total: number };
+    assert.equal(combinedHistoryResponse.status, 200);
+    assert.equal(combinedHistory.total, 1);
+    assert.equal(combinedHistory.records[0]?.periodId, historyPeriodId);
+    assert.equal(combinedHistory.records[0]?.familyName, `Familia Inactiva ${suffix}`);
+    assert.equal(combinedHistory.records[0]?.source, "jornada");
+    assert.ok(combinedHistory.records[0]?.id.startsWith("participant-"));
+    const noMatchHistory = await getRecordHistory(createRequest(`http://localhost:3000/api/records/history?query=Sin%20coincidencias%20${suffix}`, "GET", token));
+    assert.deepEqual((await noMatchHistory.json() as { records: unknown[]; total: number }), { records: [], page: 1, pageSize: 20, total: 0, hasMore: false });
+    const invalidRangeHistory = await getRecordHistory(createRequest("http://localhost:3000/api/records/history?from=2026-11-30&to=2026-11-01", "GET", token));
+    assert.equal(invalidRangeHistory.status, 400);
+    const historyPeriods = await getRecordHistory(createRequest("http://localhost:3000/api/records/history?pageSize=50", "GET", token));
+    const allHistory = await historyPeriods.json() as { records: Array<{ periodId: string }> };
+    assert.ok(allHistory.records.some((record) => record.periodId === periodId));
+    assert.ok(allHistory.records.some((record) => record.periodId === historyPeriodId));
 
     const issueResponse = await issueSheet(createRequest("http://localhost:3000/api/records/sheets", "POST", token, { periodId, personIds: [personId] }));
     assert.equal(issueResponse.status, 201);
@@ -260,6 +315,8 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     assert.equal(forbiddenIssue.status, 403);
     const forbiddenRead = await getRecords(createRequest(`http://localhost:3000/api/records?periodId=${periodId}`, "GET", unauthorizedToken));
     assert.equal(forbiddenRead.status, 403);
+    const forbiddenHistoryRead = await getRecordHistory(createRequest("http://localhost:3000/api/records/history", "GET", unauthorizedToken));
+    assert.equal(forbiddenHistoryRead.status, 403);
     const forbiddenDownload = await downloadSheet(
       createRequest(`http://localhost:3000/api/records/sheets/${sheetId}`, "GET", unauthorizedToken),
       { params: Promise.resolve({ id: sheetId }) },
@@ -267,6 +324,15 @@ test("beneficiary records synchronize once and issued sheets retain a printable 
     assert.equal(forbiddenDownload.status, 403);
   } finally {
     await prisma.beneficiarySheet.deleteMany({ where: { periodId } });
+    await prisma.rendition.deleteMany({ where: { id: historyRenditionId } });
+    await prisma.beneficiarySheet.deleteMany({ where: { id: historySheetId } });
+    await prisma.distributionRecord.deleteMany({ where: { id: historyRecordId } });
+    await prisma.distributionParticipant.deleteMany({ where: { id: historyParticipantId } });
+    await prisma.familyDelivery.deleteMany({ where: { id: historyDeliveryId } });
+    await prisma.distributionEvent.deleteMany({ where: { id: historyEventId } });
+    await prisma.family.deleteMany({ where: { id: historyFamilyId } });
+    await prisma.person.deleteMany({ where: { id: historyPersonId } });
+    await prisma.merchandisePeriod.deleteMany({ where: { id: historyPeriodId } });
     await prisma.distributionRecord.deleteMany({ where: { periodId } });
     await prisma.familyMember.deleteMany({ where: { familyId } });
     await prisma.family.deleteMany({ where: { id: familyId } });

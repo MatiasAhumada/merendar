@@ -10,6 +10,8 @@ import { createRenditionEmissionPdfs } from "@/server/services/rendition-emissio
 import { storeDocumentObject } from "@/server/services/document-storage.service";
 import { hydrateRenditionEmissionSource } from "@/server/services/rendition-emission-storage.service";
 import { findRenditionEmissionSource, saveRenditionEmissionInTransaction, storeRenditionEmissionFiles } from "@/server/repository/rendition-emission.repository";
+import { lockMerchandisePeriod } from "@/server/repository/merchandise.repository";
+import { getPendingParticipantVerifications } from "@/utils/participant-verification.util";
 
 import {
   renditionDocumentPayloadSchema,
@@ -40,7 +42,29 @@ async function applyReview(
 ) {
   const rendition = await transaction.rendition.findUnique({
     where: { id: operation.resourceId },
-    select: { id: true },
+    select: {
+      id: true,
+      beneficiarySheet: {
+        select: {
+          distributionEvent: {
+            select: {
+              familyDeliveries: {
+                select: {
+                  family: { select: { name: true } },
+                  participants: {
+                    select: {
+                      paperSignatureChecked: true,
+                      physicalDniChecked: true,
+                      familyMember: { select: { person: { select: { firstName: true, lastName: true } } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   });
 
   if (!rendition) {
@@ -57,6 +81,12 @@ async function applyReview(
 
   if (!signedSheetCount) {
     throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.ADJUNTA_UNA_PLANILLA_FIRMADA_VIGENTE_ANTES_DE_REVISAR_LA_RENDICION, 409);
+  }
+
+  const deliveries = rendition.beneficiarySheet.distributionEvent?.familyDeliveries ?? [];
+  const pendingVerifications = getPendingParticipantVerifications(deliveries);
+  if (pendingVerifications.length) {
+    throw new RenditionDocumentError(`${RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_REQUIRED}${pendingVerifications.join("; ")}`, 409);
   }
 
   const updatedRendition = await transaction.rendition.update({
@@ -116,6 +146,11 @@ async function applyDocuments(
   operation: SubmittedSyncOperation,
   payload: RenditionDocumentPayload,
 ) {
+  const period = await lockMerchandisePeriod(transaction, payload.periodId);
+  if (!period || period.status !== "VIGENTE") {
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP, 409);
+  }
+
   const sheet = await transaction.beneficiarySheet.findUnique({
     where: { id: payload.beneficiarySheetId },
     select: { id: true, periodId: true, distributionEventId: true },
@@ -205,9 +240,44 @@ async function applySubmission(
     throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PRESENTACION_NO_COINCIDE_CON_LA_RENDICION_SELECCIONADA);
   }
 
-  const rendition = await transaction.rendition.findUnique({ where: { id: payload.renditionId }, select: { id: true } });
+  const rendition = await transaction.rendition.findUnique({
+    where: { id: payload.renditionId },
+    select: {
+      id: true,
+      periodId: true,
+      beneficiarySheet: {
+        select: {
+          distributionEvent: {
+            select: {
+              familyDeliveries: {
+                select: {
+                  family: { select: { name: true } },
+                  participants: {
+                    select: {
+                      paperSignatureChecked: true,
+                      physicalDniChecked: true,
+                      familyMember: { select: { person: { select: { firstName: true, lastName: true } } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
   if (!rendition) {
     throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_RENDICION_SELECCIONADA, 404);
+  }
+  const deliveries = rendition.beneficiarySheet.distributionEvent?.familyDeliveries ?? [];
+  const pendingVerifications = getPendingParticipantVerifications(deliveries);
+  if (pendingVerifications.length) {
+    throw new RenditionDocumentError(`${RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_REQUIRED}${pendingVerifications.join("; ")}`, 409);
+  }
+  const period = await lockMerchandisePeriod(transaction, rendition.periodId);
+  if (!period || period.status !== "VIGENTE") {
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP, 409);
   }
 
   const emission = await transaction.renditionEmission.findFirst({
@@ -297,6 +367,11 @@ async function applyEmission(
     throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_EMISION_NO_COINCIDE_CON_LA_OPERACION_PENDIENTE);
   }
 
+  const period = await lockMerchandisePeriod(transaction, payload.periodId);
+  if (!period || period.status !== "VIGENTE") {
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP, 409);
+  }
+
   const sheet = await transaction.beneficiarySheet.findUnique({
     where: { id: payload.beneficiarySheetId },
     select: { id: true, periodId: true, distributionEventId: true },
@@ -327,6 +402,11 @@ async function applyEmission(
   }
   if (source.periodId !== payload.periodId || source.beneficiarySheetId !== payload.beneficiarySheetId) {
     throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP, 409);
+  }
+  const deliveries = source.beneficiarySheet.distributionEvent?.familyDeliveries ?? [];
+  const pendingVerifications = getPendingParticipantVerifications(deliveries);
+  if (pendingVerifications.length) {
+    throw new RenditionDocumentError(`${RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_REQUIRED}${pendingVerifications.join("; ")}`, 409);
   }
 
   const availableSourceIds = new Set([
@@ -403,6 +483,11 @@ export const renditionSynchronizationHandler: SynchronizationHandler = {
     const source = await findRenditionEmissionSource(parsedEmission.data.renditionId);
     if (!source || source.periodId !== parsedEmission.data.periodId || source.beneficiarySheetId !== parsedEmission.data.beneficiarySheetId) {
       throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP, 409);
+    }
+    const deliveries = source.beneficiarySheet.distributionEvent?.familyDeliveries ?? [];
+    const pendingVerifications = getPendingParticipantVerifications(deliveries);
+    if (pendingVerifications.length) {
+      throw new RenditionDocumentError(`${RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_REQUIRED}${pendingVerifications.join("; ")}`, 409);
     }
     const pdfs = await createRenditionEmissionPdfs(await hydrateRenditionEmissionSource(source), parsedEmission.data.template);
     const storedFiles = await storeRenditionEmissionFiles(parsedEmission.data.id, pdfs);

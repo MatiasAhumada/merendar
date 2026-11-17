@@ -11,27 +11,8 @@ export type FamilyDeactivationResult =
   | { type: "missing" }
   | { type: "missing-member" }
   | { type: "conflict" }
-  | { type: "has-records" }
   | { type: "last-member" }
   | { type: "reference-member" };
-
-async function hasBeneficiarySheetReference(transaction: Prisma.TransactionClient, personIds: string[]) {
-  if (!personIds.length) {
-    return false;
-  }
-
-  const matchingSheets = await transaction.beneficiarySheet.findMany({
-    where: {
-      OR: personIds.map((personId) => ({
-        snapshot: { path: ["beneficiaries"], array_contains: [{ personId }] },
-      })),
-    },
-    select: { id: true },
-    take: 1,
-  });
-
-  return matchingSheets.length > 0;
-}
 
 export async function deactivateFamilyInTransaction(
   transaction: Prisma.TransactionClient,
@@ -88,31 +69,6 @@ export async function deactivateFamilyInTransaction(
 
   if (targetMember && family.referencePersonId === targetMember.personId) {
     return { type: "reference-member" };
-  }
-
-  let affectedMembers = family.members;
-
-  if (targetMember) {
-    affectedMembers = [targetMember];
-  }
-  const affectedMemberIds = affectedMembers.map((member) => member.id);
-  const affectedPersonIds = affectedMembers.map((member) => member.personId);
-  const distributionRecord = await transaction.distributionRecord.findFirst({
-    where: { familyMemberId: { in: affectedMemberIds } },
-    select: { id: true },
-  });
-  let familyDelivery = null;
-  if (target.kind === "family") {
-    familyDelivery = await transaction.familyDelivery.findFirst({ where: { familyId: family.id }, select: { id: true } });
-  }
-  let distributionParticipant = null;
-  if (target.kind === "member") {
-    distributionParticipant = await transaction.distributionParticipant.findFirst({ where: { familyMemberId: { in: affectedMemberIds } }, select: { id: true } });
-  }
-  const hasSheetReference = await hasBeneficiarySheetReference(transaction, affectedPersonIds);
-
-  if (distributionRecord || familyDelivery || distributionParticipant || hasSheetReference) {
-    return { type: "has-records" };
   }
 
   const deactivatedAt = new Date();

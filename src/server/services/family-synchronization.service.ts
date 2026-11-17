@@ -63,10 +63,6 @@ export const familySynchronizationHandler: SynchronizationHandler = {
         message = FAMILY_ERROR_MESSAGES.NO_ENCONTRAMOS_ESE_INTEGRANTE_EN_ESTA_FAMILIA;
       }
 
-      if (result.type === "has-records") {
-        message = FAMILY_ERROR_MESSAGES.NO_SE_PUEDE_DAR_DE_BAJA_PORQUE_LA_FAMILIA_O_EL_INTEGRANTE_APARECE_EN_E;
-      }
-
       if (result.type === "last-member") {
         message = FAMILY_ERROR_MESSAGES.NO_SE_PUEDE_DAR_DE_BAJA_AL_ULTIMO_INTEGRANTE_PRIMERO_AGREGA_OTRA_PERSO;
       }

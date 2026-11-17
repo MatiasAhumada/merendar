@@ -107,3 +107,60 @@ test("keeps short desktop navigation scrollable and preserves mobile navigation"
     await prisma.$disconnect();
   }
 });
+
+test("aligns the authenticated header title with the first main heading", async ({ context, page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "The responsive shell geometry is measured in one browser context.");
+  const identity = await createBrowserIdentity(UserRole.PRESIDENTE);
+  const alignmentResults: Array<{ viewportWidth: number; horizontalDifference: number }> = [];
+
+  try {
+    await setBrowserIdentity(context, identity);
+
+    for (const viewportWidth of [1440, 768, 390, 320]) {
+      await page.setViewportSize({ width: viewportWidth, height: 844 });
+      await page.goto("/");
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      await expect(page.locator("header.sticky p.font-display")).toBeVisible();
+
+      const headerTitleBounds = await page.locator("header.sticky p.font-display").boundingBox();
+      const mainHeadingBounds = await page.locator("main h1").boundingBox();
+      assert.ok(headerTitleBounds, "El título del encabezado debe tener límites visibles.");
+      assert.ok(mainHeadingBounds, "El primer encabezado de main debe tener límites visibles.");
+      const horizontalDifference = Math.abs(headerTitleBounds.x - mainHeadingBounds.x);
+      await testInfo.attach(`header-alignment-${viewportWidth}.json`, {
+        body: JSON.stringify({ viewportWidth, headerTitleX: headerTitleBounds.x, mainHeadingX: mainHeadingBounds.x, horizontalDifference }),
+        contentType: "application/json",
+      });
+      alignmentResults.push({ viewportWidth, horizontalDifference });
+
+      if (viewportWidth <= 390) {
+        const menuButton = page.getByRole("button", { name: "Abrir menú" });
+        const avatar = page.locator("header.sticky [data-slot='avatar']");
+        await expect(menuButton).toBeVisible();
+        await expect(menuButton).toBeEnabled();
+        await expect(avatar).toBeVisible();
+        await expect(avatar).toBeInViewport({ ratio: 1 });
+        await menuButton.click();
+        const mobileNavigation = page.getByRole("navigation", { name: "Menú principal" });
+        await expect(mobileNavigation).toBeVisible();
+        await mobileNavigation.getByRole("link", { name: "Familias" }).click();
+        await expect(page).toHaveURL(/\/familias$/);
+      }
+
+      if (viewportWidth >= 1024) {
+        await expect(page.getByRole("button", { name: "Abrir menú" })).toBeHidden();
+      }
+    }
+
+    console.log("HEADER_ALIGNMENT_METRICS", JSON.stringify(alignmentResults));
+    expect(alignmentResults, "Los títulos deben compartir origen horizontal en todos los anchos probados.").toEqual([
+      { viewportWidth: 1440, horizontalDifference: 0 },
+      { viewportWidth: 768, horizontalDifference: 0 },
+      { viewportWidth: 390, horizontalDifference: 0 },
+      { viewportWidth: 320, horizontalDifference: 0 },
+    ]);
+  } finally {
+    await removeBrowserIdentity(identity);
+    await prisma.$disconnect();
+  }
+});
