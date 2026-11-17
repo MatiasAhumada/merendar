@@ -1,0 +1,12 @@
+# Regresión COD-1598: bajas lógicas con historial
+
+## Ejecución local del 2026-11-16
+
+- Estado inicial: rama `dev`, commit `a847c7f`; PostgreSQL local `localhost/merendar_dev`. Se usaron fixtures sintéticos de integración y navegador, limpiados al terminar. No se ejecutaron migraciones ni se modificó el esquema.
+- El comportamiento solicitado ya estaba implementado antes de esta tarea en el repositorio: COD-1484, el modelo Prisma, repositorio/servicio de familias, sincronizador online/offline, pruebas de integración y E2E. No se cambió lógica de producción.
+- Confirmado: `ALLOW_FAMILY_INTEGRATION_TESTS=true pnpm exec tsx --test --test-concurrency=1 tests/families.integration.test.ts` pasó **1/1**. Cubre autorización, baja de familia e integrante, fecha y autor, conservación de `Person`, exclusión de bajas del padrón activo, reintento idempotente, bloqueos por planilla, referente y último integrante, sincronización y concurrencia.
+- Confirmado: `ALLOW_BROWSER_TESTS=true pnpm exec playwright test tests/e2e/offline-regression.spec.ts --grep 'family deactivation|family offline'` pasó **4/4** en Chromium, móvil 390×844 y escritorio 1440×900. Verifica que una planilla histórica bloquea la baja manteniendo visible la ficha, que la baja de familia se confirma y desaparece de la lista, y que la baja se sincroniza después de una operación offline.
+- Confirmado con gstack Browser `158.0.8127.18`: en `/familias` con un filtro sintético sin coincidencias, los viewports 390×844 y 1440×900 no presentaron overflow horizontal ni errores de consola. La interfaz mostró el acceso del padrón; la sesión del navegador ya estaba autenticada, pero no se inspeccionó su cuenta ni rol y no se hicieron cambios CRUD.
+- Confirmado: `PORT=3023 pnpm start` quedó activo; `/login` respondió HTTP 200 y el filtro sintético del padrón respondió HTTP 200. Las rutas protegidas sin sesión respondieron con redirección 307. El puerto 3022 ya estaba ocupado por una instancia anterior.
+- No probado en esta ejecución: baja individual desde la interfaz gráfica, smoke de despliegue remoto y validación de proveedores R2. La baja individual, sus reglas de referente/último integrante y la persistencia de historial sí se cubrieron en la suite de integración.
+- `pnpm lint` y `pnpm build` terminaron correctamente, sin errores ni warnings de aplicación. El único warning de navegador E2E fue de Playwright por la combinación heredada `NO_COLOR`/`FORCE_COLOR`; los cuatro casos pasaron.
