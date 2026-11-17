@@ -203,6 +203,7 @@ export const merchandiseResponseSchema = z.object({
       authorized: z.boolean(),
       events: z.array(z.object({
         id: z.string(),
+        status: z.enum(["ABIERTA", "CERRADA"]).default("ABIERTA"),
         scheduledAt: z.iso.datetime(),
         location: z.string(),
         responsibleNames: z.string(),
@@ -215,6 +216,7 @@ export const merchandiseResponseSchema = z.object({
     endsAt: z.iso.datetime(),
     beneficiarySheets: z.array(z.object({
       id: z.string(),
+      distributionEventId: z.string().nullable().optional(),
       version: z.number().int(),
       createdAt: z.iso.datetime(),
       beneficiaryCount: z.number().int().nonnegative(),

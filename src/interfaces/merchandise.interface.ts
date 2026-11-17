@@ -78,6 +78,7 @@ export interface MerchandisePeriodRecord {
     authorized: boolean;
     events: Array<{
       id: string;
+      status: "ABIERTA" | "CERRADA";
       scheduledAt: string;
       location: string;
       responsibleNames: string;
@@ -89,7 +90,7 @@ export interface MerchandisePeriodRecord {
   startsAt: string;
   endsAt: string;
   requests: MerchandiseRequestRecord[];
-  beneficiarySheets: Array<{ id: string; version: number; createdAt: string; beneficiaryCount: number }>;
+  beneficiarySheets: Array<{ id: string; distributionEventId?: string | null; version: number; createdAt: string; beneficiaryCount: number }>;
   renditions: RenditionRecord[];
   createdAt: string;
   updatedAt: string;

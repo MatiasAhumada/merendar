@@ -9,6 +9,7 @@ import { lockMerchandisePeriod } from "@/server/repository/merchandise.repositor
 import { nullableSchema } from "@/schemas/offline.schema";
 import type { SynchronizationHandler } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
+import { SynchronizationConflictError } from "@/server/errors/synchronization.error";
 
 export class RecordSynchronizationError extends Error {
   readonly code: "period_not_found" | "beneficiary_not_in_roster" | "beneficiary_dni_missing" | "family_not_allocated" | "family_already_received" | "delivery_unavailable";
@@ -122,9 +123,10 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
     const parsedFamilyDelivery = familyDeliveryPayloadSchema.safeParse(operation.payload);
     if (parsedFamilyDelivery.success && parsedFamilyDelivery.data.id === operation.resourceId) {
       const delivery = parsedFamilyDelivery.data;
+      await transaction.$queryRaw(Prisma.sql`SELECT "id" FROM "DistributionEvent" WHERE "id" = ${delivery.eventId} FOR UPDATE`);
       const event = await transaction.distributionEvent.findUnique({
         where: { id: delivery.eventId },
-        select: { id: true, periodId: true, period: { select: { destination: true, status: true } } },
+        select: { id: true, version: true, status: true, periodId: true, period: { select: { destination: true, status: true } } },
       });
       let period: { id: string; destination: "FAMILIES" | "MERENDERO"; status: "VIGENTE" | "ANULADO" } | null = null;
       if (event) {
@@ -132,6 +134,13 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
       }
       if (!event || !period || period.destination !== "FAMILIES" || period.status !== "VIGENTE") {
         throw new RecordSynchronizationError("period_not_found", 404, SYNC_SERVER_MESSAGES.EL_PERIODO_YA_NO_ESTA_DISPONIBLE_CONECTATE_Y_ELEGI_OTRO_PERIODO_ANTES_DE_E);
+      }
+      if (event.status === "CERRADA") {
+        throw new SynchronizationConflictError(
+          "La jornada se cerró antes de sincronizar este retiro. No se creó un registro duplicado; reabrí la jornada y reintentá el conflicto.",
+          event.version,
+          { id: event.id, status: event.status },
+        );
       }
 
       await lockFamilyRows(transaction, [delivery.familyId]);

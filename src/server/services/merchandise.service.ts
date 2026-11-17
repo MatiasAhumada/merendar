@@ -43,6 +43,7 @@ export async function getVisibleMerchandisePeriods(token: string | undefined) {
 
     const reportEvents = distributionEvents.filter((event) => event.periodId === period.id).map((event) => ({
       id: event.id,
+      status: event.status,
       scheduledAt: event.scheduledAt.toISOString(),
       location: event.location,
       responsibleNames: event.responsibleNames,

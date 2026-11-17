@@ -33,6 +33,7 @@ export const API_ROUTES = {
   RECORDS: "/api/records",
   DELIVERY_RECORDS: "/api/records?includePeriodDetails=true",
   RECORD_HISTORY: "/api/records/history",
+  DISTRIBUTION_EVENT_STATUS: (eventId: string) => `/api/records/distribution-events/${encodeURIComponent(eventId)}/status`,
   RECORD_SHEETS: "/api/records/sheets",
   RECORD_SHEET: (sheetId: string) => `/api/records/sheets/${encodeURIComponent(sheetId)}`,
   RENDITION_DOCUMENT: (documentId: string) => `/api/renditions/documents/${encodeURIComponent(documentId)}`,

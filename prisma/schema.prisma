@@ -453,6 +453,7 @@ model MerchandiseCycle {
 model DistributionEvent {
   id               String            @id @default(cuid())
   version          Int               @default(1)
+  status           DistributionEventStatus @default(ABIERTA)
   periodId         String
   scheduledAt      DateTime          @db.Date
   location         String
@@ -470,6 +471,11 @@ model DistributionEvent {
   updatedAt        DateTime          @updatedAt
 
   @@index([periodId, scheduledAt])
+}
+
+enum DistributionEventStatus {
+  ABIERTA
+  CERRADA
 }
 
 model DistributionAllocation {

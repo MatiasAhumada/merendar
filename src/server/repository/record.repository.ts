@@ -192,7 +192,7 @@ export async function findDistributionEvents(periodId?: string) {
   const events = await prisma.distributionEvent.findMany({
     where,
     select: {
-      id: true, version: true, periodId: true, scheduledAt: true, location: true, responsibleNames: true, notes: true,
+      id: true, version: true, status: true, periodId: true, scheduledAt: true, location: true, responsibleNames: true, notes: true,
       familyDeliveries: { select: {
         id: true, familyId: true, moduleQuantity: true, family: { select: { name: true } },
         participants: { select: {

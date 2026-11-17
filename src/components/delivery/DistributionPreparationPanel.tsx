@@ -7,6 +7,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import clientAxios from "@/utils/clientAxios.util";
+import { API_ROUTES } from "@/constants/routes.constant";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,6 +30,38 @@ interface DistributionPreparationPanelProps {
   canWrite: boolean;
   isOnline: boolean;
   onRefresh: () => Promise<void>;
+}
+
+function nextDistributionStatus(status: "ABIERTA" | "CERRADA") {
+  if (status === "ABIERTA") return "CERRADA" as const;
+  return "ABIERTA" as const;
+}
+
+function distributionStatusLabel(status: "ABIERTA" | "CERRADA") {
+  if (status === "CERRADA") return "Cerrada";
+  return "Abierta";
+}
+
+function transitionButtonLabel(status: "ABIERTA" | "CERRADA") {
+  if (status === "ABIERTA") return "Cerrar jornada";
+  return "Reabrir jornada";
+}
+
+function transitionDialogTitle(status: "ABIERTA" | "CERRADA") {
+  if (status === "ABIERTA") return "¿Cerrar esta jornada?";
+  return "¿Reabrir esta jornada?";
+}
+
+function transitionDialogDescription(status: "ABIERTA" | "CERRADA") {
+  if (status === "ABIERTA") return "No se podrán registrar nuevos retiros. La consulta, el historial y las planillas seguirán disponibles.";
+  return "Los usuarios con permiso de escritura podrán volver a registrar retiros en esta jornada.";
+}
+
+function transitionActionLabel(status: "ABIERTA" | "CERRADA" | undefined, isTransitioning: boolean) {
+  if (isTransitioning) return "Actualizando…";
+  if (status === "ABIERTA") return "Confirmar cierre";
+  if (status === "CERRADA") return "Confirmar reapertura";
+  return "Confirmar";
 }
 
 interface AllocationRow {
@@ -96,6 +131,8 @@ export function DistributionPreparationPanel({ data, periodId, userId, sessionEx
   const [offlineOperations, setOfflineOperations] = useState<OfflineOperation[]>([]);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [eventToTransition, setEventToTransition] = useState<RecordsCollection["distributionEvents"][number] | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const receipts = data.moduleReceipts.filter((receipt) => receipt.periodId === periodId && receipt.remainingQuantity > 0 && Number.isInteger(receipt.remainingQuantity));
   const supplyReceipts = data.supplyReceipts.filter((receipt) => receipt.periodId === periodId && receipt.remainingQuantity > 0);
   const selectedPeriod = data.periods.find((period) => period.id === periodId);
@@ -223,6 +260,30 @@ export function DistributionPreparationPanel({ data, periodId, userId, sessionEx
     });
   }
 
+  async function transitionSelectedEvent() {
+    if (!eventToTransition) return;
+    setIsTransitioning(true);
+    setError("");
+    try {
+      const nextStatus = nextDistributionStatus(eventToTransition.status);
+      await clientAxios.patch(API_ROUTES.DISTRIBUTION_EVENT_STATUS(eventToTransition.id), {
+        status: nextStatus,
+        expectedStatus: eventToTransition.status,
+      });
+      setEventToTransition(null);
+      if (nextStatus === "CERRADA") {
+        setNotice("La jornada quedó cerrada.");
+      } else {
+        setNotice("La jornada volvió a estar abierta.");
+      }
+      await onRefresh();
+    } catch {
+      setError("No se pudo cambiar el estado. Actualizá la jornada y volvé a intentarlo.");
+    } finally {
+      setIsTransitioning(false);
+    }
+  }
+
   return (
     <section className="flex flex-col gap-4" aria-labelledby="distribution-preparation-title">
       <Card>
@@ -295,9 +356,21 @@ export function DistributionPreparationPanel({ data, periodId, userId, sessionEx
       <Card>
         <CardHeader><CardTitle>Jornadas preparadas</CardTitle><CardDescription>Los reportes se pueden volver a descargar sin crear movimientos nuevos.</CardDescription></CardHeader>
         <CardContent>
-          {data.distributionEvents.filter((event) => event.periodId === periodId).length ? <ul className="divide-y divide-border">{data.distributionEvents.filter((event) => event.periodId === periodId).map((event) => <li key={event.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium">{event.scheduledAt} · {event.location}</p><p className="text-sm text-muted-foreground">{event.allocations.length ? `${event.allocations.length} familias · ${event.allocations.reduce((total, allocation) => total + allocation.moduleQuantity, 0)} módulos` : `${event.supplyAllocations.length} insumos · cantidades por unidad de producto`} · {event.responsibleNames}</p><p className="text-xs text-muted-foreground">{[...event.allocations.map((allocation) => `${allocation.familyName} (${allocation.remittanceNumber})`), ...event.supplyAllocations.map((allocation) => `${allocation.productName} ${allocation.presentation}: ${allocation.quantity} ${allocation.unit} (${allocation.remittanceNumber})`)].join(" · ")}</p></div><Button variant="outline" size="sm" onClick={() => void downloadEventReport(event)}><HugeiconsIcon icon={Download04Icon} data-icon="inline-start" /> {DELIVERY_REPORT_TEXT.DOWNLOAD}</Button></li>)}</ul> : <p className="rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">No hay jornadas guardadas para este período todavía.</p>}
+          {data.distributionEvents.filter((event) => event.periodId === periodId).length ? <ul className="divide-y divide-border">{data.distributionEvents.filter((event) => event.periodId === periodId).map((event) => <li key={event.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-medium">{event.scheduledAt} · {event.location}</p><Badge variant={event.status === "CERRADA" ? "secondary" : "outline"}>{distributionStatusLabel(event.status)}</Badge></div><p className="text-sm text-muted-foreground">{event.allocations.length ? `${event.allocations.length} familias · ${event.allocations.reduce((total, allocation) => total + allocation.moduleQuantity, 0)} módulos` : `${event.supplyAllocations.length} insumos · cantidades por unidad de producto`} · {event.responsibleNames}</p><p className="text-xs text-muted-foreground">{[...event.allocations.map((allocation) => `${allocation.familyName} (${allocation.remittanceNumber})`), ...event.supplyAllocations.map((allocation) => `${allocation.productName} ${allocation.presentation}: ${allocation.quantity} ${allocation.unit} (${allocation.remittanceNumber})`)].join(" · ")}</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => void downloadEventReport(event)}><HugeiconsIcon icon={Download04Icon} data-icon="inline-start" /> {DELIVERY_REPORT_TEXT.DOWNLOAD}</Button>{canWrite && isOnline ? <Button variant="outline" size="sm" onClick={() => setEventToTransition(event)}>{transitionButtonLabel(event.status)}</Button> : null}</div></li>)}</ul> : <p className="rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">No hay jornadas guardadas para este período todavía.</p>}
         </CardContent>
       </Card>
+      <Dialog open={Boolean(eventToTransition)} onOpenChange={(open) => { if (!open && !isTransitioning) setEventToTransition(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{eventToTransition ? transitionDialogTitle(eventToTransition.status) : "Actualizar jornada"}</DialogTitle>
+            <DialogDescription>{eventToTransition ? transitionDialogDescription(eventToTransition.status) : "Confirmá el cambio de estado de la jornada."}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEventToTransition(null)} disabled={isTransitioning}>Cancelar</Button>
+            <Button onClick={() => void transitionSelectedEvent()} disabled={isTransitioning}>{transitionActionLabel(eventToTransition?.status, isTransitioning)}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

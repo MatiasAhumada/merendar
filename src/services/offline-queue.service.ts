@@ -530,6 +530,26 @@ export async function retryOfflineOperation(userId: string, operationId: string)
   await synchronizeOfflineQueue(userId);
 }
 
+export async function retryOfflineConflictOperation(userId: string, operationId: string) {
+  const operations = await listOfflineOperations(userId);
+  const selectedOperation = operations.find((operation) => operation.operationId === operationId);
+
+  if (!selectedOperation || selectedOperation.status !== "conflict") {
+    throw new OfflineQueueError(OFFLINE_OPERATION_MESSAGES.CONFLICT_NOT_FOUND);
+  }
+
+  await updateOperation(userId, operationId, (operation) => ({
+    ...operation,
+    status: "pending",
+    attempts: 0,
+    leaseExpiresAt: null,
+    message: null,
+    remoteVersion: null,
+    remoteSnapshot: null,
+  }));
+  await synchronizeOfflineQueue(userId);
+}
+
 export async function updateOfflineOperationPayload(userId: string, operationId: string, payload: JsonValue) {
   const operations = await listOfflineOperations(userId);
   const selectedOperation = operations.find((operation) => operation.operationId === operationId);

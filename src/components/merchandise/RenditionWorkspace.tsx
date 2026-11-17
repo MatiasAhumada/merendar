@@ -363,6 +363,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
 
   const selectedPeriod = periods.find((period) => period.id === selectedPeriodId) ?? periods[0];
   const selectedSheet = selectedPeriod?.beneficiarySheets.find((sheet) => sheet.id === selectedSheetId) ?? selectedPeriod?.beneficiarySheets[0];
+  const selectedSheetEvent = selectedPeriod?.reportDetails.events.find((event) => event.id === selectedSheet?.distributionEventId);
   const selectedRendition = selectedPeriod?.renditions.find((rendition) => rendition.beneficiarySheetId === selectedSheet?.id);
   const visibleOperations = useMemo(() => renditionOperations(operations), [operations]);
   const visibleEmissionOperations = useMemo(() => pendingEmissionOperations(operations), [operations]);
@@ -729,6 +730,8 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         <p className="text-sm"><strong>{RENDITION_UI_TEXT.REFERENCIA_VINCULADA}</strong> {RENDITION_UI_TEXT.PLANILLA_VERSION}{selectedSheet.version} {APPLICATION_UI_TEXT.TEXT}{selectedSheet.beneficiaryCount} {RENDITION_UI_TEXT.BENEFICIARIOS_EMITIDA_EL}{formatDate(selectedSheet.createdAt)}{RENDITION_UI_TEXT.TEXT}</p>
         <SheetDocumentLink sheetId={selectedSheet.id} offlineMode={offlineMode} preparedDocuments={preparedDocuments} />
       </div> : null}
+
+      {selectedSheetEvent?.status === "ABIERTA" ? <Alert variant="info"><AlertTitle>Jornada abierta</AlertTitle><AlertDescription>Esta planilla corresponde a una jornada abierta. Cerrala desde Preparar jornada cuando terminen los retiros; el cierre no modifica las planillas ni documentos existentes.</AlertDescription></Alert> : null}
 
       {canWrite && selectedPeriod && selectedSheet ? <section className="space-y-4 rounded-2xl border p-4" aria-labelledby="rendition-emission-title">
         <div className="space-y-1">
