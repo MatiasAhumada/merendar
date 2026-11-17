@@ -489,7 +489,7 @@ function FamilyDetails({ family, canWrite, pendingMemberIds, onClose, onAddMembe
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{deactivationTarget === "family" ? FAMILY_UI_TEXT.DAR_DE_BAJA_LA_FAMILIA : FAMILY_UI_TEXT.DAR_DE_BAJA_A_ESTA_PERSONA}</DialogTitle>
-            <DialogDescription>{FAMILY_UI_TEXT.LA_BAJA_CONSERVA_LA_FICHA_Y_LOS_DATOS_DE_LAS_PERSONAS_SI_HAY_ENTREGAS_O}</DialogDescription>
+            <DialogDescription>{FAMILY_UI_TEXT.LA_BAJA_CONSERVA_LA_FICHA_Y_EL_HISTORIAL}</DialogDescription>
           </DialogHeader>
           <div className="rounded-xl bg-muted p-3 text-sm font-medium">{deactivationTarget === "family" ? family.name : `${deactivationTarget?.firstName ?? ""} ${deactivationTarget?.lastName ?? ""}`}</div>
           {deactivationError ? <p role="alert" className="text-sm text-destructive">{deactivationError}</p> : null}

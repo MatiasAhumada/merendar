@@ -772,7 +772,7 @@ test("recovers a confirmed family after a failed list refresh without duplicatin
   }
 });
 
-test("confirms family deactivation, preserves sheet history and explains blocked records", async ({ browser, context, page }, testInfo) => {
+test("confirms family deactivation with sheet history and keeps the historical snapshot", async ({ browser, context, page }, testInfo) => {
   const president = await createBrowserIdentity(UserRole.PRESIDENTE);
   const suffix = randomUUID();
   const familyNames = [`COD1484 con planilla ${suffix}`, `COD1484 sin historial ${suffix}`];
@@ -849,16 +849,19 @@ test("confirms family deactivation, preserves sheet history and explains blocked
     await page.getByRole("button", { name: "Ver ficha familiar" }).click();
     await page.getByRole("button", { name: "Dar de baja familia" }).click();
     await expect(page.getByRole("heading", { name: "Dar de baja la familia" })).toBeVisible();
-    await expect(page.getByText(/Si hay entregas o planillas históricas/)).toBeVisible();
+    await expect(page.getByText(/el historial de entregas y planillas para su consulta/)).toBeVisible();
     await testInfo.attach("family-deactivation-confirmation.png", {
       body: await page.screenshot({ fullPage: true }),
       contentType: "image/png",
     });
     await page.getByRole("button", { name: "Confirmar baja" }).click();
-    await expect(page.getByText(/aparece en entregas o planillas históricas/).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: familyWithSheet.name })).toBeVisible();
-    expect((await prisma.family.findUniqueOrThrow({ where: { id: familyWithSheet.id }, select: { deactivatedAt: true } })).deactivatedAt).toBeNull();
-    await page.getByRole("button", { name: "Cerrar ficha" }).click();
+    await expect(page.getByText("No hay resultados", { exact: true })).toBeVisible();
+    const deactivatedFamilyWithSheet = await prisma.family.findUniqueOrThrow({ where: { id: familyWithSheet.id }, select: { deactivatedAt: true, deactivatedById: true } });
+    expect(deactivatedFamilyWithSheet.deactivatedAt).toBeTruthy();
+    expect(deactivatedFamilyWithSheet.deactivatedById).toBe(president.userId);
+    const retainedSheet = await prisma.beneficiarySheet.findFirstOrThrow({ where: { periodId: period.id } });
+    expect(JSON.stringify(retainedSheet.snapshot).includes(personIdWithSheet ?? "missing-person-id")).toBe(true);
+    expect(await prisma.person.count({ where: { id: personIdWithSheet ?? "" } })).toBe(1);
 
     await page.getByRole("searchbox", { name: "Buscar familias" }).fill(secondFamily.name);
     await page.getByRole("button", { name: "Ver ficha familiar" }).click();

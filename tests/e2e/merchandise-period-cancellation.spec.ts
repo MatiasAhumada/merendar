@@ -1,4 +1,5 @@
 import "dotenv/config";
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { UserRole } from "@prisma/client";
@@ -60,7 +61,7 @@ test("cancels a period with history and rejects a previously queued request", as
     await expect(queuedPeriodCard.getByRole("heading", { name: `Solicitud ${queuedRequestNumber}` })).toBeVisible();
 
     const queuedPeriod = await prisma.merchandisePeriod.findFirst({ where: { label: queuedPeriodLabel } });
-    expect(queuedPeriod).not.toBeNull();
+    assert.ok(queuedPeriod);
     const cancellationOperation: SubmittedSyncOperation = {
       operationId: randomUUID(),
       userId: identity.userId,
