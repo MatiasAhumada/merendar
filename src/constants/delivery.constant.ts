@@ -205,6 +205,32 @@ export const DELIVERY_UI_TEXT = {
   FIRMA_EN_PAPEL_ESTE_DOCUMENTO_ES_UNA_PLANILLA_PROPIA_DE_MERENDAR_NO_UN_FOR: "Firma en papel. Este documento es una planilla propia de Merendar, no un formulario oficial ministerial.",
 } as const;
 
+export const RECORD_HISTORY_UI_TEXT = {
+  TITLE: "Historial de entregas",
+  DESCRIPTION: "Consultá entregas individuales y retiros por jornada entre períodos, incluso para familias dadas de baja.",
+  PERSON_FILTER: "Persona, DNI o familia",
+  PERSON_FILTER_HINT: "Busca por nombre, apellido, DNI o nombre de familia",
+  FAMILY_FILTER: "Familia",
+  FROM: "Desde",
+  TO: "Hasta",
+  PERIOD: "Período",
+  ALL_PERIODS: "Todos los períodos",
+  EMPTY: "No hay entregas que coincidan con estos filtros.",
+  OFFLINE: "Consulta sin conexión: muestra únicamente el historial guardado en la preparación vigente de este dispositivo.",
+  ONLINE: "Resultados consultados con tu permiso vigente.",
+  LOADING: "Consultando historial…",
+  ERROR: "No se pudo consultar el historial de entregas.",
+  PREVIOUS: "Anterior",
+  NEXT: "Siguiente",
+  PAGE: (page: number, total: number) => {
+    let label = "entregas";
+    if (total === 1) label = "entrega";
+    return `Página ${page} · ${total} ${label}`;
+  },
+  INDIVIDUAL: "Registro individual",
+  FAMILY_EVENT: "Retiro por jornada",
+} as const;
+
 export const DELIVERY_ERROR_MESSAGES = {
   ASIGNACION_SUPERA_MODULOS_DISPONIBLES: "La asignación supera los módulos recibidos que siguen disponibles.",
   ASIGNACION_SUPERA_INSUMOS_DISPONIBLES: "La cantidad asignada supera lo recibido disponible para este producto.",

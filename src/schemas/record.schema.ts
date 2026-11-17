@@ -119,6 +119,7 @@ export const recordsCollectionSchema = z.object({
   records: z.array(z.object({
     id: z.string(),
     periodId: z.string(),
+    familyDeliveryId: z.string().nullable().optional(),
     personId: z.string(),
     receivedAt: z.iso.datetime(),
     moduleType: z.string(),

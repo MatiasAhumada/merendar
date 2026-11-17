@@ -1,5 +1,6 @@
 import { Prisma, type Prisma as PrismaTypes } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import type { RecordHistoryQuery } from "@/schemas/record-history.schema";
 
 export async function findRecordPeriods() {
   return prisma.merchandisePeriod.findMany({
@@ -51,6 +52,112 @@ export async function findDistributionRecords(periodId?: string) {
     include: { familyMember: { include: { person: { select: { id: true, firstName: true, lastName: true, dni: true } }, family: { select: { id: true, name: true } } } } },
     orderBy: { createdAt: "desc" },
   });
+}
+
+export async function findRecordHistory(filters: RecordHistoryQuery) {
+  const dateFilter: PrismaTypes.DateTimeFilter = {};
+  if (filters.from) dateFilter.gte = new Date(`${filters.from}T00:00:00.000Z`);
+  if (filters.to) dateFilter.lte = new Date(`${filters.to}T23:59:59.999Z`);
+  const recordWhere: PrismaTypes.DistributionRecordWhereInput = {
+    familyDeliveryId: null,
+  };
+  const eventWhere: PrismaTypes.DistributionEventWhereInput = {
+  };
+  if (filters.periodId) {
+    recordWhere.periodId = filters.periodId;
+    eventWhere.periodId = filters.periodId;
+  }
+  if (filters.from || filters.to) {
+    recordWhere.receivedAt = dateFilter;
+    eventWhere.scheduledAt = dateFilter;
+  }
+  const participantWhere: PrismaTypes.DistributionParticipantWhereInput = {
+    familyDelivery: { is: { event: { is: eventWhere } } },
+  };
+  const familyMatch: PrismaTypes.StringFilter = {};
+  if (filters.family) {
+    familyMatch.contains = filters.family;
+    familyMatch.mode = "insensitive";
+  }
+
+  const legacyConditions: PrismaTypes.DistributionRecordWhereInput[] = [];
+  const participantConditions: PrismaTypes.DistributionParticipantWhereInput[] = [];
+  if (filters.family) {
+    legacyConditions.push({ familyMember: { family: { name: familyMatch } } });
+    participantConditions.push({ familyDelivery: { family: { name: familyMatch } } });
+  }
+  let queryTerms: string[] = [];
+  if (filters.query) queryTerms = filters.query.split(/\s+/);
+  for (const queryTerm of queryTerms) {
+    const textMatch: PrismaTypes.StringFilter = { contains: queryTerm, mode: "insensitive" };
+    legacyConditions.push({ OR: [
+      { familyMember: { family: { name: textMatch } } },
+      { familyMember: { person: { OR: [{ firstName: textMatch }, { lastName: textMatch }, { dni: textMatch }] } } },
+    ] });
+    participantConditions.push({ OR: [
+      { familyDelivery: { family: { name: textMatch } } },
+      { familyMember: { person: { OR: [{ firstName: textMatch }, { lastName: textMatch }, { dni: textMatch }] } } },
+    ] });
+  }
+  if (legacyConditions.length) recordWhere.AND = legacyConditions;
+  if (participantConditions.length) participantWhere.AND = participantConditions;
+
+  const offset = (filters.page - 1) * filters.pageSize;
+  const candidateLimit = Math.min(offset + filters.pageSize + 1, 5000);
+  const [legacyRecords, participants, legacyCount, participantCount] = await Promise.all([
+    prisma.distributionRecord.findMany({
+      where: recordWhere,
+      orderBy: [{ receivedAt: "desc" }, { id: "desc" }],
+      take: candidateLimit,
+      select: {
+        id: true, periodId: true, receivedAt: true, moduleType: true, quantity: true,
+        period: { select: { label: true } },
+        familyMember: { select: { person: { select: { firstName: true, lastName: true, dni: true } }, family: { select: { id: true, name: true } } } },
+      },
+    }),
+    prisma.distributionParticipant.findMany({
+      where: participantWhere,
+      orderBy: [{ familyDelivery: { event: { scheduledAt: "desc" } } }, { id: "desc" }],
+      take: candidateLimit,
+      select: {
+        id: true,
+        familyMember: { select: { person: { select: { firstName: true, lastName: true, dni: true } } } },
+        familyDelivery: { select: {
+          familyId: true, moduleQuantity: true, family: { select: { name: true } },
+          event: { select: { scheduledAt: true, periodId: true, period: { select: { label: true } } } },
+        } },
+      },
+    }),
+    prisma.distributionRecord.count({ where: recordWhere }),
+    prisma.distributionParticipant.count({ where: participantWhere }),
+  ]);
+
+  const rows = [
+    ...legacyRecords.map((record) => ({
+      id: `record-${record.id}`, periodId: record.periodId, periodLabel: record.period.label,
+      familyId: record.familyMember.family.id, familyName: record.familyMember.family.name,
+      personName: `${record.familyMember.person.firstName} ${record.familyMember.person.lastName}`,
+      dni: record.familyMember.person.dni, receivedAt: record.receivedAt.toISOString().slice(0, 10),
+      moduleType: record.moduleType, quantity: record.quantity, source: "individual" as const,
+    })),
+    ...participants.map((participant) => ({
+      id: `participant-${participant.id}`, periodId: participant.familyDelivery.event.periodId,
+      periodLabel: participant.familyDelivery.event.period.label, familyId: participant.familyDelivery.familyId,
+      familyName: participant.familyDelivery.family.name,
+      personName: `${participant.familyMember.person.firstName} ${participant.familyMember.person.lastName}`,
+      dni: participant.familyMember.person.dni,
+      receivedAt: participant.familyDelivery.event.scheduledAt.toISOString().slice(0, 10),
+      moduleType: "Módulo familiar", quantity: participant.familyDelivery.moduleQuantity, source: "jornada" as const,
+    })),
+  ].sort((left, right) => right.receivedAt.localeCompare(left.receivedAt) || right.id.localeCompare(left.id));
+
+  return {
+    records: rows.slice(offset, offset + filters.pageSize),
+    total: legacyCount + participantCount,
+    page: filters.page,
+    pageSize: filters.pageSize,
+    hasMore: offset + filters.pageSize < legacyCount + participantCount,
+  };
 }
 
 export async function findModuleReceipts() {

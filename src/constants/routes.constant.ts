@@ -32,6 +32,7 @@ export const API_ROUTES = {
   MERCHANDISE_REQUEST_DOCUMENTS: (requestId: string) => `/api/merchandise/requests/${encodeURIComponent(requestId)}/documents`,
   RECORDS: "/api/records",
   DELIVERY_RECORDS: "/api/records?includePeriodDetails=true",
+  RECORD_HISTORY: "/api/records/history",
   RECORD_SHEETS: "/api/records/sheets",
   RECORD_SHEET: (sheetId: string) => `/api/records/sheets/${encodeURIComponent(sheetId)}`,
   RENDITION_DOCUMENT: (documentId: string) => `/api/renditions/documents/${encodeURIComponent(documentId)}`,
