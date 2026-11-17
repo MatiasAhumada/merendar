@@ -5,6 +5,7 @@ import { DELIVERY_ERROR_MESSAGES } from "@/constants/delivery.constant";
 import { beneficiarySheetDraftSchema, distributionPreparationPayloadSchema, distributionRecordPayloadSchema, familyDeliveryPayloadSchema } from "@/schemas/record.schema";
 import { Prisma } from "@prisma/client";
 import { lockFamilyRows } from "@/server/repository/record.repository";
+import { lockMerchandisePeriod } from "@/server/repository/merchandise.repository";
 import { nullableSchema } from "@/schemas/offline.schema";
 import type { SynchronizationHandler } from "@/interfaces/synchronization.interface";
 import type { JsonObject } from "@/types/json-value";
@@ -32,9 +33,9 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
     const parsedSheetDraft = beneficiarySheetDraftSchema.safeParse(operation.payload);
     if (parsedSheetDraft.success && parsedSheetDraft.data.id === operation.resourceId) {
       const draft = parsedSheetDraft.data;
-      const period = await transaction.merchandisePeriod.findUnique({ where: { id: draft.periodId }, select: { id: true, destination: true } });
+      const period = await lockMerchandisePeriod(transaction, draft.periodId);
 
-      if (!period || period.destination !== "FAMILIES") {
+      if (!period || period.destination !== "FAMILIES" || period.status !== "VIGENTE") {
         throw new RecordSynchronizationError("period_not_found", 404, SYNC_SERVER_MESSAGES.EL_PERIODO_YA_NO_ESTA_DISPONIBLE_CONECTATE_Y_ELEGI_OTRO_PERIODO_ANTES_DE_E);
       }
 
@@ -125,7 +126,11 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
         where: { id: delivery.eventId },
         select: { id: true, periodId: true, period: { select: { destination: true, status: true } } },
       });
-      if (!event || event.period.destination !== "FAMILIES" || event.period.status !== "VIGENTE") {
+      let period: { id: string; destination: "FAMILIES" | "MERENDERO"; status: "VIGENTE" | "ANULADO" } | null = null;
+      if (event) {
+        period = await lockMerchandisePeriod(transaction, event.periodId);
+      }
+      if (!event || !period || period.destination !== "FAMILIES" || period.status !== "VIGENTE") {
         throw new RecordSynchronizationError("period_not_found", 404, SYNC_SERVER_MESSAGES.EL_PERIODO_YA_NO_ESTA_DISPONIBLE_CONECTATE_Y_ELEGI_OTRO_PERIODO_ANTES_DE_E);
       }
 
@@ -185,8 +190,8 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
     const parsedPreparation = distributionPreparationPayloadSchema.safeParse(operation.payload);
     if (parsedPreparation.success && parsedPreparation.data.id === operation.resourceId) {
       const preparation = parsedPreparation.data;
-      const period = await transaction.merchandisePeriod.findFirst({ where: { id: preparation.periodId, status: "VIGENTE" }, select: { id: true, destination: true } });
-      if (!period) {
+      const period = await lockMerchandisePeriod(transaction, preparation.periodId);
+      if (!period || period.status !== "VIGENTE") {
         throw new RecordSynchronizationError("period_not_found", 404, SYNC_SERVER_MESSAGES.EL_PERIODO_YA_NO_ESTA_DISPONIBLE_CONECTATE_Y_ELEGI_OTRO_PERIODO_ANTES_DE_E);
       }
 
@@ -254,7 +259,7 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
     }
 
     const input = parsedPayload.data;
-    const period = await transaction.merchandisePeriod.findUnique({ where: { id: input.periodId }, select: { id: true, destination: true } });
+    const period = await lockMerchandisePeriod(transaction, input.periodId);
     const preparedEvent = await transaction.distributionEvent.findFirst({ where: { periodId: input.periodId }, select: { id: true } });
     if (preparedEvent) {
       throw new RecordSynchronizationError("family_already_received", 409, DELIVERY_ERROR_MESSAGES.LOS_RETIROS_DE_ESTE_PERIODO_SE_REGISTRAN_POR_FAMILIA_Y_JORNADA);
@@ -265,7 +270,7 @@ export const recordSynchronizationHandler: SynchronizationHandler = {
       include: { person: { select: { firstName: true, lastName: true, dni: true } }, family: { select: { name: true, address: true } } },
     });
 
-    if (!period || period.destination !== "FAMILIES" || !membership) {
+    if (!period || period.destination !== "FAMILIES" || period.status !== "VIGENTE" || !membership) {
       throw new RecordSynchronizationError("beneficiary_not_in_roster", 400, SYNC_SERVER_MESSAGES.EL_PERIODO_O_BENEFICIARIO_YA_NO_ESTA_DISPONIBLE_EN_EL_PADRON);
     }
 

@@ -178,6 +178,7 @@ export const SYNC_SERVER_MESSAGES = {
   NO_SE_PUDO_COMPLETAR_LA_PREPARACION_AUTOMATICA: "No se pudo completar la preparación automática.",
   P2002: "P2002",
   P2034: "P2034",
+  P2010: "P2010",
   LA_CLAVE_DE_OPERACION_YA_SE_USO_CON_OTRA_CUENTA_O_CON_OTROS_DATOS: "La clave de operación ya se usó con otra cuenta o con otros datos.",
   EL_REGISTRO_CAMBIO_EN_OTRO_DISPOSITIVO: "El registro cambió en otro dispositivo.",
   EL_PERIODO_YA_NO_ESTA_DISPONIBLE_CONECTATE_Y_ELEGI_OTRO_PERIODO_ANTES_DE_E: "El período ya no está disponible. Conectate y elegí otro período antes de emitir la planilla.",

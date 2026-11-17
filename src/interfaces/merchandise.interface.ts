@@ -71,6 +71,9 @@ export interface MerchandisePeriodRecord {
   agency: string;
   destination: MerchandiseDestination;
   status: "VIGENTE" | "ANULADO";
+  cancelledAt: string | null;
+  cancelledBy: { id: string; name: string } | null;
+  cancellationReason: string | null;
   reportDetails: {
     authorized: boolean;
     events: Array<{

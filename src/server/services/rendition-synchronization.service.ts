@@ -10,6 +10,7 @@ import { createRenditionEmissionPdfs } from "@/server/services/rendition-emissio
 import { storeDocumentObject } from "@/server/services/document-storage.service";
 import { hydrateRenditionEmissionSource } from "@/server/services/rendition-emission-storage.service";
 import { findRenditionEmissionSource, saveRenditionEmissionInTransaction, storeRenditionEmissionFiles } from "@/server/repository/rendition-emission.repository";
+import { lockMerchandisePeriod } from "@/server/repository/merchandise.repository";
 
 import {
   renditionDocumentPayloadSchema,
@@ -116,6 +117,11 @@ async function applyDocuments(
   operation: SubmittedSyncOperation,
   payload: RenditionDocumentPayload,
 ) {
+  const period = await lockMerchandisePeriod(transaction, payload.periodId);
+  if (!period || period.status !== "VIGENTE") {
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP, 409);
+  }
+
   const sheet = await transaction.beneficiarySheet.findUnique({
     where: { id: payload.beneficiarySheetId },
     select: { id: true, periodId: true, distributionEventId: true },
@@ -205,9 +211,13 @@ async function applySubmission(
     throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PRESENTACION_NO_COINCIDE_CON_LA_RENDICION_SELECCIONADA);
   }
 
-  const rendition = await transaction.rendition.findUnique({ where: { id: payload.renditionId }, select: { id: true } });
+  const rendition = await transaction.rendition.findUnique({ where: { id: payload.renditionId }, select: { id: true, periodId: true } });
   if (!rendition) {
     throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_RENDICION_SELECCIONADA, 404);
+  }
+  const period = await lockMerchandisePeriod(transaction, rendition.periodId);
+  if (!period || period.status !== "VIGENTE") {
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP, 409);
   }
 
   const emission = await transaction.renditionEmission.findFirst({
@@ -295,6 +305,11 @@ async function applyEmission(
 ) {
   if (payload.id !== operation.resourceId) {
     throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_EMISION_NO_COINCIDE_CON_LA_OPERACION_PENDIENTE);
+  }
+
+  const period = await lockMerchandisePeriod(transaction, payload.periodId);
+  if (!period || period.status !== "VIGENTE") {
+    throw new RenditionDocumentError(RENDITION_ERROR_MESSAGES.LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP, 409);
   }
 
   const sheet = await transaction.beneficiarySheet.findUnique({

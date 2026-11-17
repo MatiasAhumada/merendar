@@ -488,14 +488,14 @@ test("creates a dependent merchandise chain offline and synchronizes each operat
     await page.locator('input[id^="request-date-"]').fill("2026-10-25");
     await page.locator('input[id^="request-quantity-"]').fill("3");
     await page.getByRole("button", { name: "Guardar solicitud" }).click();
-    await expect(page.getByRole("heading", { name: `Solicitud ${requestNumber}` })).toBeVisible();
+    await expect(createdPeriodCard.getByRole("heading", { name: `Solicitud ${requestNumber}` })).toBeVisible();
 
-    await page.getByRole("button", { name: "Registrar cupo" }).click();
+    await createdPeriodCard.getByRole("button", { name: "Registrar cupo" }).click();
     await page.locator('input[id^="quota-quantity-"]').fill("3");
     await page.locator('input[id^="quota-date-"]').fill("2026-10-25");
     await page.getByRole("button", { name: "Guardar cupo" }).click();
 
-    await page.getByRole("button", { name: "Registrar remito" }).click();
+    await createdPeriodCard.getByRole("button", { name: "Registrar remito" }).click();
     await page.locator('input[id^="remittance-number-"]').fill(remittanceNumber);
     await page.locator('input[id^="remittance-date-"]').fill("2026-10-25");
     await page.locator('input[id^="remittance-quantity-"]').fill("3");
@@ -528,7 +528,7 @@ test("creates a dependent merchandise chain offline and synchronizes each operat
     expect(queuedOperations[3]?.dependencies).toEqual(expect.arrayContaining([queuedOperations[1]?.operationId, queuedOperations[2]?.operationId]));
     expect(await prisma.merchandisePeriod.count({ where: { id: periodId } })).toBe(0);
 
-    await context.setOffline(false);
+    await context.setOffline(false).catch(() => undefined);
     await expect.poll(async () => prisma.synchronizationReceipt.count({ where: { operationId: { in: queuedOperations.map((operation) => operation.operationId) } } }), { timeout: 30_000 }).toBe(4);
     const syncedPeriod = await prisma.merchandisePeriod.findUnique({
       where: { id: periodId },

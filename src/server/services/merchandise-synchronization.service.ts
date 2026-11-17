@@ -10,6 +10,7 @@ import type { JsonObject } from "@/types/json-value";
 import { createMerchandiseRequestPdf } from "@/services/merchandise-request-document-pdf.service";
 import { storeDocumentObject } from "@/server/services/document-storage.service";
 import { prisma } from "@/lib/prisma";
+import { lockMerchandisePeriod } from "@/server/repository/merchandise.repository";
 
 import {
   serializedMerchandiseOperationPayloadSchema,
@@ -157,7 +158,7 @@ async function applyRequest(transaction: Prisma.TransactionClient, operation: Su
     return conflict(1, { kind: "request_number_exists", id: duplicate.id, requestNumber: duplicate.requestNumber });
   }
 
-  const period = await transaction.merchandisePeriod.findUnique({ where: { id: payload.periodId } });
+  const period = await lockMerchandisePeriod(transaction, payload.periodId);
 
   if (!period || period.status !== "VIGENTE") {
     let currentVersion = 0;
@@ -210,7 +211,7 @@ async function applyQuota(transaction: Prisma.TransactionClient, operation: Subm
     return conflict(1, { kind: "quota_exists", id: existingQuota.id, approvedQuantity: existingQuota.approvedQuantity.toNumber() });
   }
 
-  const request = await transaction.merchandiseRequest.findUnique({ where: { id: payload.requestId }, include: { items: true } });
+  const request = await transaction.merchandiseRequest.findUnique({ where: { id: payload.requestId }, include: { items: true, period: true } });
 
   if (!request || request.status === "CANCELADA" || request.status === "RECHAZADA") {
     let currentVersion = 0;
@@ -220,6 +221,11 @@ async function applyQuota(transaction: Prisma.TransactionClient, operation: Subm
     }
 
     return conflict(currentVersion, { kind: "request_missing_or_cancelled", id: payload.requestId });
+  }
+
+  const period = await lockMerchandisePeriod(transaction, request.periodId);
+  if (!period || period.status !== "VIGENTE") {
+    return conflict(period?.version ?? 0, { kind: "period_missing_or_cancelled", id: request.periodId });
   }
 
   if (payload.approvedQuantity > request.requestedQuantity.toNumber()) {
@@ -265,6 +271,13 @@ async function applyRemittance(transaction: Prisma.TransactionClient, operation:
   }
 
   const quota = await transaction.merchandiseQuota.findUnique({ where: { id: payload.quotaId }, include: { request: { include: { period: true, items: true } }, items: true } });
+
+  if (quota) {
+    const period = await lockMerchandisePeriod(transaction, quota.request.periodId);
+    if (!period || period.status !== "VIGENTE") {
+      return conflict(period?.version ?? 0, { kind: "period_missing_or_cancelled", id: quota.request.periodId });
+    }
+  }
 
   if (!quota || quota.requestId !== payload.requestId || quota.request.status === "CANCELADA" || quota.request.period.status !== "VIGENTE") {
     return conflict(0, { kind: "quota_missing_or_mismatched", requestId: payload.requestId, quotaId: payload.quotaId });
@@ -335,7 +348,7 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
   }
 
   if (payload.kind === "period") {
-    const period = await transaction.merchandisePeriod.findUnique({ where: { id: payload.id } });
+    const period = await lockMerchandisePeriod(transaction, payload.id);
 
     if (!period) {
       throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_PERIODO_QUE_QUERES_CORREGIR);
@@ -375,6 +388,11 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
       throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_SOLICITUD_QUE_QUERES_CORREGIR);
     }
 
+    const period = await lockMerchandisePeriod(transaction, request.periodId);
+    if (!period || period.status !== "VIGENTE") {
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_SE_PUEDE_CORREGIR_UN_PERIODO_ANULADO);
+    }
+
     if (request.version !== baseVersion) {
       return resourceConflict(request.version, { id: request.id, kind: "request", version: request.version, requestNumber: request.requestNumber, requestedAt: request.requestedAt.toISOString(), requestedQuantity: request.requestedQuantity.toNumber(), status: request.status });
     }
@@ -410,6 +428,11 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
       throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_CUPO_QUE_QUERES_CORREGIR);
     }
 
+    const period = await lockMerchandisePeriod(transaction, quota.request.periodId);
+    if (!period || period.status !== "VIGENTE") {
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_SE_PUEDE_CORREGIR_UN_PERIODO_ANULADO);
+    }
+
     if (quota.version !== baseVersion) {
       return resourceConflict(quota.version, { id: quota.id, kind: "quota", version: quota.version, approvedQuantity: quota.approvedQuantity.toNumber(), approvedAt: quota.approvedAt.toISOString() });
     }
@@ -437,6 +460,11 @@ async function applyUpdate(transaction: Prisma.TransactionClient, operation: Sub
 
     if (!remittance) {
       throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_REMITO_QUE_QUERES_CORREGIR);
+    }
+
+    const period = await lockMerchandisePeriod(transaction, remittance.quota.request.periodId);
+    if (!period || period.status !== "VIGENTE") {
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_SE_PUEDE_CORREGIR_UN_PERIODO_ANULADO);
     }
 
     if (remittance.version !== baseVersion) {
@@ -476,7 +504,7 @@ async function applyCancellation(transaction: Prisma.TransactionClient, operatio
   }
 
   if (payload.kind === "period") {
-    const period = await transaction.merchandisePeriod.findUnique({ where: { id: payload.id }, include: { _count: { select: { requests: true, distributionRecords: true, beneficiarySheets: true, renditions: true } } } });
+    const period = await lockMerchandisePeriod(transaction, payload.id);
 
     if (!period) {
       throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.NO_ENCONTRAMOS_EL_PERIODO_QUE_QUERES_ANULAR);
@@ -486,8 +514,8 @@ async function applyCancellation(transaction: Prisma.TransactionClient, operatio
       return resourceConflict(period.version, { id: period.id, kind: "period", version: period.version, label: period.label, status: period.status });
     }
 
-    if (period.status !== "VIGENTE" || Object.values(period._count).some((count) => count > 0)) {
-      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_PERIODO_TIENE_OPERACIONES_O_DOCUMENTACION_VINCULADA_Y_NO_SE_PUEDE_ANULA);
+    if (period.status !== "VIGENTE") {
+      throw new MerchandiseDocumentError(MERCHANDISE_ERROR_MESSAGES.EL_PERIODO_YA_ESTA_ANULADO);
     }
 
     const updated = await transaction.merchandisePeriod.update({ where: { id: period.id }, data: { status: "ANULADO", cancelledAt: new Date(), cancelledById: operation.userId, cancellationReason: payload.reason, version: { increment: 1 } } });

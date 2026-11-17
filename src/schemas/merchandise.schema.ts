@@ -196,6 +196,9 @@ export const merchandiseResponseSchema = z.object({
     agency: z.string(),
     destination: z.enum(["FAMILIES", "MERENDERO"]).default("FAMILIES"),
     status: z.enum(["VIGENTE", "ANULADO"]),
+    cancelledAt: z.iso.datetime().nullable().default(null),
+    cancelledBy: z.object({ id: z.string(), name: z.string() }).nullable().default(null),
+    cancellationReason: z.string().nullable().default(null),
     reportDetails: z.object({
       authorized: z.boolean(),
       events: z.array(z.object({
