@@ -30,6 +30,11 @@ export const familyDeliveryPayloadSchema = z.object({
   path: ["participants"],
 });
 
+export const participantVerificationUpdateSchema = z.object({
+  paperSignatureChecked: z.boolean(),
+  physicalDniChecked: z.boolean(),
+}).strict();
+
 export const distributionPreparationPayloadSchema = z.object({
   kind: z.literal("distribution-preparation"),
   id: z.uuid(),

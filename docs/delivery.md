@@ -12,6 +12,8 @@ La planilla se genera con un conjunto seleccionado del padrón, sin requerir una
 
 Las firmas son manuscritas en el papel. La app no captura, valida ni guarda trazos biométricos. COD-1429 puede asociar la evidencia escaneada a la referencia de la planilla emitida.
 
+Cada participante de un retiro grupal conserva los cotejos de firma manuscrita y DNI físico por separado. Presidencia y secretaría pueden completar o corregir esos cotejos desde el detalle del retiro; los cambios requieren `delivery.write` y una conexión activa. El retiro puede guardarse mientras los cotejos están pendientes, y la planilla operativa sigue disponible para imprimir y completar a mano. La emisión definitiva, la presentación y la revisión de la rendición bloquean si falta cualquiera de los dos cotejos e indican el nombre de cada persona y el documento pendiente. La revisión además requiere una `PLANILLA_FIRMADA` vigente. La vista de rendiciones aplica estos bloqueos offline cuando dispone del snapshot autorizado; si no tiene los datos necesarios, pide conexión. La sincronización vuelve a comprobar los cotejos actuales en el servidor antes de aplicar emisión, presentación o revisión.
+
 ## Preparación de jornadas
 
 En `/entrega`, el borrador de una jornada permite agregar y quitar asignaciones de familias o productos antes de guardarlo. Quitar una fila modifica únicamente el estado local del formulario: los totales y la disponibilidad se recalculan, y el payload enviado al sincronizar contiene solo las filas restantes. No se permite guardar una preparación vacía; las acciones de quitar quedan deshabilitadas mientras se guarda. La prueba de regresión E2E está en `tests/e2e/distribution-preparation-removal.spec.ts`.

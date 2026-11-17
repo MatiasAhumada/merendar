@@ -83,7 +83,7 @@ export interface MerchandisePeriodRecord {
       location: string;
       responsibleNames: string;
       allocations: Array<{ familyId: string; familyName: string; remittanceNumber: string; moduleQuantity: number }>;
-      familyDeliveries: Array<{ familyId: string; familyName: string; moduleQuantity: number; participants: string[] }>;
+      familyDeliveries: Array<{ familyId: string; familyName: string; moduleQuantity: number; participants: Array<{ name: string; paperSignatureChecked: boolean; physicalDniChecked: boolean }> }>;
       supplyAllocations: Array<{ productName: string; presentation: string; unit: string; remittanceNumber: string; quantity: number }>;
     }>;
   };

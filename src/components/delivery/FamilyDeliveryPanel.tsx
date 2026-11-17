@@ -65,6 +65,7 @@ export function FamilyDeliveryPanel({ data, periodId, userId, sessionExpiresAt, 
   const [isSaving, setIsSaving] = useState(false);
   const [isIssuingSheet, setIsIssuingSheet] = useState(false);
   const [retryingOperationId, setRetryingOperationId] = useState("");
+  const [updatingParticipantId, setUpdatingParticipantId] = useState("");
 
   const selectedEvent = events.find((event) => event.id === eventId);
   const selectedFamily = data.families.find((family) => family.id === familyId);
@@ -164,6 +165,25 @@ export function FamilyDeliveryPanel({ data, periodId, userId, sessionExpiresAt, 
       await refreshOperations();
     } finally {
       setRetryingOperationId("");
+    }
+  }
+
+  async function updateSavedParticipantChecks(participant: { id: string; paperSignatureChecked: boolean; physicalDniChecked: boolean }, key: "paperSignatureChecked" | "physicalDniChecked", checked: boolean | "indeterminate") {
+    if (checked === "indeterminate" || !isOnline || !canWrite) {
+      return;
+    }
+    const updatedChecks = { paperSignatureChecked: participant.paperSignatureChecked, physicalDniChecked: participant.physicalDniChecked, [key]: checked };
+    setUpdatingParticipantId(participant.id);
+    setError("");
+    setNotice("");
+    try {
+      await clientAxios.patch(API_ROUTES.RECORD_PARTICIPANT(participant.id), updatedChecks);
+      await onRefresh();
+      setNotice("Las comprobaciones del participante se actualizaron.");
+    } catch (updateError) {
+      setError(getClientErrorMessage(updateError, "No se pudieron actualizar las comprobaciones del participante."));
+    } finally {
+      setUpdatingParticipantId("");
     }
   }
 
@@ -374,7 +394,7 @@ export function FamilyDeliveryPanel({ data, periodId, userId, sessionExpiresAt, 
 
         {selectedEvent ? <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium">Retiros de {selectedEvent.scheduledAt}</p><p className="text-xs text-muted-foreground">{selectedEvent.location} · {selectedEvent.responsibleNames}</p></div><Button variant="outline" onClick={() => void issueEventSheet()} disabled={isIssuingSheet || !eventDeliveries.length}><HugeiconsIcon icon={File01Icon} data-icon="inline-start" />{isIssuingSheet ? DELIVERY_UI_TEXT.PREPARANDO_PLANILLA : DELIVERY_UI_TEXT.EVENT_SHEET_SUBMIT}</Button></div>
-          {eventDeliveries.length ? <ul className="divide-y divide-border rounded-lg border border-border">{eventDeliveries.map((delivery) => { const pendingDelivery = pendingDeliveries.find((pending) => pending.id === delivery.id); return <li key={delivery.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="font-medium">{delivery.familyName} · {delivery.moduleQuantity} módulo</p><ul className="mt-1 flex flex-col gap-1 text-sm text-muted-foreground">{delivery.participants.map((participant) => <li key={participant.id}>{participant.name} · DNI {participant.physicalDniChecked ? "cotejado" : "pendiente"} · {participant.paperSignatureChecked ? DELIVERY_UI_TEXT.PAPER_SIGNATURE_RECORDED : DELIVERY_UI_TEXT.PAPER_SIGNATURE_PENDING}</li>)}</ul>{pendingDelivery?.operationStatus === "conflict" ? <p className="mt-2 text-sm text-destructive" role="status">Conflicto al sincronizar: {pendingDelivery.operationMessage ?? "el servidor rechazó el retiro y no creó un registro"}</p> : null}</div>{pendingDelivery?.operationStatus === "conflict" && selectedEvent?.status === "ABIERTA" && isOnline && canWrite ? <Button size="sm" variant="outline" onClick={() => void retryClosedEventDelivery(pendingDelivery.operationId)} disabled={retryingOperationId === pendingDelivery.operationId}>{retryingOperationId === pendingDelivery.operationId ? "Reintentando…" : "Reintentar retiro"}</Button> : null}{pendingDelivery ? <Badge variant={pendingDelivery.operationStatus === "conflict" || pendingDelivery.operationStatus === "error" ? "destructive" : "outline"}>{pendingDelivery.operationStatus === "conflict" ? "Revisar conflicto" : DELIVERY_UI_TEXT.PENDIENTE}</Badge> : null}</li>; })}</ul> : <p className="rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">Todavía no hay retiros registrados para esta jornada.</p>}
+          {eventDeliveries.length ? <ul className="divide-y divide-border rounded-lg border border-border">{eventDeliveries.map((delivery) => { const pendingDelivery = pendingDeliveries.find((pending) => pending.id === delivery.id); return <li key={delivery.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><p className="font-medium">{delivery.familyName} · {delivery.moduleQuantity} módulo</p><ul className="mt-2 flex flex-col gap-3 text-sm text-muted-foreground">{delivery.participants.map((participant) => <li key={participant.id} className="space-y-2"><p className="font-medium text-foreground">{participant.name}</p>{pendingDelivery ? <p>DNI {participant.physicalDniChecked ? "cotejado" : "pendiente"} · {participant.paperSignatureChecked ? DELIVERY_UI_TEXT.PAPER_SIGNATURE_RECORDED : DELIVERY_UI_TEXT.PAPER_SIGNATURE_PENDING}</p> : <div className="flex flex-col gap-2 sm:flex-row sm:gap-4"><label className="flex min-h-11 items-center gap-2"><Checkbox checked={participant.physicalDniChecked} onCheckedChange={(checked) => void updateSavedParticipantChecks(participant, "physicalDniChecked", checked)} disabled={!canWrite || !isOnline || updatingParticipantId === participant.id} aria-label={`DNI físico cotejado: ${participant.name}`} />DNI físico cotejado</label><label className="flex min-h-11 items-center gap-2"><Checkbox checked={participant.paperSignatureChecked} onCheckedChange={(checked) => void updateSavedParticipantChecks(participant, "paperSignatureChecked", checked)} disabled={!canWrite || !isOnline || updatingParticipantId === participant.id} aria-label={`Firma manuscrita cotejada: ${participant.name}`} />Firma manuscrita cotejada</label></div>}</li>)}</ul>{pendingDelivery?.operationStatus === "conflict" ? <p className="mt-2 text-sm text-destructive" role="status">Conflicto al sincronizar: {pendingDelivery.operationMessage ?? "el servidor rechazó el retiro y no creó un registro"}</p> : null}{canWrite && !isOnline && !pendingDelivery ? <p className="mt-2 text-xs text-muted-foreground">Conectate para actualizar las comprobaciones.</p> : null}</div>{pendingDelivery?.operationStatus === "conflict" && selectedEvent?.status === "ABIERTA" && isOnline && canWrite ? <Button size="sm" variant="outline" onClick={() => void retryClosedEventDelivery(pendingDelivery.operationId)} disabled={retryingOperationId === pendingDelivery.operationId}>{retryingOperationId === pendingDelivery.operationId ? "Reintentando…" : "Reintentar retiro"}</Button> : null}{pendingDelivery ? <Badge variant={pendingDelivery.operationStatus === "conflict" || pendingDelivery.operationStatus === "error" ? "destructive" : "outline"}>{pendingDelivery.operationStatus === "conflict" ? "Revisar conflicto" : DELIVERY_UI_TEXT.PENDIENTE}</Badge> : null}</li>; })}</ul> : <p className="rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">Todavía no hay retiros registrados para esta jornada.</p>}
         </div> : <p className="rounded-xl bg-muted/60 p-3 text-sm text-muted-foreground">No hay jornadas de familias preparadas para este período.</p>}
         {!canWrite ? <p className="text-sm text-muted-foreground">Tu rol puede consultar los retiros, pero no registrarlos.</p> : null}
       </CardContent>

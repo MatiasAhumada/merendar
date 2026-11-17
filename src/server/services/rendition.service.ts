@@ -8,6 +8,7 @@ import { readDocumentObject } from "@/server/services/document-storage.service";
 import { hydrateRenditionEmissionSource } from "@/server/services/rendition-emission-storage.service";
 import type { z } from "zod";
 import type { renditionEmissionTemplateSchema, renditionSubmissionPayloadSchema } from "@/schemas/rendition.schema";
+import { getPendingParticipantVerifications } from "@/utils/participant-verification.util";
 
 export async function getRenditionDocument(id: string) {
   const document = await findRenditionDocument(id);
@@ -36,6 +37,9 @@ export async function reviewRenditionDocument(input: {
   if (result.type === "signed-sheet-required") {
     throw new ApiError({ status: 409, message: RENDITION_ERROR_MESSAGES.ADJUNTA_UNA_PLANILLA_FIRMADA_VIGENTE_ANTES_DE_REVISAR_LA_RENDICION });
   }
+  if (result.type === "participant-checks-required") {
+    throw new ApiError({ status: 409, message: result.message });
+  }
 
   return result.rendition;
 }
@@ -49,6 +53,12 @@ export async function createRenditionEmission(input: {
 
   if (!source) {
     throw new ApiError({ status: 404, message: RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_RENDICION_SELECCIONADA });
+  }
+
+  const deliveries = source.beneficiarySheet.distributionEvent?.familyDeliveries ?? [];
+  const pendingVerifications = getPendingParticipantVerifications(deliveries);
+  if (pendingVerifications.length) {
+    throw new ApiError({ status: 409, message: `${RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_REQUIRED}${pendingVerifications.join("; ")}` });
   }
 
   const documents = await createRenditionEmissionPdfs(await hydrateRenditionEmissionSource(source), input.template);
@@ -68,6 +78,12 @@ export async function createRenditionSubmission(input: {
 
   if (!rendition) {
     throw new ApiError({ status: 404, message: RENDITION_ERROR_MESSAGES.NO_ENCONTRAMOS_LA_RENDICION_SELECCIONADA });
+  }
+
+  const deliveries = rendition.beneficiarySheet.distributionEvent?.familyDeliveries ?? [];
+  const pendingVerifications = getPendingParticipantVerifications(deliveries);
+  if (pendingVerifications.length) {
+    throw new ApiError({ status: 409, message: `${RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_REQUIRED}${pendingVerifications.join("; ")}` });
   }
 
   const emissionId = await findLatestRenditionEmissionId(input.renditionId);

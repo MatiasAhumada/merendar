@@ -208,7 +208,7 @@ export const merchandiseResponseSchema = z.object({
         location: z.string(),
         responsibleNames: z.string(),
         allocations: z.array(z.object({ familyId: z.string(), familyName: z.string(), remittanceNumber: z.string(), moduleQuantity: z.number().int().nonnegative() }).strict()),
-        familyDeliveries: z.array(z.object({ familyId: z.string(), familyName: z.string(), moduleQuantity: z.number().int().nonnegative(), participants: z.array(z.string()) }).strict()),
+        familyDeliveries: z.array(z.object({ familyId: z.string(), familyName: z.string(), moduleQuantity: z.number().int().nonnegative(), participants: z.array(z.object({ name: z.string(), paperSignatureChecked: z.boolean(), physicalDniChecked: z.boolean() }).strict()) }).strict()),
         supplyAllocations: z.array(z.object({ productName: z.string(), presentation: z.string(), unit: z.string(), remittanceNumber: z.string(), quantity: z.number().nonnegative() }).strict()).default([]),
       }).strict()),
     }).strict().default({ authorized: false, events: [] }),

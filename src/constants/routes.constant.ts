@@ -35,6 +35,7 @@ export const API_ROUTES = {
   RECORD_HISTORY: "/api/records/history",
   DISTRIBUTION_EVENT_STATUS: (eventId: string) => `/api/records/distribution-events/${encodeURIComponent(eventId)}/status`,
   RECORD_SHEETS: "/api/records/sheets",
+  RECORD_PARTICIPANT: (participantId: string) => `/api/records/distribution-participants/${encodeURIComponent(participantId)}`,
   RECORD_SHEET: (sheetId: string) => `/api/records/sheets/${encodeURIComponent(sheetId)}`,
   RENDITION_DOCUMENT: (documentId: string) => `/api/renditions/documents/${encodeURIComponent(documentId)}`,
   RENDITION_DOCUMENT_PREVIEW: (documentId: string) => `/api/renditions/documents/${encodeURIComponent(documentId)}?inline=1`,

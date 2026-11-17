@@ -146,4 +146,6 @@ export const RENDITION_ERROR_MESSAGES = {
   ELEGI_UN_DOCUMENTO_VIGENTE_DE_ESTA_RENDICION_PARA_CORREGIRLO: "Elegí un documento vigente de esta rendición para corregirlo.",
   LA_REVISION_NO_COINCIDE_CON_LA_RENDICION_SELECCIONADA: "La revisión no coincide con la rendición seleccionada.",
   LA_CARGA_NO_COINCIDE_CON_LA_OPERACION_PENDIENTE: "La carga no coincide con la operación pendiente.",
+  PARTICIPANT_CHECKS_REQUIRED: "Completá el cotejo de firma manuscrita y DNI físico de cada participante antes de emitir, revisar o registrar la presentación. Pendientes: ",
+  PARTICIPANT_CHECKS_NEED_CONNECTION: "Conectate para consultar las comprobaciones de participantes antes de continuar.",
 } as const;

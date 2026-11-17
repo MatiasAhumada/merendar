@@ -52,7 +52,11 @@ export async function getVisibleMerchandisePeriods(token: string | undefined) {
         familyId: delivery.familyId,
         familyName: delivery.familyName,
         moduleQuantity: delivery.moduleQuantity,
-        participants: delivery.participants.map((participant) => participant.name),
+        participants: delivery.participants.map((participant) => ({
+          name: participant.name,
+          paperSignatureChecked: participant.paperSignatureChecked,
+          physicalDniChecked: participant.physicalDniChecked,
+        })),
       })),
       supplyAllocations: event.supplyAllocations.map((allocation) => ({
         productName: allocation.productName,

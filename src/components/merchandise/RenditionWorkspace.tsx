@@ -27,6 +27,7 @@ import Link from "next/link";
 
 import type { MerchandisePeriodRecord } from "@/interfaces/merchandise.interface";
 import type { RenditionEmissionOperationPayload, RenditionSubmissionOperationPayload } from "@/interfaces/rendition.interface";
+import { getPendingParticipantVerificationMessages } from "@/utils/participant-verification.util";
 import type { OfflinePreparedDocument } from "@/services/offline-preparation.service";
 import type { OfflineOperation } from "@/types/offline-operation";
 import { createOfflineRenditionPackage } from "@/services/rendition-offline-pdf.service";
@@ -364,6 +365,12 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
   const selectedPeriod = periods.find((period) => period.id === selectedPeriodId) ?? periods[0];
   const selectedSheet = selectedPeriod?.beneficiarySheets.find((sheet) => sheet.id === selectedSheetId) ?? selectedPeriod?.beneficiarySheets[0];
   const selectedSheetEvent = selectedPeriod?.reportDetails.events.find((event) => event.id === selectedSheet?.distributionEventId);
+  const pendingParticipantVerifications = selectedSheetEvent?.familyDeliveries.flatMap((delivery) => getPendingParticipantVerificationMessages(delivery.participants.map((participant) => ({
+    familyName: delivery.familyName,
+    participantName: participant.name,
+    paperSignatureChecked: participant.paperSignatureChecked,
+    physicalDniChecked: participant.physicalDniChecked,
+  })))) ?? [];
   const selectedRendition = selectedPeriod?.renditions.find((rendition) => rendition.beneficiarySheetId === selectedSheet?.id);
   const visibleOperations = useMemo(() => renditionOperations(operations), [operations]);
   const visibleEmissionOperations = useMemo(() => pendingEmissionOperations(operations), [operations]);
@@ -505,6 +512,19 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
       return;
     }
 
+    if ((!isOnline || offlineMode) && selectedSheet?.distributionEventId && !selectedPeriod?.reportDetails.authorized) {
+      setReviewMessage(RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_NEED_CONNECTION);
+      return;
+    }
+    if ((!isOnline || offlineMode) && pendingParticipantVerifications.length) {
+      setReviewMessage(`${RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_REQUIRED}${pendingParticipantVerifications.join("; ")}`);
+      return;
+    }
+    if ((!isOnline || offlineMode) && !hasSignedSheet) {
+      setReviewMessage(RENDITION_ERROR_MESSAGES.ADJUNTA_UNA_PLANILLA_FIRMADA_VIGENTE_ANTES_DE_REVISAR_LA_RENDICION);
+      return;
+    }
+
     try {
       const payload = renditionReviewOperationPayloadSchema.parse({
         kind: "rendition_review",
@@ -516,7 +536,7 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         resourceId: renditionId,
         operation: "create",
         baseVersion: null,
-        dependencies: [],
+        dependencies: queuedUploads.map(({ operation }) => operation.operationId),
         payload: jsonValueSchema.parse(JSON.parse(JSON.stringify(payload))),
       });
       setReviewNotes("");
@@ -566,6 +586,12 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
       if (!isOnline || offlineMode) {
         if (!selectedPeriod || !selectedSheet) {
           throw new Error(RENDITION_ERROR_MESSAGES.LA_PLANILLA_EMITIDA_NO_PERTENECE_AL_PERIODO_SELECCIONADO_O_YA_NO_ESTA_DISP);
+        }
+        if (selectedSheet.distributionEventId && !selectedPeriod.reportDetails.authorized) {
+          throw new Error(RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_NEED_CONNECTION);
+        }
+        if (pendingParticipantVerifications.length) {
+          throw new Error(`${RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_REQUIRED}${pendingParticipantVerifications.join("; ")}`);
         }
         const resolvedRenditionId = selectedRenditionId || crypto.randomUUID();
         const operationPayload = renditionEmissionOperationPayloadSchema.safeParse({
@@ -643,6 +669,15 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
 
       if (!payload.success) {
         setSubmissionMessage(payload.error.issues[0]?.message ?? RENDITION_ERROR_MESSAGES.REVISA_LOS_DATOS_INGRESADOS);
+        return;
+      }
+
+      if ((!isOnline || offlineMode) && selectedSheet?.distributionEventId && !selectedPeriod?.reportDetails.authorized) {
+        setSubmissionMessage(RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_NEED_CONNECTION);
+        return;
+      }
+      if ((!isOnline || offlineMode) && pendingParticipantVerifications.length) {
+        setSubmissionMessage(`${RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_REQUIRED}${pendingParticipantVerifications.join("; ")}`);
         return;
       }
 
@@ -730,6 +765,9 @@ export function RenditionWorkspace({ periods, userId, sessionExpiresAt, onRefres
         <p className="text-sm"><strong>{RENDITION_UI_TEXT.REFERENCIA_VINCULADA}</strong> {RENDITION_UI_TEXT.PLANILLA_VERSION}{selectedSheet.version} {APPLICATION_UI_TEXT.TEXT}{selectedSheet.beneficiaryCount} {RENDITION_UI_TEXT.BENEFICIARIOS_EMITIDA_EL}{formatDate(selectedSheet.createdAt)}{RENDITION_UI_TEXT.TEXT}</p>
         <SheetDocumentLink sheetId={selectedSheet.id} offlineMode={offlineMode} preparedDocuments={preparedDocuments} />
       </div> : null}
+
+      {selectedSheetEvent?.familyDeliveries.length ? <Alert variant={pendingParticipantVerifications.length ? "destructive" : "info"}><AlertTitle>Comprobaciones por participante</AlertTitle><AlertDescription>{pendingParticipantVerifications.length ? <ul className="list-disc space-y-1 pl-5">{pendingParticipantVerifications.map((message) => <li key={message}>{message}</li>)}</ul> : "Todos los participantes tienen cotejados el DNI físico y la firma manuscrita."}</AlertDescription></Alert> : null}
+      {(!isOnline || offlineMode) && selectedSheet?.distributionEventId && !selectedPeriod?.reportDetails.authorized ? <Alert variant="info"><AlertTitle>Comprobaciones sin preparar</AlertTitle><AlertDescription>{RENDITION_ERROR_MESSAGES.PARTICIPANT_CHECKS_NEED_CONNECTION}</AlertDescription></Alert> : null}
 
       {selectedSheetEvent?.status === "ABIERTA" ? <Alert variant="info"><AlertTitle>Jornada abierta</AlertTitle><AlertDescription>Esta planilla corresponde a una jornada abierta. Cerrala desde Preparar jornada cuando terminen los retiros; el cierre no modifica las planillas ni documentos existentes.</AlertDescription></Alert> : null}
 
